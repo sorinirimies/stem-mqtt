@@ -166,9 +166,17 @@ jobs:
         working-directory: crates/mqtt-client-node
         run: npm run build:debug
 
+      - name: Build broker
+        run: cargo build -p mqtt-broker --bin mqtt-broker
+
       - name: Start a broker and run the Node smoke test
         working-directory: crates/mqtt-client-node
         run: |
-          cargo run -p mqtt-broker --bin mqtt-broker -- --port 18830 &
-          sleep 2
+          ../../target/debug/mqtt-broker --port 18830 &
+          for i in $(seq 1 30); do
+            if (echo > /dev/tcp/127.0.0.1/18830) 2>/dev/null; then
+              break
+            fi
+            sleep 0.5
+          done
           node scripts/smoke_test.mjs
