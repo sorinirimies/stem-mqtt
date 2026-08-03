@@ -1,5 +1,6 @@
 # stem-mqtt workspace — task runner
 # Install just:      cargo install just
+# Install vhs:       brew install vhs  OR  go install github.com/charmbracelet/vhs@latest
 # Install git-cliff: cargo install git-cliff
 # Install nu:        cargo install nu --locked
 # Usage: just <task>
@@ -23,6 +24,14 @@ _check-nu:
 _check-cross:
     @command -v cross >/dev/null 2>&1 || { \
         echo "❌ cross not found. Install with: cargo install cross --git https://github.com/cross-rs/cross"; exit 1; \
+    }
+
+_check-vhs:
+    @command -v vhs >/dev/null 2>&1 || { \
+        echo "❌ vhs not found."; \
+        echo "   macOS:      brew install vhs"; \
+        echo "   Any:        go install github.com/charmbracelet/vhs@latest"; \
+        exit 1; \
     }
 
 # Install all recommended development tools
@@ -179,6 +188,45 @@ package-linux-aarch64: _check-cross
 # builds mqtt-broker from source inside Docker, no host build needed)
 package-docker:
     docker build -t stem-mqtt-broker:local -f packaging/Dockerfile .
+
+# ── VHS Demo GIFs ─────────────────────────────────────────────────────────────
+
+VHS_DIR := "examples/vhs"
+VHS_GENERATED := "examples/vhs/generated"
+
+# Generate all VHS demo GIFs (broker CLI + client examples)
+vhs-all: _check-vhs
+    #!/usr/bin/env sh
+    set -e
+    mkdir -p {{ VHS_GENERATED }}
+    echo "╔════════════════════════════════════════════╗"
+    echo "║   stem-mqtt Tapes (broker CLI + examples) ║"
+    echo "╚════════════════════════════════════════════╝"
+    for tape in {{ VHS_DIR }}/*.tape; do
+        [ -f "$tape" ] || continue
+        echo "▶  $tape"
+        vhs "$tape" || echo "❌ Failed: $tape"
+    done
+    echo "✅ Demos done → {{ VHS_GENERATED }}/"
+
+# Render a single tape by name (e.g. just vhs-tape pub-sub-demo)
+vhs-tape name: _check-vhs
+    #!/usr/bin/env sh
+    if [ -f "{{ VHS_DIR }}/{{ name }}.tape" ]; then
+        echo "▶  {{ VHS_DIR }}/{{ name }}.tape"
+        vhs "{{ VHS_DIR }}/{{ name }}.tape" && echo "✅ Done."
+    else
+        echo "❌ Tape not found: {{ name }}.tape"
+        echo ""
+        just vhs-list
+        exit 1
+    fi
+
+# List all available VHS tapes
+vhs-list:
+    #!/usr/bin/env sh
+    echo "Tapes  →  {{ VHS_DIR }}/"
+    ls {{ VHS_DIR }}/*.tape 2>/dev/null | sed 's|.*/||; s|\.tape||' | sed 's/^/  /' || echo "  (none)"
 
 # Build the demo webpage's Docker image (nginx serving demo/web/ statically)
 package-docker-demo-web:

@@ -13,3 +13,4 @@ crates/mqtt-client-node/*.node
 crates/mqtt-client-node/npm/
 *.log
 .DS_Store
+examples/vhs/generated/
