@@ -137,7 +137,7 @@ jobs:
             tar czf "${out}.tar.gz" "$out"
           fi
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: mqtt-broker-${{ matrix.target }}
           path: |
@@ -231,7 +231,7 @@ jobs:
             tar czf "${out}.tar.gz" "$out"
           fi
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: mqtt-client-${{ matrix.target }}
           path: |
@@ -274,7 +274,7 @@ jobs:
             zip -r "bindings-${{ matrix.language }}.zip" "bindings/${{ matrix.language }}"
           fi
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: bindings-${{ matrix.language }}
           path: bindings-${{ matrix.language }}.zip
@@ -447,7 +447,7 @@ jobs:
         run: ./packaging/swift/build_xcframework.sh ${{ needs.validate.outputs.version }}
 
       - name: Upload XCFramework artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: mqtt-client-swift-xcframework
           path: packaging/swift/dist/*.zip
@@ -543,7 +543,7 @@ jobs:
         working-directory: crates/mqtt-client-node
         run: npx napi build --platform --release --target ${{ matrix.target }} --js index.js --dts index.d.ts
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: node-addon-${{ matrix.target }}
           path: crates/mqtt-client-node/*.node
