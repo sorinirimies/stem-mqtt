@@ -145,7 +145,101 @@ jobs:
             mqtt-broker-*.zip
           retention-days: 1
 
-  # ── 3. UniFFI bindings (Kotlin, Swift, Python, Ruby) ──────────────────────────
+  # ── 3. mqtt-client native library (cdylib + staticlib), standalone ──────────
+  # Same target matrix as mqtt-broker, but packages the client's compiled
+  # native library directly (for direct FFI/C/C++ consumption, or as a
+  # starting point for a binding generator this repo doesn't ship yet) —
+  # independent of any single language's packaging job below.
+  build-client:
+    name: Build mqtt-client — ${{ matrix.name }}
+    needs: [validate, test]
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x86_64
+            runner: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            cross: false
+            ext: so
+          - name: Linux aarch64
+            runner: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            cross: true
+            ext: so
+          - name: macOS x86_64
+            runner: macos-latest
+            target: x86_64-apple-darwin
+            cross: false
+            ext: dylib
+          - name: macOS aarch64
+            runner: macos-latest
+            target: aarch64-apple-darwin
+            cross: false
+            ext: dylib
+          - name: Windows x86_64
+            runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            cross: false
+            ext: dll
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate.outputs.tag }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: client-${{ matrix.target }}
+
+      - name: Install cross
+        if: matrix.cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
+
+      - name: Build (native)
+        if: ${{ !matrix.cross }}
+        run: cargo build --release -p mqtt-client --target ${{ matrix.target }}
+
+      - name: Build (cross)
+        if: matrix.cross
+        run: cross build --release -p mqtt-client --target ${{ matrix.target }}
+
+      - name: Package
+        shell: bash
+        run: |
+          out="mqtt-client-${{ needs.validate.outputs.version }}-${{ matrix.target }}"
+          mkdir -p "$out"
+          libdir="target/${{ matrix.target }}/release"
+          # Static lib is `.a` everywhere except MSVC, which names it `.lib`.
+          if [ "${{ matrix.ext }}" = "dll" ]; then
+            cp "$libdir/mqtt_client.dll" "$out/" 2>/dev/null || true
+            cp "$libdir/mqtt_client.dll.lib" "$out/" 2>/dev/null || true
+            cp "$libdir/mqtt_client.lib" "$out/" 2>/dev/null || true
+          else
+            cp "$libdir/libmqtt_client.${{ matrix.ext }}" "$out/"
+            cp "$libdir/libmqtt_client.a" "$out/" 2>/dev/null || true
+          fi
+          cp crates/mqtt-client/README.md LICENSE "$out/"
+          if [ "${{ matrix.ext }}" = "dll" ]; then
+            powershell -Command "Compress-Archive -Path '$out' -DestinationPath '${out}.zip'" || \
+              (cd "$(dirname "$out")" && 7z a "${out}.zip" "$(basename "$out")")
+          else
+            tar czf "${out}.tar.gz" "$out"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mqtt-client-${{ matrix.target }}
+          path: |
+            mqtt-client-*.tar.gz
+            mqtt-client-*.zip
+          retention-days: 1
+
+  # ── 4. UniFFI bindings (Kotlin, Swift, Python, Ruby) ──────────────────────────
   bindings:
     name: UniFFI bindings — ${{ matrix.language }}
     needs: [validate, test]
@@ -190,7 +284,7 @@ jobs:
   # ── 4. GitHub Release ──────────────────────────────────────────────────────────
   release:
     name: Create GitHub Release
-    needs: [validate, build-broker, bindings]
+    needs: [validate, build-broker, build-client, bindings]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -406,3 +500,102 @@ jobs:
         env:
           GEM_HOST_API_KEY: ${{ secrets.RUBYGEMS_API_KEY }}
         run: ./packaging/ruby/build_and_publish.sh ${{ needs.validate.outputs.version }}
+
+  # ── 10. Node.js native addon (napi-rs) ─────────────────────────────────────────
+  build-node:
+    name: Build Node addon — ${{ matrix.target }}
+    needs: [validate, test]
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - runner: macos-latest
+            target: x86_64-apple-darwin
+          - runner: macos-latest
+            target: aarch64-apple-darwin
+          - runner: windows-latest
+            target: x86_64-pc-windows-msvc
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate.outputs.tag }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: node-${{ matrix.target }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: npm ci
+        working-directory: crates/mqtt-client-node
+        run: npm ci
+
+      - name: Build native addon (release)
+        working-directory: crates/mqtt-client-node
+        run: npx napi build --platform --release --target ${{ matrix.target }} --js index.js --dts index.d.ts
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: node-addon-${{ matrix.target }}
+          path: crates/mqtt-client-node/*.node
+          retention-days: 1
+
+  publish-node:
+    name: Publish npm package
+    needs: [validate, build-node, release]
+    runs-on: ubuntu-latest
+    env:
+      HAS_TOKEN: ${{ secrets.NPM_TOKEN != '' }}
+    steps:
+      - name: Skip (no token)
+        if: env.HAS_TOKEN != 'true'
+        run: echo "⏭️  NPM_TOKEN not set — skipping. See packaging/node/README.md."
+
+      - uses: actions/checkout@v4
+        if: env.HAS_TOKEN == 'true'
+        with:
+          ref: ${{ needs.validate.outputs.tag }}
+
+      - uses: actions/setup-node@v4
+        if: env.HAS_TOKEN == 'true'
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: npm ci
+        if: env.HAS_TOKEN == 'true'
+        working-directory: crates/mqtt-client-node
+        run: npm ci
+
+      - uses: actions/download-artifact@v4
+        if: env.HAS_TOKEN == 'true'
+        with:
+          pattern: node-addon-*
+          path: crates/mqtt-client-node/artifacts
+          merge-multiple: true
+
+      - name: Stage all platform binaries next to index.js
+        if: env.HAS_TOKEN == 'true'
+        working-directory: crates/mqtt-client-node
+        run: cp artifacts/*.node .
+
+      - name: Set package version
+        if: env.HAS_TOKEN == 'true'
+        working-directory: crates/mqtt-client-node
+        run: npm version ${{ needs.validate.outputs.version }} --no-git-tag-version --allow-same-version
+
+      - name: Publish to npm
+        if: env.HAS_TOKEN == 'true'
+        working-directory: crates/mqtt-client-node
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public

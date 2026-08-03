@@ -141,3 +141,34 @@ jobs:
 
       - name: Run Nu script tests
         run: nu scripts/tests/run_all.nu
+
+  # ── 7. Node.js bindings (napi-rs) ─────────────────────────────────────────────
+  test-node:
+    name: test-node
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: npm ci
+        working-directory: crates/mqtt-client-node
+        run: npm ci
+
+      - name: Build native addon (debug)
+        working-directory: crates/mqtt-client-node
+        run: npm run build:debug
+
+      - name: Start a broker and run the Node smoke test
+        working-directory: crates/mqtt-client-node
+        run: |
+          cargo run -p mqtt-broker --bin mqtt-broker -- --port 18830 &
+          sleep 2
+          node scripts/smoke_test.mjs

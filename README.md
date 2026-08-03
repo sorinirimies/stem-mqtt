@@ -1,8 +1,9 @@
 # stem-mqtt
 
 Full MQTT 3.1.1 / MQTT 5.0 client and broker, written in Rust and exposed
-to other languages (Kotlin, Swift, Python, Ruby, Go, ...) via
-[UniFFI](https://mozilla.github.io/uniffi-rs/).
+to Kotlin, Swift, Python, and Ruby via [UniFFI](https://mozilla.github.io/uniffi-rs/),
+plus Node.js/TypeScript via a hand-written [napi-rs](https://napi.rs/) addon
+(JavaScript isn't a UniFFI target).
 
 [![CI](https://github.com/sorinirimies/stem-mqtt/actions/workflows/ci.yml/badge.svg)](https://github.com/sorinirimies/stem-mqtt/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -13,6 +14,7 @@ to other languages (Kotlin, Swift, Python, Ruby, Go, ...) via
 | --- | --- |
 | [`crates/mqtt-client`](crates/mqtt-client) | Async, `tokio`-based MQTT client. Also hosts the wire-protocol codec (`mqtt_client::protocol`) shared by the broker. |
 | [`crates/mqtt-broker`](crates/mqtt-broker) | Standalone MQTT broker (library + `mqtt-broker` CLI binary), reusing the client crate's codec instead of duplicating it. |
+| [`crates/mqtt-client-node`](crates/mqtt-client-node) | Node.js/TypeScript bindings for `mqtt-client` via napi-rs (server-side Node only — see [`packaging/node`](packaging/node)). |
 
 There is intentionally no separate "core" crate — `mqtt-client::protocol` is
 a pure, allocation-friendly, synchronous codec with no networking or async
@@ -32,7 +34,11 @@ the broker.
 - **Pluggable broker auth** (`MqttAuthProvider`) and event observation
   (`MqttBrokerEventListener`) for foreign callers.
 - **UniFFI bindings** — both crates build as `cdylib`/`staticlib` and ship a
-  `uniffi-bindgen` binary to generate Kotlin, Swift, or Python bindings.
+  `uniffi-bindgen` binary to generate Kotlin, Swift, or Python bindings
+  (Ruby via the separate `uniffi-bindgen-ruby` generator).
+- **Node.js / TypeScript bindings** for `mqtt-client` via napi-rs
+  (`crates/mqtt-client-node`) — server-side Node, not the browser (no
+  MQTT-over-WebSocket transport yet).
 
 ## Quick start (Rust)
 
@@ -81,6 +87,12 @@ cargo run -p mqtt-broker --bin mqtt-broker -- --bind 0.0.0.0 --port 1883
 just bindings-ruby                        # ruby uses a separate generator
 ```
 
+Node.js/TypeScript bindings are a separate crate, not a UniFFI target:
+
+```sh
+cd crates/mqtt-client-node && npm ci && npm run build:debug
+```
+
 UniFFI's own CLI (bundled with the `uniffi` crate) natively supports Kotlin,
 Swift, and Python. Ruby bindings come from the separate
 [`uniffi-bindgen-ruby`](https://github.com/mozilla/uniffi-rs) generator, so
@@ -125,13 +137,14 @@ reachable as `just test-nu`).
 
 ## CI/CD
 
-- **GitHub** (`.github/workflows/`): `ci.yml` (fmt/clippy/test/build/doc/nu
-  tests), `release.yml` (on `vX.Y.Z` tag: cross-platform `mqtt-broker`
-  binaries, all-language bindings, GitHub Release, then crates.io + PyPI +
-  GitHub Packages (Kotlin) + Swift Package Manager + RubyGems publishing —
-  each publish job skips gracefully if its registry secret isn't
-  configured), `auto-merge.yml` (Dependabot), `dependabot.yml` (GitHub
-  Actions version bumps).
+- **GitHub** (`.github/workflows/`): `ci.yml` (fmt/clippy/test/build/doc/nu/node
+  tests), `release.yml` (on `vX.Y.Z` tag: cross-platform `mqtt-broker` +
+  `mqtt-client` native library artifacts, all-language bindings including a
+  multi-platform Node addon, GitHub Release, then crates.io + PyPI +
+  GitHub Packages (Kotlin) + Swift Package Manager + RubyGems + npm
+  publishing — each publish job skips gracefully if its registry secret
+  isn't configured), `auto-merge.yml` (Dependabot), `dependabot.yml`
+  (GitHub Actions version bumps).
 - **Gitea** (`.gitea/workflows/`): mirrored `ci.yml`/`release.yml` (curl-installed
   Rust instead of marketplace actions, for portability across Gitea runner
   setups) plus `deps-update.yml` (nightly `cargo upgrade` sweep, auto-committed

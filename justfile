@@ -151,6 +151,24 @@ bindings-ruby:
 bindings-all: bindings-kotlin bindings-swift bindings-python bindings-ruby
     @echo "✅ All language bindings generated under bindings/"
 
+# ── Node.js / TypeScript (napi-rs, not a UniFFI target) ────────────────
+
+# Install npm deps for the Node addon
+node-install:
+    cd crates/mqtt-client-node && npm ci
+
+# Build the Node addon (fast, dev profile, current platform only)
+build-node: node-install
+    cd crates/mqtt-client-node && npm run build:debug
+
+# Build the Node addon (release profile, current platform)
+build-node-release: node-install
+    cd crates/mqtt-client-node && npm run build
+
+# Run the Node smoke test against a broker already listening on :18830
+test-node: build-node
+    cd crates/mqtt-client-node && node scripts/smoke_test.mjs
+
 # ── Packaging (cross-compiled mqtt-broker binaries) ──────────────────────────
 
 # Cross-compile the broker for aarch64 Linux (requires `cross`)

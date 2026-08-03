@@ -15,12 +15,20 @@ The [`mqtt-broker`](../crates/mqtt-broker) CLI binary is built for:
 | `aarch64-unknown-linux-gnu` | `cross build` (see [`Cross.toml`](Cross.toml)) |
 | `x86_64-apple-darwin` | native `cargo build` on `macos-latest` |
 | `aarch64-apple-darwin` | native `cargo build` on `macos-latest` |
+| `x86_64-pc-windows-msvc` | native `cargo build` on `windows-latest` |
 
-`.github/workflows/release.yml` builds all four on every `vX.Y.Z` tag,
-packages each as `mqtt-broker-<target>.tar.gz` (binary + README + LICENSE),
-and attaches them to the GitHub release.
+`.github/workflows/release.yml` builds these on every `vX.Y.Z` tag, packages
+each as `mqtt-broker-<version>-<target>.tar.gz`/`.zip` (binary + README +
+LICENSE), and attaches them to the GitHub release.
 
-## UniFFI bindings
+## `mqtt-client` native library
+
+Same target matrix, packaging the compiled `cdylib`/`staticlib` (not a
+binary) directly as `mqtt-client-<version>-<target>.tar.gz`/`.zip` — useful
+for direct FFI/C/C++ consumption independent of any one language's
+packaging job below.
+
+## UniFFI bindings (Kotlin, Swift, Python, Ruby)
 
 Both `mqtt-client` and `mqtt-broker` build as `cdylib`/`staticlib` and ship a
 `uniffi-bindgen` binary. [`../scripts/generate-bindings.sh`](../scripts/generate-bindings.sh)
@@ -54,3 +62,11 @@ No published image yet. Build one locally:
 cargo build --release -p mqtt-broker --bin mqtt-broker
 docker build -t stem-mqtt-broker -f packaging/Dockerfile .
 ```
+
+## Node.js / TypeScript (npm)
+
+JavaScript isn't a UniFFI target — see [`node/README.md`](node/README.md)
+for why Node gets its own napi-rs-based binding crate
+(`crates/mqtt-client-node`) instead, and why browser/WASM support is
+**not** covered by it (that README's Scope section explains why).
+
