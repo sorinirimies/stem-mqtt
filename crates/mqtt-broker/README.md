@@ -36,10 +36,21 @@ Usage: mqtt-broker [OPTIONS]
 Options:
       --bind <BIND>              Address to bind the listening socket to [default: 0.0.0.0]
       --port <PORT>               TCP port to listen on [default: 1883]
+      --ws-port <WS_PORT>          Also accept MQTT-over-WebSocket connections on this port (needed for browser clients — see demo/web/)
       --allow-anonymous            Allow clients to connect without a username/password
       --max-clients <MAX_CLIENTS>  Maximum simultaneously connected clients (0 = unlimited)
       --log-level <LOG_LEVEL>      Log verbosity: error, warn, info, debug, trace [default: info]
 ```
+
+Browser clients (and anything else that can't open a raw TCP socket) need
+`--ws-port`:
+
+```sh
+cargo run -p mqtt-broker --bin mqtt-broker -- --ws-port 8083
+```
+
+See [`demo/`](../../demo) for a full browser-based pub/sub demo webpage
+that talks to the broker this way.
 
 ## Embedding as a library
 

@@ -12,8 +12,7 @@ use mqtt_client::protocol::properties::Properties;
 use mqtt_client::protocol::publish::PublishPacket;
 use mqtt_client::protocol::subscribe::{SubAckPacket, SubAckReasonCode, UnsubAckPacket};
 use mqtt_client::{MqttVersion, QoS};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpStream;
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::broker::BrokerState;
@@ -22,11 +21,16 @@ use crate::topic::{is_valid_filter, is_valid_topic_name};
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
 
-/// Handle one accepted TCP connection end-to-end: CONNECT handshake,
-/// session (re)attachment, message loop, and teardown.
-pub(crate) async fn handle_connection(state: Arc<BrokerState>, stream: TcpStream, peer: String) {
-    stream.set_nodelay(true).ok();
-    let (mut reader, writer) = stream.into_split();
+/// Handle one accepted connection end-to-end — CONNECT handshake, session
+/// (re)attachment, message loop, and teardown — generic over the byte
+/// transport so the exact same logic drives both raw TCP
+/// ([`crate::broker::MqttBroker::start`]) and MQTT-over-WebSocket
+/// ([`crate::ws::WsByteStream`]) connections.
+pub(crate) async fn handle_connection<S>(state: Arc<BrokerState>, stream: S, peer: String)
+where
+    S: AsyncRead + AsyncWrite + Send + Unpin + 'static,
+{
+    let (mut reader, writer) = tokio::io::split(stream);
     let mut buf = BytesMut::with_capacity(1024);
 
     let connect = match read_connect(&mut reader, &mut buf).await {
@@ -166,8 +170,8 @@ pub(crate) async fn handle_connection(state: Arc<BrokerState>, stream: TcpStream
     tracing::info!(%client_id, reason = %disconnect_reason, "client disconnected");
 }
 
-async fn read_connect(
-    reader: &mut tokio::net::tcp::OwnedReadHalf,
+async fn read_connect<R: AsyncRead + Unpin>(
+    reader: &mut R,
     buf: &mut BytesMut,
 ) -> mqtt_client::error::MqttResult<mqtt_client::protocol::connect::ConnectPacket> {
     // The version passed here is irrelevant: CONNECT decodes its own
@@ -196,8 +200,8 @@ async fn read_connect(
     }
 }
 
-async fn read_next_packet(
-    reader: &mut tokio::net::tcp::OwnedReadHalf,
+async fn read_next_packet<R: AsyncRead + Unpin>(
+    reader: &mut R,
     buf: &mut BytesMut,
     version: MqttVersion,
     keep_alive_secs: u16,

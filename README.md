@@ -31,6 +31,9 @@ the broker.
   chain, SUBSCRIBE/SUBACK, UNSUBSCRIBE/UNSUBACK, PING, DISCONNECT, and
   MQTT 5 AUTH.
 - **Last Will and Testament**, retained messages, keep-alive pings.
+- **MQTT-over-WebSocket** (`--ws-port`) alongside raw TCP, so browser
+  clients (which can't open raw TCP sockets) can connect directly —
+  see [`demo/`](demo) for a full browser pub/sub demo webpage.
 - **Pluggable broker auth** (`MqttAuthProvider`) and event observation
   (`MqttBrokerEventListener`) for foreign callers.
 - **UniFFI bindings** — both crates build as `cdylib`/`staticlib` and ship a
@@ -79,6 +82,20 @@ cargo run -p mqtt-broker --example auth_broker
 ```sh
 cargo run -p mqtt-broker --bin mqtt-broker -- --bind 0.0.0.0 --port 1883
 ```
+
+Add `--ws-port 8083` to also accept MQTT-over-WebSocket connections (for
+browser clients — see [`demo/`](demo)).
+
+## Demo: browser client + Docker + Kubernetes
+
+```sh
+docker compose up --build      # broker (TCP+WS) + a Topcoat/mqtt.js demo webpage
+open http://localhost:8090
+```
+
+See [`demo/README.md`](demo/README.md) for the plain-binaries path, and
+[`packaging/k8s/README.md`](packaging/k8s/README.md) for a one-Pod or
+Deployment+Service Kubernetes demo.
 
 ## Generating foreign-language bindings
 

@@ -1,0 +1,227 @@
+/* Layout + small visual touches on top of Topcoat's dark desktop theme —
+ * Topcoat only ships component styles (buttons, inputs, lists), not page
+ * layout, so this is intentionally small. */
+
+:root {
+  --bg: #1d1f21;
+  --panel-bg: #26282b;
+  --border: #3a3d40;
+  --accent: #4faaff;
+  --ok: #52c76a;
+  --warn: #e0a730;
+  --err: #e2554f;
+  --muted: #8a8f94;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: #eee;
+  font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--border);
+}
+
+.app-header h1 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.app-header__subtitle {
+  font-weight: 400;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.status-badge {
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.status-badge--disconnected {
+  background: rgba(226, 85, 79, 0.18);
+  color: var(--err);
+}
+
+.status-badge--connecting {
+  background: rgba(224, 167, 48, 0.18);
+  color: var(--warn);
+}
+
+.status-badge--connected {
+  background: rgba(82, 199, 106, 0.18);
+  color: var(--ok);
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  padding: 24px;
+}
+
+@media (max-width: 900px) {
+  .layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.panel {
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.panel--wide {
+  grid-column: 1 / -1;
+}
+
+.panel h2 {
+  margin: 0 0 12px;
+  font-size: 15px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+
+.panel-log__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.field-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+
+.field-row label {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.field-row--buttons {
+  flex-direction: row;
+  gap: 8px;
+}
+
+.topcoat-text-input,
+.topcoat-textarea,
+.topcoat-select {
+  width: 100%;
+}
+
+.topcoat-textarea {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 13px;
+  resize: vertical;
+}
+
+.qos-toggle {
+  display: flex;
+  gap: 4px;
+}
+
+.qos-toggle__option {
+  flex: 1;
+  opacity: 0.55;
+}
+
+.qos-toggle__option.is-selected {
+  opacity: 1;
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+#subscription-list {
+  margin-top: 8px;
+}
+
+#subscription-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+#subscription-list .unsubscribe-btn {
+  padding: 2px 8px;
+  font-size: 12px;
+}
+
+.log {
+  height: 320px;
+  overflow-y: auto;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 12.5px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 8px;
+}
+
+.log-entry {
+  padding: 4px 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+
+.log-entry__time {
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
+.log-entry__kind {
+  flex-shrink: 0;
+  padding: 0 6px;
+  border-radius: 3px;
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.log-entry--in .log-entry__kind {
+  background: rgba(79, 170, 255, 0.18);
+  color: var(--accent);
+}
+
+.log-entry--out .log-entry__kind {
+  background: rgba(82, 199, 106, 0.18);
+  color: var(--ok);
+}
+
+.log-entry--system .log-entry__kind {
+  background: rgba(138, 143, 148, 0.18);
+  color: var(--muted);
+}
+
+.log-entry--error .log-entry__kind {
+  background: rgba(226, 85, 79, 0.18);
+  color: var(--err);
+}
+
+.log-entry__body {
+  white-space: pre-wrap;
+  word-break: break-word;
+}

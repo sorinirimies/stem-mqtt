@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>stem-mqtt · Browser Demo</title>
+
+  <!-- Topcoat (Adobe/Mozilla UI framework) — dark desktop theme -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/topcoat/topcoat@v0.8.0/css/topcoat-desktop-dark.min.css" />
+  <link rel="stylesheet" href="style.css" />
+
+  <!-- mqtt.js — speaks MQTT-over-WebSocket directly to stem-mqtt's broker -->
+  <script src="https://unpkg.com/mqtt@5/dist/mqtt.min.js"></script>
+</head>
+<body>
+  <header class="app-header">
+    <h1>stem-mqtt <span class="app-header__subtitle">browser demo</span></h1>
+    <div id="status" class="status-badge status-badge--disconnected">disconnected</div>
+  </header>
+
+  <main class="layout">
+    <!-- ── Connection ─────────────────────────────────────────────────── -->
+    <section class="panel" id="panel-connect">
+      <h2>Connection</h2>
+      <div class="field-row">
+        <label for="ws-url">WebSocket URL</label>
+        <input id="ws-url" class="topcoat-text-input" type="text" value="ws://localhost:8083" />
+      </div>
+      <div class="field-row">
+        <label for="client-id">Client ID</label>
+        <input id="client-id" class="topcoat-text-input" type="text" />
+      </div>
+      <div class="field-row">
+        <label for="protocol-version">Protocol</label>
+        <select id="protocol-version" class="topcoat-select">
+          <option value="5">MQTT 5.0</option>
+          <option value="4">MQTT 3.1.1</option>
+        </select>
+      </div>
+      <div class="field-row field-row--buttons">
+        <button id="btn-connect" class="topcoat-button--cta">Connect</button>
+        <button id="btn-disconnect" class="topcoat-button" disabled>Disconnect</button>
+      </div>
+    </section>
+
+    <!-- ── Publish ────────────────────────────────────────────────────── -->
+    <section class="panel" id="panel-publish">
+      <h2>Publish</h2>
+      <div class="field-row">
+        <label for="pub-topic">Topic</label>
+        <input id="pub-topic" class="topcoat-text-input" type="text" value="stem-mqtt/demo" />
+      </div>
+      <div class="field-row">
+        <label for="pub-payload">Payload</label>
+        <textarea id="pub-payload" class="topcoat-textarea" rows="3">hello from the browser</textarea>
+      </div>
+      <div class="field-row">
+        <label>QoS</label>
+        <div class="qos-toggle" id="pub-qos" data-value="0">
+          <button class="topcoat-button qos-toggle__option is-selected" data-qos="0">QoS 0</button>
+          <button class="topcoat-button qos-toggle__option" data-qos="1">QoS 1</button>
+          <button class="topcoat-button qos-toggle__option" data-qos="2">QoS 2</button>
+        </div>
+      </div>
+      <div class="field-row">
+        <label class="topcoat-checkbox">
+          <input id="pub-retain" type="checkbox" />
+          <div class="topcoat-checkbox__checkmark"></div>
+          Retain
+        </label>
+      </div>
+      <div class="field-row field-row--buttons">
+        <button id="btn-publish" class="topcoat-button--cta" disabled>Publish</button>
+        <button id="btn-publish-all-qos" class="topcoat-button" disabled title="Publish the same payload at QoS 0, 1, and 2 back-to-back, timing each">
+          Publish at all 3 QoS levels
+        </button>
+      </div>
+    </section>
+
+    <!-- ── Subscribe ──────────────────────────────────────────────────── -->
+    <section class="panel" id="panel-subscribe">
+      <h2>Subscribe</h2>
+      <div class="field-row">
+        <label for="sub-topic">Topic filter</label>
+        <input id="sub-topic" class="topcoat-text-input" type="text" value="stem-mqtt/#" />
+      </div>
+      <div class="field-row">
+        <label>QoS</label>
+        <div class="qos-toggle" id="sub-qos" data-value="0">
+          <button class="topcoat-button qos-toggle__option is-selected" data-qos="0">QoS 0</button>
+          <button class="topcoat-button qos-toggle__option" data-qos="1">QoS 1</button>
+          <button class="topcoat-button qos-toggle__option" data-qos="2">QoS 2</button>
+        </div>
+      </div>
+      <div class="field-row field-row--buttons">
+        <button id="btn-subscribe" class="topcoat-button--cta" disabled>Subscribe</button>
+      </div>
+      <ul class="topcoat-list" id="subscription-list"></ul>
+    </section>
+
+    <!-- ── Message log ────────────────────────────────────────────────── -->
+    <section class="panel panel--wide" id="panel-log">
+      <div class="panel-log__header">
+        <h2>Activity log</h2>
+        <button id="btn-clear-log" class="topcoat-button">Clear</button>
+      </div>
+      <div id="log" class="log"></div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

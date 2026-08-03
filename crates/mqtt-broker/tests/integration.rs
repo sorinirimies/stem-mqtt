@@ -63,6 +63,167 @@ async fn assert_no_message(rx: &mut mpsc::UnboundedReceiver<MqttMessage>) {
     assert!(result.is_err(), "expected no message, but got one");
 }
 
+// ── MQTT-over-WebSocket ────────────────────────────────────────────────
+// These drive a raw `tokio-tungstenite` WebSocket client speaking MQTT
+// bytes directly (mirroring what a browser's `mqtt.js` does), rather than
+// `mqtt_client::MqttClient` (which only speaks raw TCP) — proving the
+// broker's WebSocket bridge (`crate`-internal `WsByteStream`) actually
+// round-trips real MQTT packets, not just that it accepts a handshake.
+
+use futures_util::{SinkExt, StreamExt};
+use mqtt_client::protocol::connect::ConnectPacket;
+use mqtt_client::protocol::packet::Packet;
+use mqtt_client::protocol::properties::Properties;
+use mqtt_client::protocol::publish::PublishPacket;
+use mqtt_client::protocol::subscribe::{SubscribeFilter, SubscribePacket};
+use tokio_tungstenite::tungstenite::handshake::client::Request;
+use tokio_tungstenite::tungstenite::Message;
+
+async fn start_broker_with_ws() -> (MqttBroker, u16, u16) {
+    let mut config = MqttBrokerConfig::new("127.0.0.1", 0);
+    config.ws_port = Some(0);
+    let broker = MqttBroker::new(config);
+    broker.start().await.expect("broker should bind and start");
+    let tcp_port = broker.bound_port().expect("tcp port must be known");
+    let ws_port = broker.bound_ws_port().expect("ws port must be known");
+    (broker, tcp_port, ws_port)
+}
+
+/// Connects a raw WebSocket client to the broker's `ws_port`, completing
+/// the `mqtt` subprotocol handshake (MQTT-5.0 §6.4.1).
+async fn connect_ws(
+    ws_port: u16,
+) -> tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>> {
+    let request = Request::builder()
+        .uri(format!("ws://127.0.0.1:{ws_port}/"))
+        .header("Sec-WebSocket-Protocol", "mqtt")
+        .header("Host", format!("127.0.0.1:{ws_port}"))
+        .header("Connection", "Upgrade")
+        .header("Upgrade", "websocket")
+        .header("Sec-WebSocket-Version", "13")
+        .header(
+            "Sec-WebSocket-Key",
+            tokio_tungstenite::tungstenite::handshake::client::generate_key(),
+        )
+        .body(())
+        .unwrap();
+    let (ws_stream, response) = tokio_tungstenite::connect_async(request)
+        .await
+        .expect("websocket handshake should succeed");
+    assert_eq!(
+        response
+            .headers()
+            .get("sec-websocket-protocol")
+            .and_then(|v| v.to_str().ok()),
+        Some("mqtt"),
+        "broker must echo back the negotiated `mqtt` subprotocol"
+    );
+    ws_stream
+}
+
+#[tokio::test]
+async fn websocket_client_connects_and_subscribes() {
+    let (broker, _tcp_port, ws_port) = start_broker_with_ws().await;
+    let mut ws = connect_ws(ws_port).await;
+
+    let connect = Packet::Connect(ConnectPacket {
+        version: MqttVersion::V5,
+        client_id: "ws-raw-client".into(),
+        clean_start: true,
+        keep_alive: 30,
+        username: None,
+        password: None,
+        will: None,
+        properties: Properties::new(),
+    });
+    ws.send(Message::Binary(
+        connect.encode(MqttVersion::V5).unwrap().to_vec(),
+    ))
+    .await
+    .unwrap();
+
+    let msg = ws.next().await.unwrap().unwrap();
+    let Message::Binary(bytes) = msg else {
+        panic!("expected a binary CONNACK message, got {msg:?}")
+    };
+    let mut buf = bytes::BytesMut::from(&bytes[..]);
+    let packet = Packet::decode(&mut buf, MqttVersion::V5).unwrap().unwrap();
+    let Packet::ConnAck(ack) = packet else {
+        panic!("expected CONNACK, got {packet:?}")
+    };
+    assert!(ack.reason_code.is_success());
+
+    broker.stop().await.unwrap();
+}
+
+#[tokio::test]
+async fn websocket_subscriber_receives_publish_from_tcp_client() {
+    let (broker, tcp_port, ws_port) = start_broker_with_ws().await;
+
+    // Subscriber: raw WebSocket client (stands in for a browser).
+    let mut ws = connect_ws(ws_port).await;
+    let connect = Packet::Connect(ConnectPacket {
+        version: MqttVersion::V5,
+        client_id: "ws-subscriber".into(),
+        clean_start: true,
+        keep_alive: 30,
+        username: None,
+        password: None,
+        will: None,
+        properties: Properties::new(),
+    });
+    ws.send(Message::Binary(
+        connect.encode(MqttVersion::V5).unwrap().to_vec(),
+    ))
+    .await
+    .unwrap();
+    ws.next().await.unwrap().unwrap(); // CONNACK
+
+    let subscribe = Packet::Subscribe(SubscribePacket {
+        packet_id: 1,
+        filters: vec![SubscribeFilter::new("ws/bridge", QoS::AtLeastOnce)],
+        properties: Properties::new(),
+    });
+    ws.send(Message::Binary(
+        subscribe.encode(MqttVersion::V5).unwrap().to_vec(),
+    ))
+    .await
+    .unwrap();
+    ws.next().await.unwrap().unwrap(); // SUBACK
+
+    // Publisher: a normal `MqttClient` over raw TCP.
+    let publisher = client(tcp_port, "tcp-publisher");
+    publisher.connect().await.unwrap();
+    publisher
+        .publish(
+            "ws/bridge".into(),
+            b"bridged across transports".to_vec(),
+            QoS::AtLeastOnce,
+            false,
+        )
+        .await
+        .unwrap();
+
+    let msg = timeout(Duration::from_secs(5), ws.next())
+        .await
+        .expect("timed out waiting for the bridged PUBLISH")
+        .unwrap()
+        .unwrap();
+    let Message::Binary(bytes) = msg else {
+        panic!("expected a binary PUBLISH message, got {msg:?}")
+    };
+    let mut buf = bytes::BytesMut::from(&bytes[..]);
+    let packet = Packet::decode(&mut buf, MqttVersion::V5).unwrap().unwrap();
+    let Packet::Publish(PublishPacket { topic, payload, .. }) = packet else {
+        panic!("expected PUBLISH, got {packet:?}")
+    };
+    assert_eq!(topic, "ws/bridge");
+    assert_eq!(payload, b"bridged across transports".as_slice());
+
+    publisher.disconnect().await.unwrap();
+    broker.stop().await.unwrap();
+}
+
 #[tokio::test]
 async fn qos0_pub_sub_roundtrip() {
     let (broker, port) = start_broker(|_| {}).await;

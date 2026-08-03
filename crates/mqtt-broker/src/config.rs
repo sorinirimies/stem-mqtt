@@ -11,6 +11,14 @@ pub struct MqttBrokerConfig {
     /// Address to bind the listening socket to, e.g. `"0.0.0.0"` or `"::"`.
     pub bind_address: String,
     pub port: u16,
+    /// Port to accept MQTT-over-WebSocket connections on (MQTT-5.0 §6 /
+    /// MQTT-3.1.1 Appendix B), bound alongside the raw-TCP `port` above.
+    /// `None` disables the WebSocket listener entirely — the default,
+    /// since most deployments only need raw TCP. `Some(0)` binds an
+    /// OS-assigned ephemeral WebSocket port (mirroring `port`'s own `0`
+    /// convention), which is why this is `Option<u16>` rather than reusing
+    /// `0` itself as the "disabled" sentinel.
+    pub ws_port: Option<u16>,
     /// Accept connections without a username/password when no
     /// [`MqttAuthProvider`] is registered. Ignored if an auth provider is
     /// set — the provider always makes the final decision.
@@ -33,6 +41,7 @@ impl MqttBrokerConfig {
         MqttBrokerConfig {
             bind_address: bind_address.into(),
             port,
+            ws_port: None,
             allow_anonymous: true,
             max_clients: 0,
             max_qos: QoS::ExactlyOnce,

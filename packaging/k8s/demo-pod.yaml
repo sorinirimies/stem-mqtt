@@ -1,0 +1,40 @@
+# Quick single-Pod demo: broker + the static demo webpage as two
+# containers sharing one network namespace, so demo-web can reach the
+# broker at localhost — no Service/DNS needed for a one-off try-it-out.
+#
+# Usage:
+#   docker build -t stem-mqtt-broker:local -f packaging/Dockerfile .
+#   docker build -t stem-mqtt-demo-web:local -f demo/web/Dockerfile .
+#   kind load docker-image stem-mqtt-broker:local stem-mqtt-demo-web:local   # if using kind
+#   kubectl apply -f packaging/k8s/demo-pod.yaml
+#   kubectl port-forward pod/stem-mqtt-demo 8090:80 8083:8083
+#   open http://localhost:8090   (the page's default ws:// URL already
+#                                  points at ws://localhost:8083)
+apiVersion: v1
+kind: Pod
+metadata:
+  name: stem-mqtt-demo
+  labels:
+    app: stem-mqtt-demo
+spec:
+  containers:
+    - name: broker
+      image: stem-mqtt-broker:local
+      imagePullPolicy: IfNotPresent
+      args: ["--bind", "0.0.0.0", "--port", "1883", "--ws-port", "8083", "--log-level", "info"]
+      ports:
+        - containerPort: 1883
+          name: mqtt
+        - containerPort: 8083
+          name: mqtt-ws
+      readinessProbe:
+        tcpSocket:
+          port: 1883
+        initialDelaySeconds: 1
+        periodSeconds: 5
+    - name: demo-web
+      image: stem-mqtt-demo-web:local
+      imagePullPolicy: IfNotPresent
+      ports:
+        - containerPort: 80
+          name: http

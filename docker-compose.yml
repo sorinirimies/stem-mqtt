@@ -1,0 +1,23 @@
+services:
+  broker:
+    build:
+      context: .
+      dockerfile: packaging/Dockerfile
+    command: ["--bind", "0.0.0.0", "--port", "1883", "--ws-port", "8083", "--log-level", "info"]
+    ports:
+      - "1883:1883" # raw MQTT-over-TCP
+      - "8083:8083" # MQTT-over-WebSocket (used by demo-web)
+    healthcheck:
+      test: ["CMD-SHELL", "printf '' | timeout 1 bash -c 'cat < /dev/null > /dev/tcp/127.0.0.1/1883' || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  demo-web:
+    build:
+      context: .
+      dockerfile: demo/web/Dockerfile
+    ports:
+      - "8090:80"
+    depends_on:
+      - broker

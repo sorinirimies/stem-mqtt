@@ -1,0 +1,58 @@
+# Standalone broker Deployment + Service (the more realistic pattern —
+# see demo-pod.yaml for a single-Pod quick demo instead).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: stem-mqtt-broker
+  labels:
+    app: stem-mqtt-broker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: stem-mqtt-broker
+  template:
+    metadata:
+      labels:
+        app: stem-mqtt-broker
+    spec:
+      containers:
+        - name: broker
+          image: stem-mqtt-broker:local
+          imagePullPolicy: IfNotPresent
+          args: ["--bind", "0.0.0.0", "--port", "1883", "--ws-port", "8083", "--log-level", "info"]
+          ports:
+            - containerPort: 1883
+              name: mqtt
+            - containerPort: 8083
+              name: mqtt-ws
+          readinessProbe:
+            tcpSocket:
+              port: 1883
+            initialDelaySeconds: 1
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 50m
+              memory: 32Mi
+            limits:
+              cpu: 500m
+              memory: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: stem-mqtt-broker
+spec:
+  selector:
+    app: stem-mqtt-broker
+  ports:
+    - name: mqtt
+      port: 1883
+      targetPort: 1883
+      nodePort: 30883
+    - name: mqtt-ws
+      port: 8083
+      targetPort: 8083
+      nodePort: 30808
+  type: NodePort

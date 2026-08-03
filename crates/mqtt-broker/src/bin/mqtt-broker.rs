@@ -27,6 +27,13 @@ struct Args {
     #[arg(long, default_value_t = 0)]
     max_clients: u32,
 
+    /// Port to also accept MQTT-over-WebSocket connections on — the
+    /// transport a browser-based client (e.g. the demo webpage under
+    /// `demo/web/`) must use, since browsers can't open raw TCP sockets.
+    /// Omit to disable the WebSocket listener (default).
+    #[arg(long)]
+    ws_port: Option<u16>,
+
     /// Log verbosity: error, warn, info, debug, trace.
     #[arg(long, default_value = "info")]
     log_level: String,
@@ -43,6 +50,7 @@ async fn main() -> anyhow::Result<()> {
     let mut config = MqttBrokerConfig::new(args.bind.clone(), args.port);
     config.allow_anonymous = args.allow_anonymous;
     config.max_clients = args.max_clients;
+    config.ws_port = args.ws_port;
 
     let broker = MqttBroker::new(config);
     broker
@@ -51,6 +59,9 @@ async fn main() -> anyhow::Result<()> {
         .map_err(|e| anyhow::anyhow!(e.to_string()))?;
 
     tracing::info!(bind = %args.bind, port = args.port, "mqtt-broker listening");
+    if let Some(ws_port) = args.ws_port {
+        tracing::info!(bind = %args.bind, port = ws_port, "mqtt-broker listening (WebSocket)");
+    }
 
     // Run until interrupted.
     tokio::signal::ctrl_c().await?;

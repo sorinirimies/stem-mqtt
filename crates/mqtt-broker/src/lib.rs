@@ -11,6 +11,7 @@ mod config;
 mod connection;
 mod session;
 mod topic;
+mod ws;
 
 pub use broker::MqttBroker;
 pub use config::{MqttAuthProvider, MqttBrokerConfig, MqttBrokerEventListener};

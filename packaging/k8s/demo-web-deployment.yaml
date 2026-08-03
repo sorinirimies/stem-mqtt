@@ -1,0 +1,50 @@
+# Standalone demo-web Deployment + Service. The page's WebSocket URL field
+# is editable at runtime — since it runs in the user's browser (outside the
+# cluster), it can't resolve `stem-mqtt-broker`'s in-cluster Service DNS
+# name, so point it at however you've exposed stem-mqtt-broker's `mqtt-ws`
+# port externally (NodePort/LoadBalancer/port-forward) instead of trying to
+# bake a cluster-internal address into the page.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: stem-mqtt-demo-web
+  labels:
+    app: stem-mqtt-demo-web
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: stem-mqtt-demo-web
+  template:
+    metadata:
+      labels:
+        app: stem-mqtt-demo-web
+    spec:
+      containers:
+        - name: demo-web
+          image: stem-mqtt-demo-web:local
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 80
+              name: http
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 200m
+              memory: 64Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: stem-mqtt-demo-web
+spec:
+  selector:
+    app: stem-mqtt-demo-web
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
+      nodePort: 30809
+  type: NodePort

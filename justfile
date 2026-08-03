@@ -175,9 +175,35 @@ test-node: build-node
 package-linux-aarch64: _check-cross
     cross build --release -p mqtt-broker --bin mqtt-broker --target aarch64-unknown-linux-gnu
 
-# Build a Docker image for the broker (packaging/Dockerfile)
-package-docker: build-release
-    docker build -t stem-mqtt-broker -f packaging/Dockerfile .
+# Build a Docker image for the broker (multi-stage packaging/Dockerfile —
+# builds mqtt-broker from source inside Docker, no host build needed)
+package-docker:
+    docker build -t stem-mqtt-broker:local -f packaging/Dockerfile .
+
+# Build the demo webpage's Docker image (nginx serving demo/web/ statically)
+package-docker-demo-web:
+    docker build -t stem-mqtt-demo-web:local -f demo/web/Dockerfile .
+
+# ── Demo (browser client + Docker + Kubernetes) ──────────────────
+
+# Run the broker with WebSocket support + a static file server for the
+# demo webpage, using whatever's already installed (no Docker required)
+demo-run:
+    #!/usr/bin/env sh
+    set -e
+    echo "Broker (TCP :1883, WebSocket :8083) + demo webpage (:8090) — Ctrl-C to stop both"
+    trap 'kill 0' EXIT
+    cargo run -p mqtt-broker --bin mqtt-broker -- --ws-port 8083 &
+    (cd demo/web && python3 -m http.server 8090) &
+    wait
+
+# Build and run the full demo (broker + demo webpage) via Docker Compose
+demo-docker:
+    docker compose up --build
+
+# Tear down the Docker Compose demo
+demo-docker-down:
+    docker compose down
 
 # ── Documentation ─────────────────────────────────────────────────────────────
 
