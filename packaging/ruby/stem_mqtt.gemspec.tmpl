@@ -1,0 +1,14 @@
+Gem::Specification.new do |s|
+  s.name        = "stem_mqtt"
+  s.version     = "VERSION_PLACEHOLDER"
+  s.summary     = "UniFFI-generated Ruby bindings for the stem-mqtt client + broker."
+  s.description = "A full MQTT 3.1.1 / MQTT 5.0 client and broker, implemented in Rust, " \
+                  "exposed to Ruby via UniFFI (uniffi-bindgen-ruby)."
+  s.authors     = ["Sorin Irimies"]
+  s.email       = ["sorinirimies@gmail.com"]
+  s.homepage    = "https://github.com/sorinirimies/stem-mqtt"
+  s.license     = "MIT"
+  s.files       = Dir["lib/**/*"]
+  s.require_paths = ["lib"]
+  s.required_ruby_version = ">= 3.0"
+end

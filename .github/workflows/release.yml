@@ -1,0 +1,408 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (e.g. v0.2.0)"
+        required: true
+        default: ""
+
+permissions:
+  contents: write
+  packages: write
+
+concurrency:
+  group: release
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # ── 0. Validate tag ──────────────────────────────────────────────────────────
+  validate:
+    name: Validate tag
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+      version: ${{ steps.resolve.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Nushell
+        run: cargo install nu --locked
+      - name: Resolve and validate tag
+        id: resolve
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ github.event.inputs.tag }}"
+          else
+            TAG="${{ github.ref_name }}"
+          fi
+          nu scripts/ci/validate_tag.nu "$TAG" >> "$GITHUB_OUTPUT"
+
+  # ── 1. Quality gate ───────────────────────────────────────────────────────────
+  test:
+    name: Test & lint
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate.outputs.tag }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt,clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Install Nushell
+        run: cargo install nu --locked
+      - name: Quality gate
+        run: nu scripts/ci/quality_gate.nu
+
+  # ── 2. mqtt-broker binary matrix ──────────────────────────────────────────────
+  build-broker:
+    name: Build mqtt-broker — ${{ matrix.name }}
+    needs: [validate, test]
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x86_64
+            runner: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            cross: false
+            suffix: ""
+          - name: Linux aarch64
+            runner: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            cross: true
+            suffix: ""
+          - name: macOS x86_64
+            runner: macos-latest
+            target: x86_64-apple-darwin
+            cross: false
+            suffix: ""
+          - name: macOS aarch64
+            runner: macos-latest
+            target: aarch64-apple-darwin
+            cross: false
+            suffix: ""
+          - name: Windows x86_64
+            runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            cross: false
+            suffix: ".exe"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate.outputs.tag }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Install cross
+        if: matrix.cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
+
+      - name: Build (native)
+        if: ${{ !matrix.cross }}
+        run: cargo build --release -p mqtt-broker --bin mqtt-broker --target ${{ matrix.target }}
+
+      - name: Build (cross)
+        if: matrix.cross
+        run: cross build --release -p mqtt-broker --bin mqtt-broker --target ${{ matrix.target }}
+
+      - name: Package
+        shell: bash
+        run: |
+          bin="target/${{ matrix.target }}/release/mqtt-broker${{ matrix.suffix }}"
+          out="mqtt-broker-${{ needs.validate.outputs.version }}-${{ matrix.target }}"
+          mkdir -p "$out"
+          cp "$bin" "$out/"
+          cp README.md LICENSE "$out/"
+          if [ "${{ matrix.suffix }}" = ".exe" ]; then
+            (cd "$(dirname "$out")" && 7z a "${out}.zip" "$(basename "$out")") 2>/dev/null || \
+              powershell -Command "Compress-Archive -Path '$out' -DestinationPath '${out}.zip'"
+          else
+            tar czf "${out}.tar.gz" "$out"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mqtt-broker-${{ matrix.target }}
+          path: |
+            mqtt-broker-*.tar.gz
+            mqtt-broker-*.zip
+          retention-days: 1
+
+  # ── 3. UniFFI bindings (Kotlin, Swift, Python, Ruby) ──────────────────────────
+  bindings:
+    name: UniFFI bindings — ${{ matrix.language }}
+    needs: [validate, test]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [kotlin, swift, python, ruby]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate.outputs.tag }}
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install uniffi-bindgen-ruby
+        if: matrix.language == 'ruby'
+        run: cargo install uniffi-bindgen-ruby --locked || echo "⚠️  uniffi-bindgen-ruby unavailable — skipping"
+
+      - name: Generate bindings (mqtt-client)
+        run: ./scripts/generate-bindings.sh ${{ matrix.language }} mqtt-client
+        continue-on-error: ${{ matrix.language == 'ruby' }}
+
+      - name: Generate bindings (mqtt-broker)
+        run: ./scripts/generate-bindings.sh ${{ matrix.language }} mqtt-broker
+        continue-on-error: ${{ matrix.language == 'ruby' }}
+
+      - name: Zip bindings
+        run: |
+          if [ -d "bindings/${{ matrix.language }}" ]; then
+            zip -r "bindings-${{ matrix.language }}.zip" "bindings/${{ matrix.language }}"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bindings-${{ matrix.language }}
+          path: bindings-${{ matrix.language }}.zip
+          if-no-files-found: ignore
+          retention-days: 1
+
+  # ── 4. GitHub Release ──────────────────────────────────────────────────────────
+  release:
+    name: Create GitHub Release
+    needs: [validate, build-broker, bindings]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate.outputs.tag }}
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install git-cliff
+        run: cargo install git-cliff --locked
+      - name: Install Nushell
+        run: cargo install nu --locked
+      - name: Generate release notes
+        run: nu scripts/ci/release_notes.nu ${{ needs.validate.outputs.tag }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.validate.outputs.tag }}
+          body_path: RELEASE_NOTES.md
+          files: |
+            artifacts/*
+            LICENSE
+            README.md
+            CHANGELOG.md
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ── 5. Publish to crates.io ────────────────────────────────────────────────────
+  publish-crates:
+    name: Publish to crates.io
+    needs: [validate, release]
+    runs-on: ubuntu-latest
+    env:
+      HAS_TOKEN: ${{ secrets.CRATES_IO_TOKEN != '' }}
+    steps:
+      - name: Skip (no token)
+        if: env.HAS_TOKEN != 'true'
+        run: echo "⏭️  CRATES_IO_TOKEN not set — skipping."
+
+      - uses: actions/checkout@v4
+        if: env.HAS_TOKEN == 'true'
+        with:
+          ref: ${{ needs.validate.outputs.tag }}
+      - uses: dtolnay/rust-toolchain@stable
+        if: env.HAS_TOKEN == 'true'
+      - uses: Swatinem/rust-cache@v2
+        if: env.HAS_TOKEN == 'true'
+      - name: Install Nushell
+        if: env.HAS_TOKEN == 'true'
+        run: cargo install nu --locked
+
+      - name: Publish mqtt-client (must go first — mqtt-broker depends on it)
+        if: env.HAS_TOKEN == 'true'
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+        run: nu scripts/ci/publish_crate.nu mqtt-client ${{ needs.validate.outputs.version }} --readme-dir crates/mqtt-client --wait 30
+
+      - name: Publish mqtt-broker
+        if: env.HAS_TOKEN == 'true'
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+        run: nu scripts/ci/publish_crate.nu mqtt-broker ${{ needs.validate.outputs.version }} --readme-dir crates/mqtt-broker --wait 0
+
+  # ── 6. Publish Python wheels to PyPI ───────────────────────────────────────────
+  publish-python:
+    name: Publish to PyPI
+    needs: [validate, release]
+    runs-on: ubuntu-latest
+    env:
+      HAS_TOKEN: ${{ secrets.PYPI_API_TOKEN != '' }}
+    steps:
+      - name: Skip (no token)
+        if: env.HAS_TOKEN != 'true'
+        run: echo "⏭️  PYPI_API_TOKEN not set — skipping. See packaging/python/README.md."
+
+      - uses: actions/checkout@v4
+        if: env.HAS_TOKEN == 'true'
+        with:
+          ref: ${{ needs.validate.outputs.tag }}
+      - uses: dtolnay/rust-toolchain@stable
+        if: env.HAS_TOKEN == 'true'
+      - uses: actions/setup-python@v5
+        if: env.HAS_TOKEN == 'true'
+        with:
+          python-version: "3.12"
+
+      - name: Install maturin
+        if: env.HAS_TOKEN == 'true'
+        run: pip install maturin
+
+      - name: Build + publish mqtt-client wheel
+        if: env.HAS_TOKEN == 'true'
+        working-directory: crates/mqtt-client
+        env:
+          MATURIN_PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+        run: maturin publish --skip-existing
+
+      - name: Build + publish mqtt-broker wheel
+        if: env.HAS_TOKEN == 'true'
+        working-directory: crates/mqtt-broker
+        env:
+          MATURIN_PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+        run: maturin publish --skip-existing
+
+  # ── 7. Publish Kotlin/JVM package to GitHub Packages (Maven) ──────────────────
+  publish-kotlin:
+    name: Publish Kotlin package
+    needs: [validate, release]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate.outputs.tag }}
+
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Generate Kotlin bindings
+        run: |
+          ./scripts/generate-bindings.sh kotlin mqtt-client
+          ./scripts/generate-bindings.sh kotlin mqtt-broker
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Stage generated sources + native libs
+        run: ./packaging/kotlin/stage.sh ${{ needs.validate.outputs.version }}
+
+      - name: Publish to GitHub Packages
+        working-directory: packaging/kotlin
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PACKAGE_VERSION: ${{ needs.validate.outputs.version }}
+        run: gradle publish --no-daemon
+
+  # ── 8. Publish Swift package (XCFramework + Package.swift) ────────────────────
+  publish-swift:
+    name: Publish Swift package
+    needs: [validate, build-broker, release]
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate.outputs.tag }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - name: Generate Swift bindings + build XCFramework
+        run: ./packaging/swift/build_xcframework.sh ${{ needs.validate.outputs.version }}
+
+      - name: Upload XCFramework artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mqtt-client-swift-xcframework
+          path: packaging/swift/dist/*.zip
+
+      - name: Attach XCFramework to the GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload ${{ needs.validate.outputs.tag }} packaging/swift/dist/*.zip --clobber
+
+      - name: Update Package.swift with release checksum
+        run: ./packaging/swift/update_manifest.sh ${{ needs.validate.outputs.tag }}
+
+      - name: Commit updated Package.swift
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add packaging/swift/Package.swift
+          git diff --cached --quiet || git commit -m "chore(swift): update Package.swift for ${{ needs.validate.outputs.tag }}"
+          git push origin HEAD:main || echo "⚠️  Could not push Package.swift update (branch protection?) — update it manually."
+
+  # ── 9. Publish Ruby gem to RubyGems ────────────────────────────────────────────
+  publish-ruby:
+    name: Publish Ruby gem
+    needs: [validate, release]
+    runs-on: ubuntu-latest
+    env:
+      HAS_TOKEN: ${{ secrets.RUBYGEMS_API_KEY != '' }}
+    steps:
+      - name: Skip (no token)
+        if: env.HAS_TOKEN != 'true'
+        run: echo "⏭️  RUBYGEMS_API_KEY not set — skipping. See packaging/ruby/README.md."
+
+      - uses: actions/checkout@v4
+        if: env.HAS_TOKEN == 'true'
+        with:
+          ref: ${{ needs.validate.outputs.tag }}
+      - uses: dtolnay/rust-toolchain@stable
+        if: env.HAS_TOKEN == 'true'
+      - uses: ruby/setup-ruby@v1
+        if: env.HAS_TOKEN == 'true'
+        with:
+          ruby-version: "3.3"
+
+      - name: Install uniffi-bindgen-ruby
+        if: env.HAS_TOKEN == 'true'
+        run: cargo install uniffi-bindgen-ruby --locked
+
+      - name: Build + publish gem
+        if: env.HAS_TOKEN == 'true'
+        env:
+          GEM_HOST_API_KEY: ${{ secrets.RUBYGEMS_API_KEY }}
+        run: ./packaging/ruby/build_and_publish.sh ${{ needs.validate.outputs.version }}

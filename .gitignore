@@ -1,0 +1,10 @@
+/target
+.codegraph/
+bindings/
+packaging/kotlin/staged/
+packaging/swift/.build/
+packaging/swift/dist/
+packaging/ruby/.build/
+gitea-data/
+*.log
+.DS_Store

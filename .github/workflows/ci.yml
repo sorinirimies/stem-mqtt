@@ -1,0 +1,143 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - master
+      - develop
+
+env:
+  CARGO_TERM_COLOR: always
+
+# Cancel any in-progress run for the same workflow + branch/PR so a new push
+# immediately supersedes a stale run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── 1. Formatting ────────────────────────────────────────────────────────────
+  fmt:
+    name: fmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable + rustfmt
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Check formatting (workspace)
+        run: cargo fmt --all -- --check
+
+  # ── 2. Clippy ────────────────────────────────────────────────────────────────
+  clippy:
+    name: clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable + clippy
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Run clippy (workspace)
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+  # ── 3. Tests ─────────────────────────────────────────────────────────────────
+  test:
+    name: test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.os }}
+
+      - name: Generate lockfile (if absent)
+        if: hashFiles('Cargo.lock') == ''
+        run: cargo generate-lockfile
+
+      - name: cargo test --workspace
+        run: cargo test --workspace --all-features --all-targets
+
+  # ── 4. Build (dev) ───────────────────────────────────────────────────────────
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build mqtt-client (dev)
+        run: cargo build -p mqtt-client
+
+      - name: Build mqtt-broker (dev)
+        run: cargo build -p mqtt-broker
+
+      - name: Build every example
+        run: cargo build --workspace --examples
+
+  # ── 5. Docs ──────────────────────────────────────────────────────────────────
+  doc:
+    name: doc
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust nightly
+        uses: dtolnay/rust-toolchain@nightly
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: cargo doc (mqtt-client)
+        run: cargo doc --no-deps -p mqtt-client --all-features
+        env:
+          RUSTDOCFLAGS: --cfg docsrs -D warnings
+
+      - name: cargo doc (mqtt-broker)
+        run: cargo doc --no-deps -p mqtt-broker --all-features
+        env:
+          RUSTDOCFLAGS: --cfg docsrs -D warnings
+
+  # ── 6. Nu script tests ───────────────────────────────────────────────────────
+  test-nu:
+    name: test-nu
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Generate lockfile (if absent)
+        if: hashFiles('Cargo.lock') == ''
+        run: cargo generate-lockfile
+
+      - name: Install Nushell
+        run: cargo install nu --locked
+
+      - name: Run Nu script tests
+        run: nu scripts/tests/run_all.nu

@@ -1,0 +1,54 @@
+[changelog]
+header = """
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+"""
+body = """
+{% if version -%}
+## [{{ version | trim_start_matches(pat="v") }}] - {{ timestamp | date(format="%Y-%m-%d") }}
+{% else -%}
+## [Unreleased]
+{% endif -%}
+{% for group, commits in commits | group_by(attribute="group") -%}
+### {{ group }}
+{% for commit in commits -%}
+- {{ commit.message | split(pat="\n") | first | trim }}{% if commit.breaking %} **[BREAKING]**{% endif %}
+{% endfor -%}
+{% endfor -%}
+{% if version and previous.version -%}
+**Full Changelog**: https://github.com/sorinirimies/stem-mqtt/compare/{{ previous.version }}...{{ version }}
+{% endif -%}
+"""
+trim = true
+
+[git]
+conventional_commits = true
+filter_unconventional = true
+filter_commits = true
+
+commit_parsers = [
+    { message = "^chore: bump version",   skip = true },
+    { message = "^chore\\(release\\)",    skip = true },
+    { message = "^chore\\(deps\\)",       skip = true },
+
+    { message = "^feat",                  group = "✨ Features"       },
+    { message = "^fix",                   group = "🐛 Bug Fixes"      },
+    { message = "^perf",                  group = "⚡ Performance"    },
+    { message = "^refactor",              group = "♻️  Refactor"      },
+    { message = "^doc",                   group = "📚 Documentation"  },
+    { message = "^test",                  group = "🧪 Testing"        },
+    { message = "^build",                 group = "📦 Build"          },
+    { message = "^ci",                    group = "🔄 CI"             },
+    { message = "^style",                 group = "💄 Style"          },
+    { message = "^chore",                 group = "🔧 Chores"         },
+]
+
+protect_breaking_commits = true
+tag_pattern = "v[0-9]*"
+sort_tags = "semver"
+
+[github]
+owner = "sorinirimies"
+repo  = "stem-mqtt"

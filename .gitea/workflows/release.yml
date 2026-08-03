@@ -1,0 +1,281 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (e.g. v0.2.0)"
+        required: true
+        default: ""
+
+permissions:
+  contents: write
+  packages: write
+
+concurrency:
+  group: release
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # ── 0. Validate tag ──────────────────────────────────────────────────────────
+  validate:
+    name: Validate tag
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+      version: ${{ steps.resolve.outputs.version }}
+    steps:
+      - name: Resolve and validate tag
+        id: resolve
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ github.event.inputs.tag }}"
+          else
+            TAG="${{ github.ref_name }}"
+          fi
+          if [[ ! "${TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "❌ Tag '${TAG}' does not match vX.Y.Z — aborting."
+            exit 1
+          fi
+          VERSION="${TAG#v}"
+          echo "tag=${TAG}"         >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+  # ── 1. Quality gate ───────────────────────────────────────────────────────────
+  test:
+    name: Test & lint
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate.outputs.tag }}
+      - name: Install Rust stable
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+          . "$HOME/.cargo/env"
+          rustup component add rustfmt clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Install Nushell
+        run: cargo install nu --locked
+      - name: Quality gate
+        run: nu scripts/ci/quality_gate.nu
+
+  # ── 2. Linux builds (native + aarch64 cross) ──────────────────────────────────
+  build-linux:
+    name: Build mqtt-broker Linux — ${{ matrix.target }}
+    needs: [validate, test]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            cross: false
+          - target: aarch64-unknown-linux-gnu
+            cross: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate.outputs.tag }}
+
+      - name: Install cross-linker (aarch64)
+        if: matrix.cross == true
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends gcc-aarch64-linux-gnu
+
+      - name: Install Rust stable + target
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+          . "$HOME/.cargo/env"
+          rustup target add ${{ matrix.target }}
+
+      - name: Configure aarch64 cross-linker
+        if: matrix.cross == true
+        run: |
+          mkdir -p ~/.cargo
+          echo '[target.aarch64-unknown-linux-gnu]' >> ~/.cargo/config.toml
+          echo 'linker = "aarch64-linux-gnu-gcc"'   >> ~/.cargo/config.toml
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Build mqtt-broker
+        run: cargo build --release -p mqtt-broker --bin mqtt-broker --target ${{ matrix.target }}
+
+      - name: Stage tarball
+        run: |
+          out="mqtt-broker-${{ needs.validate.outputs.version }}-${{ matrix.target }}"
+          mkdir -p "$out"
+          cp target/${{ matrix.target }}/release/mqtt-broker "$out/"
+          cp README.md LICENSE "$out/"
+          tar czf "${out}.tar.gz" "$out"
+
+      - uses: actions/upload-artifact@v3
+        with:
+          name: linux-${{ matrix.target }}
+          path: "*.tar.gz"
+          retention-days: 1
+
+  # ── 3. Windows cross-compile from Linux (mingw-w64) ───────────────────────────
+  build-windows:
+    name: Build mqtt-broker Windows x86_64 (cross from Linux)
+    needs: [validate, test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate.outputs.tag }}
+
+      - name: Install mingw-w64 cross-compiler
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends gcc-mingw-w64-x86-64
+
+      - name: Install Rust stable + Windows target
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+          . "$HOME/.cargo/env"
+          rustup target add x86_64-pc-windows-gnu
+
+      - name: Configure Windows cross-linker
+        run: |
+          mkdir -p ~/.cargo
+          echo '[target.x86_64-pc-windows-gnu]'    >> ~/.cargo/config.toml
+          echo 'linker = "x86_64-w64-mingw32-gcc"' >> ~/.cargo/config.toml
+          echo 'ar = "x86_64-w64-mingw32-ar"'      >> ~/.cargo/config.toml
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: x86_64-pc-windows-gnu
+
+      - name: Build mqtt-broker for Windows
+        run: cargo build --release -p mqtt-broker --bin mqtt-broker --target x86_64-pc-windows-gnu
+
+      - name: Stage zip
+        run: |
+          out="mqtt-broker-${{ needs.validate.outputs.version }}-x86_64-pc-windows-gnu"
+          mkdir -p "$out"
+          cp target/x86_64-pc-windows-gnu/release/mqtt-broker.exe "$out/"
+          cp README.md LICENSE "$out/"
+          zip -r "${out}.zip" "$out"
+
+      - uses: actions/upload-artifact@v3
+        with:
+          name: windows-x86_64
+          path: "*.zip"
+          retention-days: 1
+
+  # ── 4. Create Gitea Release ───────────────────────────────────────────────────
+  release:
+    name: Create Release
+    needs: [validate, build-linux, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate.outputs.tag }}
+          fetch-depth: 0
+
+      - name: Install Rust stable
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+      - name: Install git-cliff
+        run: cargo install git-cliff --locked
+      - name: Install Nushell
+        run: cargo install nu --locked
+      - name: Generate release notes
+        run: nu scripts/ci/release_notes.nu ${{ needs.validate.outputs.tag }}
+
+      - uses: actions/download-artifact@v3
+        with:
+          path: artifacts/
+
+      - name: Flatten artifact directories
+        run: |
+          cd artifacts
+          find . -mindepth 2 -type f -exec mv {} . \; 2>/dev/null || true
+          find . -empty -type d -delete 2>/dev/null || true
+
+      - name: Create Gitea Release
+        run: |
+          TAG="${{ needs.validate.outputs.tag }}"
+          GITEA_URL="${{ github.server_url }}"
+          REPO="${{ github.repository }}"
+          TOKEN="${{ secrets.GITHUB_TOKEN }}"
+
+          RELEASE_BODY=$(python3 -c 'import sys,json; print(json.dumps(open("RELEASE_NOTES.md").read()))')
+          RESPONSE=$(curl -s -X POST \
+            "${GITEA_URL}/api/v1/repos/${REPO}/releases" \
+            -H "Authorization: token ${TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "{\"tag_name\":\"${TAG}\",\"name\":\"${TAG}\",\"body\":${RELEASE_BODY},\"draft\":false,\"prerelease\":false}")
+
+          RELEASE_ID=$(echo "$RESPONSE" | python3 -c 'import sys,json; print(json.load(sys.stdin)["id"])' 2>/dev/null)
+          if [ -z "$RELEASE_ID" ] || [ "$RELEASE_ID" = "None" ]; then
+            echo "❌ Failed to create release: $RESPONSE"; exit 1
+          fi
+
+          for file in artifacts/* LICENSE README.md CHANGELOG.md; do
+            [ -f "$file" ] || continue
+            FILENAME=$(basename "$file")
+            echo "📦 Uploading ${FILENAME}..."
+            curl -s -X POST \
+              "${GITEA_URL}/api/v1/repos/${REPO}/releases/${RELEASE_ID}/assets?name=${FILENAME}" \
+              -H "Authorization: token ${TOKEN}" \
+              -H "Content-Type: application/octet-stream" \
+              --data-binary "@${file}" > /dev/null
+          done
+          echo "✅ Release ${TAG} published."
+
+  # ── 5. Publish to crates.io ───────────────────────────────────────────────────
+  publish-crates:
+    name: Publish to crates.io
+    needs: [validate, release]
+    runs-on: ubuntu-latest
+    env:
+      HAS_TOKEN: ${{ secrets.CRATES_IO_TOKEN != '' }}
+    steps:
+      - name: Skip (no token)
+        if: env.HAS_TOKEN != 'true'
+        run: echo "⏭️  CRATES_IO_TOKEN not set — skipping."
+
+      - uses: actions/checkout@v4
+        if: env.HAS_TOKEN == 'true'
+        with:
+          ref: ${{ needs.validate.outputs.tag }}
+
+      - name: Install Rust stable
+        if: env.HAS_TOKEN == 'true'
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+      - uses: Swatinem/rust-cache@v2
+        if: env.HAS_TOKEN == 'true'
+      - name: Install Nushell
+        if: env.HAS_TOKEN == 'true'
+        run: cargo install nu --locked
+
+      - name: Publish mqtt-client (must go first — mqtt-broker depends on it)
+        if: env.HAS_TOKEN == 'true'
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+        run: nu scripts/ci/publish_crate.nu mqtt-client ${{ needs.validate.outputs.version }} --readme-dir crates/mqtt-client --wait 30
+
+      - name: Publish mqtt-broker
+        if: env.HAS_TOKEN == 'true'
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+        run: nu scripts/ci/publish_crate.nu mqtt-broker ${{ needs.validate.outputs.version }} --readme-dir crates/mqtt-broker --wait 0

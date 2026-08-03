@@ -1,0 +1,88 @@
+name: Nightly Dependency Upgrade
+
+on:
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+concurrency:
+  group: deps-update
+  cancel-in-progress: true
+
+jobs:
+  upgrade-deps:
+    name: Upgrade Dependencies
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust stable (rustfmt + clippy)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-edit
+        run: cargo install cargo-edit --locked
+
+      # `cargo upgrade`'s recursive-dep resolver runs in offline mode and
+      # only considers package sources physically present in the local
+      # cache. `cargo update && cargo fetch` refreshes the index and
+      # downloads sources first so the offline phase always has a valid,
+      # non-yanked candidate for every transitive dependency.
+      - name: Pre-warm cargo registry (refresh index + fetch sources)
+        run: cargo update && cargo fetch
+
+      - name: Upgrade workspace dependency pins
+        run: cargo upgrade --incompatible allow
+
+      - name: Sync Cargo.lock
+        run: cargo update
+
+      - name: Check for changes
+        id: check
+        run: |
+          if git diff --quiet Cargo.toml Cargo.lock; then
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check formatting
+        if: steps.check.outputs.has_changes == 'true'
+        run: cargo fmt --all -- --check
+
+      - name: Run clippy
+        if: steps.check.outputs.has_changes == 'true'
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+      - name: Run tests
+        if: steps.check.outputs.has_changes == 'true'
+        run: cargo test --workspace --all-features --all-targets
+
+      # The quality gate already passed above — safe to push directly.
+      - name: Commit and push dependency updates
+        if: steps.check.outputs.has_changes == 'true'
+        run: |
+          DATE=$(date -u '+%Y-%m-%d')
+
+          git config user.name  "gitea-actions[bot]"
+          git config user.email "gitea-actions[bot]@noreply.gitea"
+
+          git add Cargo.toml Cargo.lock
+          git commit -m "chore(deps): nightly dependency upgrade $DATE"
+          git push origin main
+
+          echo "✅ Dependency updates pushed to main."
+
+      - name: Nothing to update
+        if: steps.check.outputs.has_changes == 'false'
+        run: echo "✅ All dependencies already up to date — nothing to upgrade."

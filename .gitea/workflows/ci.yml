@@ -1,0 +1,147 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - master
+      - develop
+
+env:
+  CARGO_TERM_COLOR: always
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── 1. Formatting ────────────────────────────────────────────────────────────
+  fmt:
+    name: fmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable + rustfmt
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+          . "$HOME/.cargo/env"
+          rustup component add rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Check formatting (workspace)
+        run: cargo fmt --all -- --check
+
+  # ── 2. Clippy ────────────────────────────────────────────────────────────────
+  clippy:
+    name: clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable + clippy
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+          . "$HOME/.cargo/env"
+          rustup component add clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Run clippy (workspace)
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+  # ── 3. Tests ─────────────────────────────────────────────────────────────────
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Generate lockfile (if absent)
+        if: hashFiles('Cargo.lock') == ''
+        run: cargo generate-lockfile
+
+      - name: cargo test --workspace
+        run: cargo test --workspace --all-features --all-targets
+
+  # ── 4. Build (dev) ───────────────────────────────────────────────────────────
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build mqtt-client (dev)
+        run: cargo build -p mqtt-client
+
+      - name: Build mqtt-broker (dev)
+        run: cargo build -p mqtt-broker
+
+      - name: Build every example
+        run: cargo build --workspace --examples
+
+  # ── 5. Docs ──────────────────────────────────────────────────────────────────
+  doc:
+    name: doc
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust nightly
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain nightly
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: cargo doc (mqtt-client)
+        run: cargo doc --no-deps -p mqtt-client --all-features
+        env:
+          RUSTDOCFLAGS: --cfg docsrs -D warnings
+
+      - name: cargo doc (mqtt-broker)
+        run: cargo doc --no-deps -p mqtt-broker --all-features
+        env:
+          RUSTDOCFLAGS: --cfg docsrs -D warnings
+
+  # ── 6. Nu script tests ───────────────────────────────────────────────────────
+  test-nu:
+    name: test-nu
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Generate lockfile (if absent)
+        if: hashFiles('Cargo.lock') == ''
+        run: cargo generate-lockfile
+
+      - name: Install Nushell
+        run: cargo install nu --locked
+
+      - name: Run Nu script tests
+        run: nu scripts/tests/run_all.nu

@@ -1,0 +1,38 @@
+[package]
+name = "mqtt-broker"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "A full MQTT 3.1.1 / MQTT 5.0 broker, implemented in Rust with UniFFI bindings for Kotlin, Swift, Python, and more."
+readme = "README.md"
+categories = ["network-programming", "asynchronous"]
+keywords = ["mqtt", "mqtt5", "broker", "uniffi", "iot"]
+
+[lib]
+name = "mqtt_broker"
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+required-features = ["uniffi/cli"]
+
+[[bin]]
+name = "mqtt-broker"
+path = "src/bin/mqtt-broker.rs"
+
+[dependencies]
+mqtt-client = { workspace = true }
+tokio        = { workspace = true }
+bytes        = { workspace = true }
+uniffi       = { workspace = true }
+thiserror    = { workspace = true }
+tracing      = { workspace = true }
+tracing-subscriber = { workspace = true }
+clap         = { workspace = true }
+anyhow       = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util", "macros"] }

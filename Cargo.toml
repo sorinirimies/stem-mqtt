@@ -1,0 +1,48 @@
+[workspace]
+members = [
+    "crates/mqtt-client",
+    "crates/mqtt-broker",
+]
+resolver = "2"
+
+[workspace.package]
+version      = "0.1.0"
+edition      = "2021"
+authors      = ["Sorin Irimies <sorinirimies@gmail.com>"]
+license      = "MIT"
+repository   = "https://github.com/sorinirimies/stem-mqtt"
+rust-version = "1.75"
+
+# ── Shared dependency versions ────────────────────────────────────────────────
+# Pin versions here once; each crate's Cargo.toml references them with
+# `{ workspace = true }` so there is a single source of truth.
+
+[workspace.dependencies]
+# Async runtime & networking
+anyhow      = "1"
+tokio      = { version = "1", features = ["full"] }
+bytes      = "1"
+
+# UniFFI language bindings
+uniffi     = { version = "0.29", features = ["tokio"] }
+
+# Error handling / logging
+thiserror  = "2"
+tracing    = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Misc
+rand       = "0.9"
+clap       = { version = "4", features = ["derive"] }
+
+# Internal crates
+mqtt-client = { path = "crates/mqtt-client", version = "0.1.0" }
+
+[profile.dev]
+opt-level = 0
+
+[profile.release]
+opt-level     = 3
+lto           = "thin"
+codegen-units = 1
+strip         = "symbols"
