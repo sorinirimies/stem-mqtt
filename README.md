@@ -8,6 +8,16 @@ plus Node.js/TypeScript via a hand-written [napi-rs](https://napi.rs/) addon
 [![CI](https://github.com/sorinirimies/stem-mqtt/actions/workflows/ci.yml/badge.svg)](https://github.com/sorinirimies/stem-mqtt/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
+## Preview
+
+![Pub/Sub Demo](examples/vhs/generated/pub-sub-demo.gif)
+
+Starting the `mqtt-broker` CLI, then running the `pub_sub` client example
+against it for a full publish/subscribe round trip. Recorded with
+[VHS](https://github.com/charmbracelet/vhs) — regenerate with
+`just vhs-tape pub-sub-demo`, or render every tape under
+[`examples/vhs`](examples/vhs) with `just vhs-all`.
+
 ## Workspace layout
 
 | Crate | Description |
