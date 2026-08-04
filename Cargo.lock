@@ -605,7 +605,7 @@ dependencies = [
 
 [[package]]
 name = "mqtt-broker"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "bytes",
@@ -622,7 +622,7 @@ dependencies = [
 
 [[package]]
 name = "mqtt-client"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "bytes",
@@ -636,7 +636,7 @@ dependencies = [
 
 [[package]]
 name = "mqtt-client-node"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "mqtt-client",
  "napi",
