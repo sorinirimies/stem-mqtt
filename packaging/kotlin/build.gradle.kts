@@ -12,6 +12,10 @@ repositories {
 
 dependencies {
     implementation("net.java.dev.jna:jna:5.14.0")
+    // Required by UniFFI's generated suspend-fn bridging for our
+    // async-exported methods (MqttClient.connect/publish/..., MqttBroker
+    // .start/stop use `#[uniffi::export(async_runtime = "tokio")]`).
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
 }
 
 sourceSets {

@@ -2,6 +2,11 @@
 .codegraph/
 bindings/
 packaging/kotlin/staged/
+packaging/kotlin/android/staged-jniLibs/
+packaging/kotlin/build/
+packaging/kotlin/.gradle/
+packaging/kotlin/android/build/
+packaging/kotlin/android/.gradle/
 packaging/swift/.build/
 packaging/swift/dist/
 packaging/ruby/.build/

@@ -406,24 +406,48 @@ jobs:
           ref: ${{ needs.validate.outputs.tag }}
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android,i686-linux-android
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --locked
+
+      - uses: nttld/setup-ndk@v1
+        id: setup-ndk
+        with:
+          ndk-version: r27c
+
       - name: Generate Kotlin bindings
-        run: |
-          ./scripts/generate-bindings.sh kotlin mqtt-client
-          ./scripts/generate-bindings.sh kotlin mqtt-broker
+        run: ./scripts/generate-bindings.sh kotlin mqtt-client
 
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
 
+      - name: Ensure Android SDK platform 34 + build-tools are installed
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "platforms;android-34" "build-tools;34.0.0" >/dev/null
+
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Stage generated sources + native libs
+      - name: Stage generated sources + native libs (JVM)
         run: ./packaging/kotlin/stage.sh ${{ needs.validate.outputs.version }}
 
-      - name: Publish to GitHub Packages
+      - name: Cross-compile + stage native libs (Android, all ABIs)
+        env:
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+        run: ./packaging/kotlin/stage-android.sh
+
+      - name: Publish Kotlin/JVM package to GitHub Packages
         working-directory: packaging/kotlin
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PACKAGE_VERSION: ${{ needs.validate.outputs.version }}
+        run: gradle publish --no-daemon
+
+      - name: Publish Kotlin/Android AAR to GitHub Packages
+        working-directory: packaging/kotlin/android
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PACKAGE_VERSION: ${{ needs.validate.outputs.version }}
@@ -441,7 +465,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-apple-darwin,x86_64-apple-darwin
+          targets: aarch64-apple-darwin,x86_64-apple-darwin,aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios
 
       - name: Generate Swift bindings + build XCFramework
         run: ./packaging/swift/build_xcframework.sh ${{ needs.validate.outputs.version }}

@@ -18,9 +18,12 @@ pointing at `packaging/swift/Package.swift`, which declares a
 ## How a release updates it
 
 1. `packaging/swift/build_xcframework.sh <version>` — builds `mqtt-client`
-   for both macOS targets, generates the Swift bindings via
-   `uniffi-bindgen`, `lipo`s a universal static lib, and assembles
-   `MqttClient.xcframework` with `xcodebuild -create-xcframework`.
+   for macOS (arm64 + x86_64), iOS device (arm64), and the iOS simulator
+   (arm64 + x86_64, universal), generates the Swift bindings via
+   `uniffi-bindgen`, `lipo`s each multi-arch slice into a universal static
+   lib, and assembles `MqttClient.xcframework` with
+   `xcodebuild -create-xcframework` (3 slices: `macos-arm64_x86_64`,
+   `ios-arm64`, `ios-arm64_x86_64-simulator`).
 2. The zipped XCFramework is attached to the GitHub release as an asset.
 3. `packaging/swift/update_manifest.sh <tag>` computes its checksum
    (`swift package compute-checksum`) and rewrites `Package.swift` to point
@@ -40,9 +43,6 @@ elsewhere), which is why `publish-swift` in
 
 ## Caveats
 
-- iOS device/simulator slices aren't built yet (macOS-only for now) — add
-  `aarch64-apple-ios` / `aarch64-apple-ios-sim` targets to
-  `build_xcframework.sh` to extend this.
 - `mqtt-broker`'s Swift bindings aren't packaged here (a broker embedded in
   an iOS/macOS app is a less common use case than the client); follow the
   same pattern with a second XCFramework if needed.

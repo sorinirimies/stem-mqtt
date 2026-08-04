@@ -26,6 +26,16 @@ _check-cross:
         echo "❌ cross not found. Install with: cargo install cross --git https://github.com/cross-rs/cross"; exit 1; \
     }
 
+_check-cargo-ndk:
+    @command -v cargo-ndk >/dev/null 2>&1 || { \
+        echo "❌ cargo-ndk not found. Install with: cargo install cargo-ndk --locked"; exit 1; \
+    }
+    @[ -n "${ANDROID_NDK_HOME:-${ANDROID_NDK_ROOT:-}}" ] || { \
+        echo "❌ ANDROID_NDK_HOME (or ANDROID_NDK_ROOT) not set."; \
+        echo "   macOS: brew install --cask android-ndk && export ANDROID_NDK_HOME=/opt/homebrew/share/android-ndk"; \
+        exit 1; \
+    }
+
 _check-vhs:
     @command -v vhs >/dev/null 2>&1 || { \
         echo "❌ vhs not found."; \
@@ -183,6 +193,21 @@ test-node: build-node
 # Cross-compile the broker for aarch64 Linux (requires `cross`)
 package-linux-aarch64: _check-cross
     cross build --release -p mqtt-broker --bin mqtt-broker --target aarch64-unknown-linux-gnu
+
+# Stage the Kotlin/JVM package (generates bindings + builds the release
+# cdylib + stages packaging/kotlin/staged/) — run `gradle build` in
+# packaging/kotlin/ afterwards to actually build the jar.
+package-kotlin-jvm:
+    ./scripts/generate-bindings.sh kotlin mqtt-client
+    ./packaging/kotlin/stage.sh 0.0.0-dev
+
+# Cross-compile mqtt-client for every Android ABI (arm64-v8a/armeabi-v7a/
+# x86_64/x86) and stage the .so files for the :android AAR module (requires
+# `cargo-ndk` + an installed NDK — see packaging/kotlin/README.md). Run
+# `gradle assembleRelease` in packaging/kotlin/android/ afterwards to
+# actually build the AAR.
+package-kotlin-android: _check-cargo-ndk
+    ./packaging/kotlin/stage-android.sh
 
 # Build a Docker image for the broker (multi-stage packaging/Dockerfile —
 # builds mqtt-broker from source inside Docker, no host build needed)
