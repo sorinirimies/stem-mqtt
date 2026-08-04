@@ -88,7 +88,7 @@ where
     }
 
     // ── Take over / create the session ───────────────────────────────────
-    let (session_present, shutdown_prev) = state.attach_session(
+    let (session_present, shutdown_prev) = state.sessions.attach(
         &client_id,
         version,
         connect.clean_start,
@@ -100,10 +100,10 @@ where
     }
 
     let (tx, mut rx) = mpsc::unbounded_channel::<Bytes>();
-    state.set_sender(&client_id, tx);
+    state.sessions.set_sender(&client_id, tx);
 
     let (shutdown_tx, mut shutdown_rx) = oneshot::channel::<()>();
-    state.set_shutdown_handle(&client_id, shutdown_tx);
+    state.sessions.set_shutdown_handle(&client_id, shutdown_tx);
 
     // Writer task: drains the channel to the socket.
     let mut writer = writer;
@@ -121,13 +121,13 @@ where
         reason_code: ConnectReasonCode::SUCCESS,
         properties: Properties::new(),
     });
-    if !state.send_to(&client_id, &connack) {
+    if !state.sessions.send_to(&client_id, &connack) {
         writer_task.abort();
         return;
     }
 
-    state.flush_offline_queue(&client_id);
-    state.notify_connected(&client_id);
+    state.sessions.flush_offline_queue(&client_id);
+    state.events.notify_connected(&client_id);
     tracing::info!(%client_id, %peer, ?version, "client connected");
 
     let keep_alive = connect.keep_alive;
@@ -166,7 +166,9 @@ where
 
     writer_task.abort();
     state.detach_session(&client_id, graceful);
-    state.notify_disconnected(&client_id, &disconnect_reason);
+    state
+        .events
+        .notify_disconnected(&client_id, &disconnect_reason);
     tracing::info!(%client_id, reason = %disconnect_reason, "client disconnected");
 }
 
@@ -239,10 +241,10 @@ async fn handle_packet(
     match packet {
         Packet::Publish(p) => handle_publish(state, client_id, version, p).await,
         Packet::PubRel(ack) => {
-            if let Some(message) = state.take_incoming_qos2(client_id, ack.packet_id) {
+            if let Some(message) = state.sessions.take_incoming_qos2(client_id, ack.packet_id) {
                 dispatch_publish(state, client_id, &message).await;
             }
-            state.send_to(
+            state.sessions.send_to(
                 client_id,
                 &Packet::PubComp(SimpleAck::success(ack.packet_id)),
             );
@@ -253,8 +255,11 @@ async fn handle_packet(
             // A subscriber acking a QoS 2 PUBLISH *we* sent — complete the
             // handshake by sending PUBREL (MQTT-5.0 §4.3.3). Ignored if the
             // packet id is unknown (e.g. a stray/duplicate PUBREC).
-            if state.complete_outgoing_qos2(client_id, ack.packet_id) {
-                state.send_to(
+            if state
+                .sessions
+                .complete_outgoing_qos2(client_id, ack.packet_id)
+            {
+                state.sessions.send_to(
                     client_id,
                     &Packet::PubRel(SimpleAck::success(ack.packet_id)),
                 );
@@ -271,11 +276,11 @@ async fn handle_packet(
             true
         }
         Packet::PingReq => {
-            state.send_to(client_id, &Packet::PingResp);
+            state.sessions.send_to(client_id, &Packet::PingResp);
             true
         }
         Packet::Disconnect(_) => {
-            state.discard_will(client_id);
+            state.sessions.discard_will(client_id);
             true
         }
         _ => false, // CONNECT/CONNACK/SUBACK/UNSUBACK/AUTH/PINGRESP are never valid from a client here
@@ -293,7 +298,7 @@ async fn handle_publish(
     }
 
     if p.retain {
-        state.update_retained(&p);
+        state.retained.update(&p);
     }
 
     match p.qos {
@@ -303,13 +308,17 @@ async fn handle_publish(
         QoS::AtLeastOnce => {
             dispatch_publish(state, client_id, &to_queued(&p)).await;
             if let Some(id) = p.packet_id {
-                state.send_to(client_id, &Packet::PubAck(SimpleAck::success(id)));
+                state
+                    .sessions
+                    .send_to(client_id, &Packet::PubAck(SimpleAck::success(id)));
             }
         }
         QoS::ExactlyOnce => {
             if let Some(id) = p.packet_id {
-                state.store_incoming_qos2(client_id, id, p);
-                state.send_to(client_id, &Packet::PubRec(SimpleAck::success(id)));
+                state.sessions.store_incoming_qos2(client_id, id, p);
+                state
+                    .sessions
+                    .send_to(client_id, &Packet::PubRec(SimpleAck::success(id)));
             }
         }
     }
@@ -330,8 +339,10 @@ fn to_queued(p: &PublishPacket) -> QueuedMessage {
 /// subscribers publishing to their own topic), queueing it for offline
 /// sessions.
 async fn dispatch_publish(state: &Arc<BrokerState>, publisher_id: &str, message: &QueuedMessage) {
-    state.notify_message_published(publisher_id, &message.topic, message.qos);
-    state.fan_out(publisher_id, message);
+    state
+        .events
+        .notify_message_published(publisher_id, &message.topic, message.qos);
+    state.sessions.fan_out(publisher_id, message);
 }
 
 async fn handle_subscribe(
@@ -348,7 +359,7 @@ async fn handle_subscribe(
             continue;
         }
         let granted_qos = filter.qos.min(state.config.max_qos);
-        let is_new = state.add_subscription(
+        let is_new = state.sessions.add_subscription(
             client_id,
             &filter.topic_filter,
             Subscription {
@@ -366,7 +377,7 @@ async fn handle_subscribe(
         ));
     }
 
-    state.send_to(
+    state.sessions.send_to(
         client_id,
         &Packet::SubAck(SubAckPacket {
             packet_id: p.packet_id,
@@ -395,9 +406,9 @@ async fn handle_unsubscribe(
     p: mqtt_client::protocol::subscribe::UnsubscribePacket,
 ) {
     for filter in &p.topic_filters {
-        state.remove_subscription(client_id, filter);
+        state.sessions.remove_subscription(client_id, filter);
     }
-    state.send_to(
+    state.sessions.send_to(
         client_id,
         &Packet::UnsubAck(UnsubAckPacket {
             packet_id: p.packet_id,

@@ -9,6 +9,9 @@
 mod broker;
 mod config;
 mod connection;
+mod events;
+mod registry;
+mod retain;
 mod session;
 mod topic;
 mod ws;
