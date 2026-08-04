@@ -98,15 +98,20 @@ def main [
     # ── 4. Docs ───────────────────────────────────────────────────────────────
     if not $skip_doc {
         step "cargo doc --workspace --no-deps (deny broken intra-doc links)"
-        with-env { RUSTDOCFLAGS: "-D warnings" } {
-            let doc_result = (do { cargo doc --workspace --no-deps --all-features } | complete)
-            if $doc_result.exit_code != 0 {
-                print (red "  ✗ cargo doc failed.")
-                if ($doc_result.stderr | str trim | is-not-empty) { print $doc_result.stderr }
-                $failed = true
-            } else {
-                print (green "  ✔ Docs OK")
-            }
+        # `with-env`'s second argument is a closure (like `each`/`do`), which
+        # nu doesn't allow to capture/mutate an outer `mut` variable — only
+        # plain if/else blocks (evaluated inline in this function's own
+        # scope) can do that. So the closure just returns the `complete`
+        # result, and `$failed` is only ever mutated below, outside it.
+        let doc_result = (with-env { RUSTDOCFLAGS: "-D warnings" } {
+            do { cargo doc --workspace --no-deps --all-features } | complete
+        })
+        if $doc_result.exit_code != 0 {
+            print (red "  ✗ cargo doc failed.")
+            if ($doc_result.stderr | str trim | is-not-empty) { print $doc_result.stderr }
+            $failed = true
+        } else {
+            print (green "  ✔ Docs OK")
         }
         print ""
     } else {

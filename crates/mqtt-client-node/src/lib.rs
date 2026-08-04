@@ -100,7 +100,7 @@ impl ConnectOptions {
     }
 }
 
-/// Outcome of a successful [`MqttClient.connect`].
+/// Outcome of a successful [`MqttClient::connect`].
 #[napi(object)]
 pub struct ConnectResult {
     pub session_present: bool,

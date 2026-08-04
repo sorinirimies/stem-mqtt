@@ -69,20 +69,25 @@ def main [
 
     print "── Step 4: Starting Gitea container ──"
     let ssh_port = ($port + 22)
-    let run_result = (
-        do {
-            ^$runtime run -d
-                --name $name
-                --restart unless-stopped
-                -p $"($port):3000"
-                -p $"($ssh_port):22"
-                -v $"($data_path):/data"
-                -e "GITEA__server__ROOT_URL"=$"http://localhost:($port)/"
-                -e "GITEA__server__HTTP_PORT"="3000"
-                -e "GITEA__repository__DEFAULT_BRANCH"="main"
-                "gitea/gitea:latest"
-        } | complete
-    )
+    # Built as a list + spread (`...$args`) rather than one long multi-line
+    # external-command invocation: newer nu versions parse a bare external
+    # call's arguments as ending at the first newline unless the whole
+    # thing is one line, so a naive multi-line `^$runtime run -d\n --name
+    # ...` no longer parses ("expected operator"). A list is unambiguous
+    # regardless of nu version.
+    let args = [
+        "run" "-d"
+        "--name" $name
+        "--restart" "unless-stopped"
+        "-p" $"($port):3000"
+        "-p" $"($ssh_port):22"
+        "-v" $"($data_path):/data"
+        "-e" $"GITEA__server__ROOT_URL=http://localhost:($port)/"
+        "-e" "GITEA__server__HTTP_PORT=3000"
+        "-e" "GITEA__repository__DEFAULT_BRANCH=main"
+        "gitea/gitea:latest"
+    ]
+    let run_result = (do { ^$runtime ...$args } | complete)
 
     if $run_result.exit_code != 0 {
         print "  ✗ Failed to start Gitea container."
@@ -133,7 +138,7 @@ def main [
     print "═══════════════════════════════════════════════════════════════"
 }
 
-def detect_runtime [] -> string {
+def detect_runtime [] {
     let docker_check = (do { which docker } | complete)
     if $docker_check.exit_code == 0 and ($docker_check.stdout | str trim | str length) > 0 {
         return "docker"
