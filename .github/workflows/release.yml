@@ -429,7 +429,7 @@ jobs:
         run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "platforms;android-34" "build-tools;34.0.0" >/dev/null
 
       - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v5
 
       - name: Stage generated sources + native libs (JVM)
         run: ./packaging/kotlin/stage.sh ${{ needs.validate.outputs.version }}
