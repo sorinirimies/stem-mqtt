@@ -13,9 +13,30 @@ plus Node.js/TypeScript via a hand-written [napi-rs](https://napi.rs/) addon
 ![Pub/Sub Demo](examples/vhs/generated/pub-sub-demo.gif)
 
 Starting the `mqtt-broker` CLI, then running the `pub_sub` client example
-against it for a full publish/subscribe round trip. Recorded with
-[VHS](https://github.com/charmbracelet/vhs) — regenerate with
-`just vhs-tape pub-sub-demo`, or render every tape under
+against it for a full publish/subscribe round trip.
+
+![MQTT Versions Demo](examples/vhs/generated/mqtt-versions-demo.gif)
+
+MQTT 3.1.1 and MQTT 5.0 clients connected to the same broker at the same
+time, each publishing and both receiving both messages — the protocol
+version is negotiated per-connection, not per-broker.
+
+![Topics & Wildcards Demo](examples/vhs/generated/topics-demo.gif)
+
+An exact topic, a `+` single-level wildcard, and a `#` multi-level
+wildcard all watching the same topic tree, then four publishes of varying
+depth — see exactly which filter catches which message and why.
+
+![Long-Lived Connection Demo](examples/vhs/generated/long-lived-connection-demo.gif)
+
+A single connection held open for ~20 seconds across multiple keep-alive
+intervals, publishing a heartbeat every 2 seconds — the shape a
+long-running background service or IoT device holds a connection in,
+rather than connect-publish-disconnect.
+
+All four recorded with [VHS](https://github.com/charmbracelet/vhs) —
+regenerate one with `just vhs-tape <name>` (tape names match the `.gif`
+filenames above, minus the extension), or render every tape under
 [`examples/vhs`](examples/vhs) with `just vhs-all`.
 
 ## Workspace layout
