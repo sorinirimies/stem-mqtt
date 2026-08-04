@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.1] - 2026-08-04
+### 🐛 Bug Fixes
+- npm publish was crashing, crates.io publish was silently a no-op
+### 🔧 Chores
+- update Package.swift for v0.2.0
+**Full Changelog**: https://github.com/sorinirimies/stem-mqtt/compare/v0.2.0...v0.2.1
 ## [0.2.0] - 2026-08-04
 ### ♻️  Refactor
 - break down broker god-object and monolithic client into cohesive modules
@@ -9,6 +15,7 @@ All notable changes to this project will be documented in this file.
 - real iOS device/simulator support + Android AAR
 ### 🐛 Bug Fixes
 - silence broker tracing + job-control noise in pub-sub-demo.gif
+- unblock the release quality gate on current Nushell + rustdoc
 ### 📚 Documentation
 - add VHS demo GIF preview to README, track *.gif via git-lfs
 - add stem-mqtt-development pi skill (.pi/skills/)
