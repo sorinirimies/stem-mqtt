@@ -71,6 +71,23 @@ def update_readme_badge [version: string] {
     }
 }
 
+# Update crates/mqtt-client-node/package.json's "version" field so the repo
+# stays in sync with the workspace version between releases. Not strictly
+# required for publishing (release.yml's publish-node job re-sets it via
+# `npm version` right before `npm publish`), but leaving it stale in git is
+# confusing to anyone browsing the repo.
+def update_node_package_version [version: string] {
+    let path = "crates/mqtt-client-node/package.json"
+    if not ($path | path exists) {
+        print $"(ansi yellow)⚠(ansi reset) ($path) not found — skipping."
+        return
+    }
+    let pkg = (open $path --raw)
+    let updated = ($pkg | str replace --regex '"version":\s*"[^"]+"' $'"version": "($version)"')
+    $updated | save --force $path
+    print $"(ansi green)✓(ansi reset) Updated ($path) version → ($version)"
+}
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main [
@@ -99,6 +116,7 @@ def main [
     update_workspace_version $new_version
     update_internal_dep_version $new_version
     update_readme_badge $new_version
+    update_node_package_version $new_version
 
     print ""
     print $"(ansi cyan)── cargo fmt ───────────────────────────────────────────────(ansi reset)"
