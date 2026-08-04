@@ -24,12 +24,17 @@
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 # Check whether a crate@version is already on crates.io.
+#
+# Queries crates.io's registry API directly
+# (https://crates.io/api/v1/crates/<crate>/<version>) rather than shelling
+# out to `cargo info <crate>@<version>`: when run inside this workspace,
+# `cargo info` resolves against the *local path crate* of the same
+# name+version instead of the remote registry, so it always reports
+# "found" for whatever version is currently in Cargo.toml — a false
+# positive that silently skipped every real crates.io publish attempt.
 export def is_already_published [crate: string, version: string]: nothing -> bool {
-    let result = (do { cargo info $"($crate)@($version)" } | complete)
-    if $result.exit_code != 0 {
-        return false
-    }
-    $result.stdout | str contains $crate
+    let resp = (http get --full --allow-errors $"https://crates.io/api/v1/crates/($crate)/($version)")
+    $resp.status == 200
 }
 
 # Copy README.md into the crate's directory so cargo publish ships it.

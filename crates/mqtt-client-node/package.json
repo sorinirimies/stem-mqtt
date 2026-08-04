@@ -7,7 +7,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/sorinirimies/stem-mqtt"
+    "url": "git+https://github.com/sorinirimies/stem-mqtt.git"
   },
   "napi": {
     "binaryName": "mqtt-client",
@@ -21,7 +21,8 @@
   },
   "files": [
     "index.js",
-    "index.d.ts"
+    "index.d.ts",
+    "*.node"
   ],
   "engines": {
     "node": ">= 16"
@@ -30,7 +31,6 @@
     "build": "napi build --platform --release --js index.js --dts index.d.ts",
     "build:debug": "napi build --platform --js index.js --dts index.d.ts",
     "artifacts": "napi artifacts",
-    "prepublishOnly": "napi prepublish -t npm",
     "version": "napi version"
   },
   "devDependencies": {
