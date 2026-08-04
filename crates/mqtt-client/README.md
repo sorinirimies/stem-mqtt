@@ -76,11 +76,14 @@ platform first: `../../scripts/generate-bindings.sh kotlin`.
 ## Examples
 
 ```sh
-cargo run -p mqtt-client --example pub_sub          # connect, subscribe, publish, receive
-cargo run -p mqtt-client --example will_and_retain   # Last-Will-and-Testament + retained messages
+cargo run -p mqtt-client --example pub_sub               # connect, subscribe, publish, receive
+cargo run -p mqtt-client --example will_and_retain        # Last-Will-and-Testament + retained messages
+cargo run -p mqtt-client --example mqtt_versions          # MQTT 3.1.1 + 5.0 on the same broker
+cargo run -p mqtt-client --example topics                 # topic hierarchies, `+`/`#` wildcards
+cargo run -p mqtt-client --example long_lived_connection  # persistent connection, keep-alive over ~20s
 ```
 
-Both expect a broker listening on `127.0.0.1:1883` (run
+All expect a broker listening on `127.0.0.1:1883` (run
 `cargo run -p mqtt-broker --bin mqtt-broker` first, or
 `cargo run -p mqtt-broker --example simple_broker`).
 

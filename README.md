@@ -80,11 +80,14 @@ crate-level docs.
 ```sh
 cargo run -p mqtt-client --example pub_sub
 cargo run -p mqtt-client --example will_and_retain
+cargo run -p mqtt-client --example mqtt_versions          # MQTT 3.1.1 + 5.0 on the same broker
+cargo run -p mqtt-client --example topics                 # topic hierarchies, `+`/`#` wildcards
+cargo run -p mqtt-client --example long_lived_connection  # persistent connection, keep-alive over ~20s
 cargo run -p mqtt-broker --example simple_broker
 cargo run -p mqtt-broker --example auth_broker
 ```
 
-(`pub_sub`/`will_and_retain` need a broker already running — either
+(All `mqtt-client` examples need a broker already running — either
 `simple_broker`/`auth_broker` above or the `mqtt-broker` CLI below.)
 
 ## Running the broker
