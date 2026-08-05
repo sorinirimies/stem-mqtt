@@ -5,6 +5,22 @@ codec shared with [`mqtt-broker`](../mqtt-broker/README.md). Exposed to
 Kotlin, Swift, Python, and other languages via
 [UniFFI](https://mozilla.github.io/uniffi-rs/).
 
+## Installation
+
+Published on crates.io as `stem-mqtt-client` (not `mqtt-client` — already
+taken by an unrelated project). The import path is unaffected:
+
+```sh
+cargo add stem-mqtt-client
+```
+
+```rust,no_run
+use mqtt_client::{ConnectOptions, MqttClient, MqttVersion, QoS};
+```
+
+See the [root README's Installation section](../../README.md#installation)
+for every other language (Node, Kotlin, Swift, Python, Ruby).
+
 ## Layout
 
 - [`src/protocol`](src/protocol) — pure, synchronous, allocation-friendly
@@ -16,9 +32,11 @@ Kotlin, Swift, Python, and other languages via
   - `connect`, `publish`, `subscribe`, `ack` — per-packet-type bodies.
   - `properties` — MQTT 5.0 properties (user properties, content type,
     message expiry, etc.); a no-op on MQTT 3.1.1 connections.
-- [`src/client.rs`](src/client.rs) — `MqttClient`: connect/publish/subscribe/
-  unsubscribe/disconnect over `tokio::net::TcpStream`, packet-id bookkeeping
-  for QoS 1/2 acks, a background read loop, and keep-alive pings.
+- [`src/client/`](src/client) — split by responsibility: `types.rs` (public
+  data types), `inner.rs` (live-connection state + pending-ack/QoS-2
+  bookkeeping), `io.rs` (read loop, keep-alive loop, wire encode/write),
+  `mod.rs` (the public `MqttClient` API: connect/publish/subscribe/
+  unsubscribe/disconnect).
 - [`src/error.rs`](src/error.rs) — `MqttError` / `MqttResult`.
 
 ## Rust usage

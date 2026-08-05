@@ -6,19 +6,52 @@ Kotlin, Swift, Python, and other languages via
 codec from [`mqtt-client`](../mqtt-client/README.md)
 (`mqtt_client::protocol`) instead of duplicating it.
 
+## Installation
+
+Published on crates.io as `stem-mqtt-broker` (not `mqtt-broker` — kept
+consistent with `stem-mqtt-client`'s naming, see that crate's README for
+why). The import path is unaffected:
+
+```sh
+cargo add stem-mqtt-broker
+```
+
+```rust,no_run
+use mqtt_broker::{MqttBroker, MqttBrokerConfig};
+```
+
+Note: only `mqtt-client`'s bindings are published to Kotlin/npm/SPM (not
+`mqtt-broker`'s — see [`packaging/kotlin/README.md`](../../packaging/kotlin/README.md)
+for why Kotlin specifically can't ship them yet). Rust/crates.io, Python/PyPI,
+and Ruby/RubyGems do ship the broker. See the
+[root README's Installation section](../../README.md#installation) for every
+language.
+
 ## Layout
 
-- [`src/broker.rs`](src/broker.rs) — `MqttBroker`: accepts TCP connections,
-  owns the shared topic tree and session table, `start()`/`stop()` lifecycle.
+- [`src/broker.rs`](src/broker.rs) — `BrokerState`: composes the three
+  subsystems below (only the operations that genuinely span more than one
+  of them live here — will delivery on disconnect, retained-message replay
+  on subscribe) — and `MqttBroker`, the thin UniFFI-exported handle:
+  bind sockets, spawn per-connection tasks, `start()`/`stop()` lifecycle.
+- [`src/registry.rs`](src/registry.rs) — `SessionRegistry`: owns the
+  `client_id -> Session` map, per-client send/queue/QoS-2 bookkeeping, and
+  fan-out (matching a published message to subscribers).
+- [`src/retain.rs`](src/retain.rs) — `RetainStore`: the retained-message
+  store, and only that.
+- [`src/events.rs`](src/events.rs) — `EventHub`: connect/disconnect/publish
+  notifications to the foreign-side listener.
 - [`src/connection.rs`](src/connection.rs) — per-connection actor: reads and
   decodes packets off the socket, drives the CONNECT handshake, and dispatches
-  PUBLISH/SUBSCRIBE/UNSUBSCRIBE/ack packets for one client.
+  PUBLISH/SUBSCRIBE/UNSUBSCRIBE/ack packets for one client. Calls straight
+  into whichever subsystem above owns a given operation.
 - [`src/session.rs`](src/session.rs) — per-client session state: subscriptions,
   in-flight QoS 1/2 packet ids, and (for non-clean sessions) the queued
   message backlog.
-- [`src/topic.rs`](src/topic.rs) — topic-filter tree for matching PUBLISH
-  topics against subscriptions (`+`/`#` wildcards) and storing retained
-  messages.
+- [`src/topic.rs`](src/topic.rs) — topic name/filter matching (`+`/`#`
+  wildcards), independent of everything else.
+- [`src/ws.rs`](src/ws.rs) — MQTT-over-WebSocket transport adapter, so the
+  same `connection.rs` logic drives both raw TCP and WebSocket connections.
 - [`src/config.rs`](src/config.rs) — `MqttBrokerConfig`, the pluggable
   `MqttAuthProvider` trait, and the `MqttBrokerEventListener` observer trait,
   all exported across the UniFFI boundary.

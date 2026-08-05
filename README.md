@@ -39,6 +39,127 @@ regenerate one with `just vhs-tape <name>` (tape names match the `.gif`
 filenames above, minus the extension), or render every tape under
 [`examples/vhs`](examples/vhs) with `just vhs-all`.
 
+## Installation
+
+Every published package name is prefixed `stem-mqtt-`/`stem_mqtt` —
+`mqtt-client`/`mqtt-broker` are already taken by unrelated projects on
+crates.io and PyPI, so this project uses the `stem-mqtt-` prefix
+consistently everywhere to avoid that collision. Language-facing import/use
+names (Rust `mqtt_client`/`mqtt_broker`, Python `mqtt_client`/`mqtt_broker`,
+Swift `MqttClient`) are unaffected — only the *published package* identity
+is prefixed.
+
+### Rust (crates.io)
+
+```sh
+cargo add stem-mqtt-client   # client
+cargo add stem-mqtt-broker   # broker (depends on stem-mqtt-client)
+```
+
+```rust,no_run
+use mqtt_client::{ConnectOptions, MqttClient, MqttVersion, QoS}; // import path unaffected by the package rename
+```
+
+### Node.js / TypeScript (npm)
+
+```sh
+npm install stem-mqtt-client
+```
+
+```ts
+import { MqttClient } from "stem-mqtt-client";
+
+const client = new MqttClient({ host: "localhost", port: 1883, clientId: "demo", version: "5.0" });
+await client.connect();
+await client.subscribe("demo/topic", 1);
+await client.publish("demo/topic", Buffer.from("hi"), 1, false);
+```
+
+Server-side Node only (no browser build — see [`packaging/node/README.md`](packaging/node/README.md)).
+
+### Kotlin (JVM or Android, via GitHub Packages)
+
+```kotlin
+// settings.gradle.kts
+dependencyResolutionManagement {
+    repositories {
+        maven {
+            url = uri("https://maven.pkg.github.com/sorinirimies/stem-mqtt")
+            credentials {
+                username = providers.gradleProperty("gpr.user").getOrElse(System.getenv("GITHUB_ACTOR") ?: "")
+                password = providers.gradleProperty("gpr.token").getOrElse(System.getenv("GITHUB_TOKEN") ?: "")
+            }
+        }
+    }
+}
+```
+
+```kotlin
+// build.gradle.kts
+dependencies {
+    // JVM/desktop:
+    implementation("com.github.sorinirimies.stemmqtt:stem-mqtt-client-kotlin:0.2.1")
+    // Android (real AAR with jniLibs for arm64-v8a/armeabi-v7a/x86_64/x86), instead:
+    implementation("com.github.sorinirimies.stemmqtt:stem-mqtt-client-android:0.2.1")
+}
+```
+
+Reading a GitHub Package still requires an authenticated `GITHUB_TOKEN`/PAT
+with `read:packages`, even for a public repo — a GitHub Packages platform
+limitation. `mqtt-client` only (not `mqtt-broker` — an
+[upstream uniffi-rs bug](https://github.com/mozilla/uniffi-rs/issues/2392)
+blocks the broker's Kotlin bindings specifically; see
+[`packaging/kotlin/README.md`](packaging/kotlin/README.md)). Full details:
+[`packaging/kotlin/README.md`](packaging/kotlin/README.md).
+
+### Swift (Swift Package Manager)
+
+```swift
+// Package.swift
+dependencies: [
+    .package(url: "https://github.com/sorinirimies/stem-mqtt", from: "0.2.1"),
+]
+```
+
+```swift
+import MqttClient
+
+let client = MqttClient(options: ConnectOptions(host: "localhost", port: 1883, clientId: "demo", version: .v5))
+try await client.connect()
+```
+
+Pre-built XCFramework (macOS + iOS device + iOS simulator) attached as a
+GitHub Release asset — no local Rust toolchain needed to consume it. Client
+only, same reasoning as Node. Full details:
+[`packaging/swift/README.md`](packaging/swift/README.md).
+
+### Python (PyPI)
+
+```sh
+pip install stem-mqtt-client   # client
+pip install stem-mqtt-broker   # broker
+```
+
+```python
+import mqtt_client  # import name unaffected by the package rename
+
+client = mqtt_client.MqttClient(mqtt_client.ConnectOptions("localhost", 1883, "demo", mqtt_client.MqttVersion.V5))
+```
+
+Not yet published (requires the `PYPI_API_TOKEN` repository secret to be
+configured — the release workflow's `publish-python` job skips gracefully
+until then). Full details: [`packaging/python/README.md`](packaging/python/README.md).
+
+### Ruby (RubyGems)
+
+```sh
+gem install stem_mqtt   # one gem, both client and broker bindings
+```
+
+Not yet published (requires the `RUBYGEMS_API_KEY` repository secret to be
+configured — the release workflow's `publish-ruby` job skips gracefully
+until then). Full details: [`packaging/ruby/README.md`](packaging/ruby/README.md).
+
 ## Workspace layout
 
 | Crate | Description |
