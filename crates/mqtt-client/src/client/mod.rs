@@ -49,6 +49,13 @@ use crate::protocol::{
 use inner::{register_pending, unexpected, wait_for, Inner};
 use io::{build_connect_packet, keepalive_loop, read_loop, read_one_packet, send_packet};
 
+/// How many times [`MqttClient::publish`] resends an unacked QoS 1/2
+/// PUBLISH (with DUP=1) — or, for QoS 2, an unacked PUBREL — before giving
+/// up and returning [`MqttError::Timeout`]. The broker doesn't resend on
+/// our behalf; MQTT's "at least once"/"exactly once" delivery guarantees
+/// are the *publisher's* responsibility to enforce via redelivery.
+const MAX_PUBLISH_RETRIES: u32 = 3;
+
 /// A connected (or not-yet-connected) MQTT client instance.
 ///
 /// One `MqttClient` corresponds to one broker connection / MQTT session.
@@ -179,6 +186,12 @@ impl MqttClient {
     /// Publish `payload` to `topic`. Resolves once the broker has
     /// acknowledged the message (QoS 1: PUBACK; QoS 2: full four-part
     /// handshake). Resolves immediately for QoS 0.
+    ///
+    /// For QoS 1/2, an unacked step is retried (with DUP=1) up to
+    /// `MAX_PUBLISH_RETRIES` (3) times before giving up with
+    /// [`MqttError::Timeout`] — the broker never resends on our behalf, so
+    /// enforcing "at least once"/"exactly once" delivery is the
+    /// publisher's job.
     pub async fn publish(
         &self,
         topic: String,
@@ -204,46 +217,73 @@ impl MqttClient {
             }
             QoS::AtLeastOnce => {
                 let id = inner.alloc_packet_id();
-                let rx = register_pending(&inner, id);
-                let pkt = Packet::Publish(PublishPacket {
-                    dup: false,
-                    qos,
-                    retain,
-                    topic,
-                    packet_id: Some(id),
-                    payload,
-                    properties: Properties::new(),
-                });
-                send_packet(&inner, &pkt).await?;
-                match wait_for(&inner, rx).await? {
-                    Packet::PubAck(_) => Ok(()),
-                    other => Err(unexpected(&other)),
+                let mut dup = false;
+                let mut attempts: u32 = 0;
+                loop {
+                    let rx = register_pending(&inner, id);
+                    let pkt = Packet::Publish(PublishPacket {
+                        dup,
+                        qos,
+                        retain,
+                        topic: topic.clone(),
+                        packet_id: Some(id),
+                        payload: payload.clone(),
+                        properties: Properties::new(),
+                    });
+                    send_packet(&inner, &pkt).await?;
+                    match wait_for(&inner, rx).await {
+                        Ok(Packet::PubAck(_)) => return Ok(()),
+                        Ok(other) => return Err(unexpected(&other)),
+                        Err(MqttError::Timeout) if attempts < MAX_PUBLISH_RETRIES => {
+                            attempts += 1;
+                            dup = true;
+                        }
+                        Err(e) => return Err(e),
+                    }
                 }
             }
             QoS::ExactlyOnce => {
                 let id = inner.alloc_packet_id();
-                let rx = register_pending(&inner, id);
-                let pkt = Packet::Publish(PublishPacket {
-                    dup: false,
-                    qos,
-                    retain,
-                    topic,
-                    packet_id: Some(id),
-                    payload,
-                    properties: Properties::new(),
-                });
-                send_packet(&inner, &pkt).await?;
-                match wait_for(&inner, rx).await? {
-                    Packet::PubRec(_) => {}
-                    other => return Err(unexpected(&other)),
+                let mut dup = false;
+                let mut attempts: u32 = 0;
+                loop {
+                    let rx = register_pending(&inner, id);
+                    let pkt = Packet::Publish(PublishPacket {
+                        dup,
+                        qos,
+                        retain,
+                        topic: topic.clone(),
+                        packet_id: Some(id),
+                        payload: payload.clone(),
+                        properties: Properties::new(),
+                    });
+                    send_packet(&inner, &pkt).await?;
+                    match wait_for(&inner, rx).await {
+                        Ok(Packet::PubRec(_)) => break,
+                        Ok(other) => return Err(unexpected(&other)),
+                        Err(MqttError::Timeout) if attempts < MAX_PUBLISH_RETRIES => {
+                            attempts += 1;
+                            dup = true;
+                        }
+                        Err(e) => return Err(e),
+                    }
                 }
 
-                let rx2 = register_pending(&inner, id);
-                let rel = Packet::PubRel(SimpleAck::success(id));
-                send_packet(&inner, &rel).await?;
-                match wait_for(&inner, rx2).await? {
-                    Packet::PubComp(_) => Ok(()),
-                    other => Err(unexpected(&other)),
+                let mut attempts: u32 = 0;
+                loop {
+                    let rx2 = register_pending(&inner, id);
+                    let rel = Packet::PubRel(SimpleAck::success(id));
+                    send_packet(&inner, &rel).await?;
+                    match wait_for(&inner, rx2).await {
+                        Ok(Packet::PubComp(_)) => return Ok(()),
+                        Ok(other) => return Err(unexpected(&other)),
+                        Err(MqttError::Timeout) if attempts < MAX_PUBLISH_RETRIES => {
+                            // PUBREL has no DUP flag (MQTT-5.0 §3.6.1) — it's
+                            // just resent as-is on timeout.
+                            attempts += 1;
+                        }
+                        Err(e) => return Err(e),
+                    }
                 }
             }
         }

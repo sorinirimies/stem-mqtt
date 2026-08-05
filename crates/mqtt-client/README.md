@@ -111,8 +111,12 @@ All expect a broker listening on `127.0.0.1:1883` (run
 cargo test -p stem-mqtt-client
 ```
 
-Protocol round-trip tests live alongside each codec module (`#[cfg(test)]`);
-there are no separate integration tests for this crate — connection-level
-behavior (including the QoS 1/2 handshakes and Last-Will delivery) is
-covered by `mqtt-broker`'s integration tests, which drive a real client
-against a real broker over a loopback socket.
+Protocol round-trip tests live alongside each codec module (`#[cfg(test)]`).
+[`tests/redelivery.rs`](tests/redelivery.rs) covers client-side QoS 1/2
+redelivery and the keep-alive timing fix, against a minimal fake TCP peer
+(needed since the real broker always acks correctly/promptly, and
+`tokio::time::interval`'s immediate first tick can't be observed against a
+real broker either) — everything else connection-level (the QoS 1/2
+handshakes, Last-Will delivery, session resumption) is covered by
+`mqtt-broker`'s integration tests, which drive a real client against a real
+broker over a loopback socket.

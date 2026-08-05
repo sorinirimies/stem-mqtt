@@ -216,6 +216,11 @@ pub(super) async fn handle_incoming(inner: &Arc<Inner>, packet: Packet) -> bool 
 pub(super) async fn keepalive_loop(inner: Arc<Inner>, keep_alive_secs: u16) {
     let interval = Duration::from_secs((keep_alive_secs as u64).max(1)).mul_f32(0.8);
     let mut ticker = tokio::time::interval(interval);
+    // `tokio::time::interval`'s first `.tick()` resolves immediately, not
+    // after `interval` — without this, every connection would send a
+    // spurious PINGREQ right after CONNECT instead of waiting a full
+    // keep-alive interval like every subsequent ping does.
+    ticker.tick().await;
     loop {
         ticker.tick().await;
         if !inner.connected.load(Ordering::Relaxed) {

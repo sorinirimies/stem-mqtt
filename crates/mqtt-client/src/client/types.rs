@@ -38,8 +38,11 @@ pub struct ConnectOptions {
     pub will: Option<WillOptions>,
     /// Seconds to wait for the TCP connection + CONNACK before failing.
     pub connect_timeout_secs: u32,
-    /// Seconds to wait for a QoS 1/2 handshake step before failing. `0`
-    /// selects the built-in default (15s).
+    /// Seconds to wait for a QoS 1/2 handshake step *per attempt* before
+    /// retrying (with DUP=1) — `MqttClient::publish` retries an unacked
+    /// QoS 1/2 PUBLISH (or QoS 2's PUBREL) up to 3 times before giving up,
+    /// so the worst-case total wait for a single `publish()` call is up to
+    /// 4x this value. `0` selects the built-in default (15s).
     pub operation_timeout_secs: u32,
 }
 
