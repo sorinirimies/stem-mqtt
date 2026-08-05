@@ -533,3 +533,124 @@ async fn last_will_is_published_on_ungraceful_disconnect() {
     observer.disconnect().await.unwrap();
     broker.stop().await.unwrap();
 }
+
+#[tokio::test]
+async fn offline_session_resumes_and_flushes_queued_messages() {
+    let (broker, port) = start_broker(|_| {}).await;
+
+    // First connection: clean_start = false, so the broker must keep this
+    // session (subscriptions + an offline queue) after we disconnect.
+    let mut opts = ConnectOptions::new("127.0.0.1", port, "persist-me", MqttVersion::V5);
+    opts.clean_start = false;
+    let first = MqttClient::new(opts.clone());
+    let result = first.connect().await.unwrap();
+    assert!(
+        !result.session_present,
+        "first-ever CONNECT for a client id must not report a resumed session"
+    );
+    first
+        .subscribe("t/persist".into(), QoS::AtLeastOnce)
+        .await
+        .unwrap();
+    // Graceful disconnect (not drop): clean_start=false means the session
+    // — including this subscription — must still survive.
+    first.disconnect().await.unwrap();
+
+    // Published while "persist-me" is offline — the broker must queue this
+    // for later delivery instead of silently dropping it.
+    let publisher = client(port, "pub");
+    publisher.connect().await.unwrap();
+    publisher
+        .publish(
+            "t/persist".into(),
+            b"queued while offline".to_vec(),
+            QoS::AtLeastOnce,
+            false,
+        )
+        .await
+        .unwrap();
+    publisher.disconnect().await.unwrap();
+
+    // Reconnect with the same client id and clean_start=false: the broker
+    // must report session_present=true and immediately flush the queued
+    // message, without needing to re-subscribe.
+    let (tx2, mut rx2) = mpsc::unbounded_channel();
+    let second = MqttClient::new(opts);
+    second.set_message_listener(Arc::new(ChannelListener { tx: tx2 }));
+    let result = second.connect().await.unwrap();
+    assert!(
+        result.session_present,
+        "reconnecting with clean_start=false must resume the prior session"
+    );
+
+    let msg = recv_message(&mut rx2).await;
+    assert_eq!(msg.topic, "t/persist");
+    assert_eq!(msg.payload, b"queued while offline");
+
+    second.disconnect().await.unwrap();
+    broker.stop().await.unwrap();
+}
+
+#[tokio::test]
+async fn empty_payload_retained_publish_clears_it() {
+    let (broker, port) = start_broker(|_| {}).await;
+
+    let publisher = client(port, "pub");
+    publisher.connect().await.unwrap();
+    publisher
+        .publish(
+            "t/clear-me".into(),
+            b"sticky".to_vec(),
+            QoS::AtLeastOnce,
+            true,
+        )
+        .await
+        .unwrap();
+    // An empty-payload retained PUBLISH must clear the topic's retained
+    // message (MQTT-3.3.1-10), not store an empty one.
+    publisher
+        .publish("t/clear-me".into(), Vec::new(), QoS::AtLeastOnce, true)
+        .await
+        .unwrap();
+    publisher.disconnect().await.unwrap();
+
+    // A subscriber connecting *after* the clear must get nothing retained.
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let subscriber = client(port, "sub");
+    subscriber.set_message_listener(Arc::new(ChannelListener { tx }));
+    subscriber.connect().await.unwrap();
+    subscriber
+        .subscribe("t/clear-me".into(), QoS::AtLeastOnce)
+        .await
+        .unwrap();
+    assert_no_message(&mut rx).await;
+
+    subscriber.disconnect().await.unwrap();
+    broker.stop().await.unwrap();
+}
+
+#[tokio::test]
+async fn max_clients_rejects_connections_past_the_limit() {
+    let (broker, port) = start_broker(|c| c.max_clients = 1).await;
+
+    let first = client(port, "first");
+    let result = first.connect().await.unwrap();
+    assert_eq!(result.reason_code, 0x00);
+
+    // A second, concurrent connection must be refused with "quota exceeded"
+    // (0x97) while the first is still connected.
+    let second = client(port, "second");
+    let err = second.connect().await.unwrap_err();
+    assert!(matches!(err, mqtt_client::MqttError::ConnectionRefused(_)));
+
+    first.disconnect().await.unwrap();
+
+    // Once the first client disconnects, a new connection must be allowed
+    // again — the limit is on *concurrent* clients, not a lifetime count.
+    let third = client(port, "third");
+    let result = third.connect().await.unwrap();
+    assert_eq!(result.reason_code, 0x00);
+
+    third.disconnect().await.unwrap();
+    broker.stop().await.unwrap();
+}
