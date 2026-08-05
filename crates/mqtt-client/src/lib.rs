@@ -12,7 +12,8 @@ pub mod error;
 pub mod protocol;
 
 pub use client::{
-    ConnectOptions, ConnectResult, MqttClient, MqttMessage, MqttMessageListener, WillOptions,
+    ConnectOptions, ConnectResult, MqttClient, MqttMessage, MqttMessageListener, TlsOptions,
+    WillOptions,
 };
 pub use error::MqttError;
 pub use protocol::{MqttVersion, QoS};

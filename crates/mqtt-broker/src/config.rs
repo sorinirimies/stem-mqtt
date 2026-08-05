@@ -38,6 +38,31 @@ pub struct MqttBrokerConfig {
     /// packet that hasn't been acked yet. `0` selects the built-in default
     /// (5 seconds).
     pub redelivery_interval_secs: u32,
+    /// If set, also accept TLS (`mqtts`) connections on
+    /// [`BrokerTlsConfig::port`], alongside the plain-TCP `port` (and
+    /// optional WebSocket `ws_port`) above. `None` (the default) means no
+    /// TLS listener at all, unchanged from before TLS support existed.
+    pub tls: Option<BrokerTlsConfig>,
+}
+
+/// TLS configuration for [`MqttBrokerConfig::tls`]. All certificate/key
+/// material is PEM-encoded bytes (not file paths), matching
+/// `mqtt_client::TlsOptions` so this works identically across every
+/// language binding without assuming a filesystem layout.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct BrokerTlsConfig {
+    /// Port to accept TLS connections on.
+    pub port: u16,
+    /// PEM-encoded server certificate chain (leaf certificate first, then
+    /// any intermediates).
+    pub cert_pem: Vec<u8>,
+    /// PEM-encoded server private key.
+    pub key_pem: Vec<u8>,
+    /// PEM-encoded CA certificate(s) to verify *client* certificates
+    /// against, for mutual TLS (mTLS). If unset (the default), client
+    /// certificates aren't required or checked — just a normal one-way
+    /// TLS listener.
+    pub client_ca_pem: Option<Vec<u8>>,
 }
 
 impl MqttBrokerConfig {
@@ -52,6 +77,7 @@ impl MqttBrokerConfig {
             max_retained_messages: 10_000,
             max_queued_per_client: 1_000,
             redelivery_interval_secs: 0,
+            tls: None,
         }
     }
 }

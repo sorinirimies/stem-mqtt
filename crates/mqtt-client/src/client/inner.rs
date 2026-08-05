@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use tokio::net::tcp::OwnedWriteHalf;
+use tokio::io::WriteHalf;
 use tokio::sync::{oneshot, Mutex as AsyncMutex};
 use tokio::task::JoinHandle;
 
@@ -19,6 +19,7 @@ use crate::error::{MqttError, MqttResult};
 use crate::protocol::packet::Packet;
 use crate::protocol::MqttVersion;
 
+use super::tls::Transport;
 use super::types::{MqttMessage, MqttMessageListener};
 
 /// QoS 2 PUBLISHes received from the broker, held until the matching
@@ -33,7 +34,7 @@ pub(super) struct PendingQos2Incoming {
 /// background tasks (read loop, keep-alive) that keep it all moving.
 pub(super) struct Inner {
     pub version: MqttVersion,
-    pub writer: AsyncMutex<Option<OwnedWriteHalf>>,
+    pub writer: AsyncMutex<Option<WriteHalf<Box<dyn Transport>>>>,
     next_packet_id: AtomicU16,
     pub pending: std::sync::Mutex<HashMap<u16, oneshot::Sender<Packet>>>,
     pub incoming_qos2: std::sync::Mutex<PendingQos2Incoming>,
@@ -47,7 +48,7 @@ pub(super) struct Inner {
 impl Inner {
     pub fn new(
         version: MqttVersion,
-        writer: OwnedWriteHalf,
+        writer: WriteHalf<Box<dyn Transport>>,
         listener: Option<Arc<dyn MqttMessageListener>>,
         operation_timeout: Duration,
     ) -> Self {

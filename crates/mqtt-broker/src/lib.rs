@@ -13,10 +13,11 @@ mod events;
 mod registry;
 mod retain;
 mod session;
+mod tls;
 mod topic;
 mod ws;
 
 pub use broker::MqttBroker;
-pub use config::{MqttAuthProvider, MqttBrokerConfig, MqttBrokerEventListener};
+pub use config::{BrokerTlsConfig, MqttAuthProvider, MqttBrokerConfig, MqttBrokerEventListener};
 
 uniffi::setup_scaffolding!();

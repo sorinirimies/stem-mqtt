@@ -20,6 +20,50 @@ pub struct WillOptions {
     pub retain: bool,
 }
 
+/// TLS configuration for [`ConnectOptions::tls`]. All certificate/key
+/// material is PEM-encoded bytes (not file paths) so this works
+/// identically across every language binding without assuming a
+/// filesystem layout.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct TlsOptions {
+    /// Additional PEM-encoded root CA certificate(s) to trust, on top of
+    /// the bundled Mozilla root store (`webpki-roots`). Needed to connect
+    /// to a broker with a self-signed or private-CA certificate.
+    pub ca_cert_pem: Option<Vec<u8>>,
+    /// PEM-encoded client certificate, for mutual TLS (mTLS). Requires
+    /// [`Self::client_key_pem`] too.
+    pub client_cert_pem: Option<Vec<u8>>,
+    /// PEM-encoded client private key, for mutual TLS. Requires
+    /// [`Self::client_cert_pem`] too.
+    pub client_key_pem: Option<Vec<u8>>,
+    /// Skip server certificate verification entirely. **Dangerous** — only
+    /// for local development against a broker with a self-signed
+    /// certificate you can't otherwise easily trust (e.g. one generated
+    /// on the fly for a demo). Never use this in production: it makes the
+    /// connection trivially interceptable.
+    pub insecure_skip_certificate_verification: bool,
+}
+
+impl TlsOptions {
+    /// TLS with the bundled Mozilla root store and no client certificate —
+    /// the common case of connecting to a broker with a certificate from a
+    /// well-known public CA.
+    pub fn new() -> Self {
+        TlsOptions {
+            ca_cert_pem: None,
+            client_cert_pem: None,
+            client_key_pem: None,
+            insecure_skip_certificate_verification: false,
+        }
+    }
+}
+
+impl Default for TlsOptions {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Everything needed to establish an MQTT connection.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct ConnectOptions {
@@ -60,6 +104,10 @@ pub struct ConnectOptions {
     /// built-in default (30s). Ignored unless [`Self::auto_reconnect`] is
     /// set.
     pub reconnect_max_backoff_secs: u32,
+    /// If set, connect over TLS (`mqtts`) instead of plain TCP. `None`
+    /// (the default) is plain TCP, unchanged from before TLS support
+    /// existed.
+    pub tls: Option<TlsOptions>,
 }
 
 impl ConnectOptions {
@@ -84,6 +132,7 @@ impl ConnectOptions {
             auto_reconnect: false,
             reconnect_backoff_secs: 0,
             reconnect_max_backoff_secs: 0,
+            tls: None,
         }
     }
 

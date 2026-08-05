@@ -178,10 +178,19 @@ the broker.
 - **MQTT 3.1.1 and MQTT 5.0** — one codec, version negotiated per connection
   (`MqttVersion::V311` / `MqttVersion::V5`).
 - **QoS 0, 1, 2** — at-most-once, at-least-once, and the full exactly-once
-  four-part handshake (PUBLISH → PUBREC → PUBREL → PUBCOMP).
+  four-part handshake (PUBLISH → PUBREC → PUBREL → PUBCOMP), with real
+  redelivery (DUP=1 resend on timeout) on both the client and broker side
+  — not just a single fire-and-hope attempt.
 - **All standard packet types** — CONNECT/CONNACK, PUBLISH and its ack
   chain, SUBSCRIBE/SUBACK, UNSUBSCRIBE/UNSUBACK, PING, DISCONNECT, and
   MQTT 5 AUTH.
+- **TLS** (client + broker, `mqtt-client::TlsOptions` /
+  `mqtt-broker::BrokerTlsConfig`) — pure-Rust `rustls`, custom CA support,
+  and mutual TLS (mTLS) client-certificate verification. No OpenSSL/system-
+  TLS dependency.
+- **Opt-in client auto-reconnect** (`ConnectOptions::auto_reconnect`) with
+  exponential backoff, replaying every topic the client was subscribed to
+  once reconnected.
 - **Last Will and Testament**, retained messages, keep-alive pings.
 - **MQTT-over-WebSocket** (`--ws-port`) alongside raw TCP, so browser
   clients (which can't open raw TCP sockets) can connect directly —

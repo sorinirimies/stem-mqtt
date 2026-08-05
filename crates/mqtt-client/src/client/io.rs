@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::{Bytes, BytesMut};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncReadExt, AsyncWriteExt, ReadHalf};
 
 use crate::error::MqttResult;
 use crate::protocol::ack::SimpleAck;
@@ -21,6 +21,7 @@ use crate::protocol::MqttVersion;
 use crate::MqttError;
 
 use super::inner::{deliver, finish_disconnected, resolve_pending, Inner};
+use super::tls::Transport;
 use super::types::{ConnectOptions, MqttMessage};
 use crate::protocol::QoS;
 
@@ -64,7 +65,7 @@ pub(super) async fn send_packet(inner: &Arc<Inner>, packet: &Packet) -> MqttResu
 /// Read exactly one packet during the CONNECT/CONNACK handshake, before
 /// the background read loop exists.
 pub(super) async fn read_one_packet(
-    reader: &mut tokio::net::tcp::OwnedReadHalf,
+    reader: &mut ReadHalf<Box<dyn Transport>>,
     buf: &mut BytesMut,
     version: MqttVersion,
     timeout_secs: u32,
@@ -92,7 +93,7 @@ pub(super) async fn read_one_packet(
 /// decoded.
 pub(super) async fn read_loop(
     inner: Arc<Inner>,
-    mut reader: tokio::net::tcp::OwnedReadHalf,
+    mut reader: ReadHalf<Box<dyn Transport>>,
     mut buf: BytesMut,
 ) {
     loop {

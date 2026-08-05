@@ -21,10 +21,12 @@
 
 mod inner;
 mod io;
+mod tls;
 mod types;
 
 pub use types::{
-    ConnectOptions, ConnectResult, MqttMessage, MqttMessageListener, SubscribeResult, WillOptions,
+    ConnectOptions, ConnectResult, MqttMessage, MqttMessageListener, SubscribeResult, TlsOptions,
+    WillOptions,
 };
 
 use std::collections::HashMap;
@@ -34,7 +36,6 @@ use std::time::Duration;
 
 use bytes::{Bytes, BytesMut};
 use tokio::io::AsyncWriteExt;
-use tokio::net::TcpStream;
 use tokio::sync::Mutex as AsyncMutex;
 
 use crate::error::{MqttError, MqttResult};
@@ -434,17 +435,15 @@ async fn connect_once(shared: &Arc<ClientShared>) -> MqttResult<ConnectResult> {
     }
 
     let options = &shared.options;
-    let addr = format!("{}:{}", options.host, options.port);
-    let connect_fut = TcpStream::connect(&addr);
-    let stream = tokio::time::timeout(
+    let connect_fut = tls::connect_transport(options);
+    let stream: Box<dyn tls::Transport> = tokio::time::timeout(
         Duration::from_secs(options.connect_timeout_secs.max(1) as u64),
         connect_fut,
     )
     .await
     .map_err(|_| MqttError::Timeout)??;
-    stream.set_nodelay(true).ok();
 
-    let (mut reader, mut writer) = stream.into_split();
+    let (mut reader, mut writer) = tokio::io::split(stream);
 
     let encoded = build_connect_packet_wrapper(options)
         .encode(options.version)

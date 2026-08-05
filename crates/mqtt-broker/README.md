@@ -52,6 +52,9 @@ language.
   wildcards), independent of everything else.
 - [`src/ws.rs`](src/ws.rs) — MQTT-over-WebSocket transport adapter, so the
   same `connection.rs` logic drives both raw TCP and WebSocket connections.
+- [`src/tls.rs`](src/tls.rs) — builds a `tokio_rustls::TlsAcceptor` from
+  `BrokerTlsConfig` (server cert/key, optional mTLS client-CA) — accepted
+  TLS streams feed into the same generic `connection.rs` handler too.
 - [`src/config.rs`](src/config.rs) — `MqttBrokerConfig`, the pluggable
   `MqttAuthProvider` trait, and the `MqttBrokerEventListener` observer trait,
   all exported across the UniFFI boundary.

@@ -35,8 +35,11 @@ for every other language (Node, Kotlin, Swift, Python, Ruby).
 - [`src/client/`](src/client) — split by responsibility: `types.rs` (public
   data types), `inner.rs` (live-connection state + pending-ack/QoS-2
   bookkeeping), `io.rs` (read loop, keep-alive loop, wire encode/write),
-  `mod.rs` (the public `MqttClient` API: connect/publish/subscribe/
-  unsubscribe/disconnect).
+  `tls.rs` (TLS transport via `rustls`/`tokio-rustls`, type-erased behind a
+  `Transport` trait so the rest of the client doesn't care whether it's
+  plain TCP or TLS), `mod.rs` (the public `MqttClient` API:
+  connect/publish/subscribe/unsubscribe/disconnect — including opt-in
+  auto-reconnect and QoS 1/2 redelivery).
 - [`src/error.rs`](src/error.rs) — `MqttError` / `MqttResult`.
 
 ## Rust usage

@@ -106,9 +106,11 @@ pub struct MqttBroker {
     state: Arc<BrokerState>,
     accept_task: Mutex<Option<JoinHandle<()>>>,
     ws_accept_task: Mutex<Option<JoinHandle<()>>>,
+    tls_accept_task: Mutex<Option<JoinHandle<()>>>,
     redelivery_task: Mutex<Option<JoinHandle<()>>>,
     bound_port: Mutex<Option<u16>>,
     bound_ws_port: Mutex<Option<u16>>,
+    bound_tls_port: Mutex<Option<u16>>,
 }
 
 #[uniffi::export(async_runtime = "tokio")]
@@ -119,9 +121,11 @@ impl MqttBroker {
             state: Arc::new(BrokerState::new(config)),
             accept_task: Mutex::new(None),
             ws_accept_task: Mutex::new(None),
+            tls_accept_task: Mutex::new(None),
             redelivery_task: Mutex::new(None),
             bound_port: Mutex::new(None),
             bound_ws_port: Mutex::new(None),
+            bound_tls_port: Mutex::new(None),
         }
     }
 
@@ -202,6 +206,42 @@ impl MqttBroker {
             *self.ws_accept_task.lock().unwrap() = Some(ws_handle);
         }
 
+        if let Some(tls_config) = self.state.config.tls.clone() {
+            let acceptor = crate::tls::build_acceptor(&tls_config)
+                .map_err(mqtt_client::MqttError::Protocol)?;
+            let tls_addr = format!("{}:{}", self.state.config.bind_address, tls_config.port);
+            let tls_listener = TcpListener::bind(&tls_addr).await?;
+            let local_tls_port = tls_listener
+                .local_addr()
+                .map(|a| a.port())
+                .unwrap_or(tls_config.port);
+            *self.bound_tls_port.lock().unwrap() = Some(local_tls_port);
+
+            let tls_state = self.state.clone();
+            let tls_handle = tokio::spawn(async move {
+                loop {
+                    match tls_listener.accept().await {
+                        Ok((stream, peer)) => {
+                            stream.set_nodelay(true).ok();
+                            let state = tls_state.clone();
+                            let acceptor = acceptor.clone();
+                            tokio::spawn(accept_tls_connection(
+                                state,
+                                acceptor,
+                                stream,
+                                peer.to_string(),
+                            ));
+                        }
+                        Err(e) => {
+                            tracing::warn!(error = %e, "tls accept() failed");
+                            break;
+                        }
+                    }
+                }
+            });
+            *self.tls_accept_task.lock().unwrap() = Some(tls_handle);
+        }
+
         let redelivery_state = self.state.clone();
         let redelivery_interval = if self.state.config.redelivery_interval_secs == 0 {
             crate::registry::DEFAULT_REDELIVERY_INTERVAL
@@ -233,11 +273,15 @@ impl MqttBroker {
         if let Some(handle) = self.ws_accept_task.lock().unwrap().take() {
             handle.abort();
         }
+        if let Some(handle) = self.tls_accept_task.lock().unwrap().take() {
+            handle.abort();
+        }
         if let Some(handle) = self.redelivery_task.lock().unwrap().take() {
             handle.abort();
         }
         *self.bound_port.lock().unwrap() = None;
         *self.bound_ws_port.lock().unwrap() = None;
+        *self.bound_tls_port.lock().unwrap() = None;
         Ok(())
     }
 
@@ -259,6 +303,27 @@ impl MqttBroker {
     /// The WebSocket port actually bound, if `config.ws_port != 0`.
     pub fn bound_ws_port(&self) -> Option<u16> {
         *self.bound_ws_port.lock().unwrap()
+    }
+
+    /// The TLS port actually bound, if `config.tls` is set.
+    pub fn bound_tls_port(&self) -> Option<u16> {
+        *self.bound_tls_port.lock().unwrap()
+    }
+}
+
+/// Complete the TLS handshake, then hand off to the same
+/// [`handle_connection`] every raw-TCP connection goes through — it's
+/// generic over the byte transport, so an already-decrypted
+/// `tokio_rustls::server::TlsStream` works exactly like a raw `TcpStream`.
+async fn accept_tls_connection(
+    state: Arc<BrokerState>,
+    acceptor: tokio_rustls::TlsAcceptor,
+    stream: tokio::net::TcpStream,
+    peer: String,
+) {
+    match acceptor.accept(stream).await {
+        Ok(tls_stream) => handle_connection(state, tls_stream, peer).await,
+        Err(e) => tracing::debug!(%peer, error = %e, "TLS handshake failed"),
     }
 }
 
