@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.2] - 2026-08-05
+### 🐛 Bug Fixes
+- rename published packages to stem-mqtt-client / stem-mqtt-broker
+### 📚 Documentation
+- add per-language installation instructions, fix stale layout docs
+### 🔧 Chores
+- update Package.swift for v0.2.1
+**Full Changelog**: https://github.com/sorinirimies/stem-mqtt/compare/v0.2.1...v0.2.2
 ## [0.2.1] - 2026-08-04
 ### 🐛 Bug Fixes
 - npm publish was crashing, crates.io publish was silently a no-op
