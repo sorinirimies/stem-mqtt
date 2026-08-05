@@ -106,6 +106,7 @@ pub struct MqttBroker {
     state: Arc<BrokerState>,
     accept_task: Mutex<Option<JoinHandle<()>>>,
     ws_accept_task: Mutex<Option<JoinHandle<()>>>,
+    redelivery_task: Mutex<Option<JoinHandle<()>>>,
     bound_port: Mutex<Option<u16>>,
     bound_ws_port: Mutex<Option<u16>>,
 }
@@ -118,6 +119,7 @@ impl MqttBroker {
             state: Arc::new(BrokerState::new(config)),
             accept_task: Mutex::new(None),
             ws_accept_task: Mutex::new(None),
+            redelivery_task: Mutex::new(None),
             bound_port: Mutex::new(None),
             bound_ws_port: Mutex::new(None),
         }
@@ -200,6 +202,24 @@ impl MqttBroker {
             *self.ws_accept_task.lock().unwrap() = Some(ws_handle);
         }
 
+        let redelivery_state = self.state.clone();
+        let redelivery_interval = if self.state.config.redelivery_interval_secs == 0 {
+            crate::registry::DEFAULT_REDELIVERY_INTERVAL
+        } else {
+            std::time::Duration::from_secs(self.state.config.redelivery_interval_secs as u64)
+        };
+        let redelivery_handle = tokio::spawn(async move {
+            let mut interval = tokio::time::interval(redelivery_interval);
+            // The first tick fires immediately; skip it so we don't sweep
+            // an empty registry the instant the broker starts.
+            interval.tick().await;
+            loop {
+                interval.tick().await;
+                redelivery_state.sessions.retry_pending(redelivery_interval);
+            }
+        });
+        *self.redelivery_task.lock().unwrap() = Some(redelivery_handle);
+
         Ok(())
     }
 
@@ -211,6 +231,9 @@ impl MqttBroker {
             handle.abort();
         }
         if let Some(handle) = self.ws_accept_task.lock().unwrap().take() {
+            handle.abort();
+        }
+        if let Some(handle) = self.redelivery_task.lock().unwrap().take() {
             handle.abort();
         }
         *self.bound_port.lock().unwrap() = None;

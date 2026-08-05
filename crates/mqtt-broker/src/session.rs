@@ -1,8 +1,10 @@
 //! Per-client session state: subscriptions, the outbound delivery channel,
-//! offline message queueing, and QoS 2 dedup bookkeeping.
+//! offline message queueing, QoS 2 dedup bookkeeping, and outgoing-message
+//! redelivery tracking.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicU16, Ordering};
+use std::time::Instant;
 
 use bytes::Bytes;
 use mqtt_client::protocol::connect::Will;
@@ -28,6 +30,31 @@ pub struct QueuedMessage {
     pub retain: bool,
 }
 
+/// What we're waiting to hear back for one packet id we sent to this
+/// session, and what to resend (with DUP=1) if that ack takes too long.
+/// See [`crate::registry::SessionRegistry::retry_pending`].
+#[derive(Debug, Clone)]
+pub enum PendingRedelivery {
+    /// Awaiting PUBACK (QoS 1) or PUBREC (QoS 2, first handshake step) for
+    /// this PUBLISH. Retried by resending the same PUBLISH with DUP=1.
+    Publish(QueuedMessage),
+    /// Awaiting PUBCOMP (QoS 2, second handshake step) for this PUBREL —
+    /// the PUBLISH itself already got its PUBREC, so only the packet id
+    /// needs resending, not the payload. PUBREL has no DUP flag; it's just
+    /// resent as-is.
+    PubRel,
+}
+
+/// One in-flight outgoing acknowledgement: a packet id we sent to this
+/// session and are still waiting on the peer to ack, plus how many times
+/// we've already retried it.
+#[derive(Debug, Clone)]
+pub struct RedeliveryEntry {
+    pub kind: PendingRedelivery,
+    pub attempts: u32,
+    pub last_sent: Instant,
+}
+
 /// All state the broker keeps for one client identifier, whether currently
 /// connected or persisted across a `clean_start = false` disconnect.
 pub struct Session {
@@ -45,12 +72,12 @@ pub struct Session {
     /// Packet ids this session has sent us a PUBLISH for at QoS 2, not yet
     /// resolved with PUBREL (dedup + hold-until-PUBREL semantics).
     pub incoming_qos2: HashMap<u16, PublishPacket>,
-    /// Packet ids of QoS 2 PUBLISHes *we* sent to this session, waiting for
-    /// its PUBREC before we can send PUBREL (MQTT-5.0 §4.3.3). Without this,
-    /// a broker-initiated QoS 2 delivery would stop dead after PUBREC —
-    /// the subscriber would never see PUBREL/PUBCOMP and the message would
-    /// never actually complete delivery.
-    pub outgoing_qos2: HashSet<u16>,
+    /// QoS 1/2 PUBLISHes and QoS 2 PUBRELs *we* sent to this session,
+    /// awaiting their ack, eligible for a timed dup-flagged resend — see
+    /// [`crate::registry::SessionRegistry::retry_pending`]. Without this, a
+    /// broker-initiated QoS 1/2 delivery that's lost in flight (or whose
+    /// ack is lost) would just silently never complete.
+    pub pending_redelivery: HashMap<u16, RedeliveryEntry>,
     /// Fires to tell a *previous* connection for this same client id to shut
     /// down (MQTT-3.1.4-3: a new CONNECT with the same ClientID takes over).
     pub shutdown: Option<tokio::sync::oneshot::Sender<()>>,
@@ -74,7 +101,7 @@ impl Session {
             sender: None,
             queued: VecDeque::new(),
             incoming_qos2: HashMap::new(),
-            outgoing_qos2: HashSet::new(),
+            pending_redelivery: HashMap::new(),
             shutdown: None,
             next_packet_id: AtomicU16::new(1),
             max_queued,

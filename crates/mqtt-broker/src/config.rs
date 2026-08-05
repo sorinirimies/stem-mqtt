@@ -34,6 +34,10 @@ pub struct MqttBrokerConfig {
     /// Maximum number of messages queued per offline session (for clients
     /// that connected with `clean_start = false`). `0` means unlimited.
     pub max_queued_per_client: u32,
+    /// How often the broker resends (with DUP=1) an outgoing QoS 1/2
+    /// packet that hasn't been acked yet. `0` selects the built-in default
+    /// (5 seconds).
+    pub redelivery_interval_secs: u32,
 }
 
 impl MqttBrokerConfig {
@@ -47,6 +51,7 @@ impl MqttBrokerConfig {
             max_qos: QoS::ExactlyOnce,
             max_retained_messages: 10_000,
             max_queued_per_client: 1_000,
+            redelivery_interval_secs: 0,
         }
     }
 }

@@ -78,7 +78,6 @@ use mqtt_client::protocol::publish::PublishPacket;
 use mqtt_client::protocol::subscribe::{SubscribeFilter, SubscribePacket};
 use tokio_tungstenite::tungstenite::handshake::client::Request;
 use tokio_tungstenite::tungstenite::Message;
-
 async fn start_broker_with_ws() -> (MqttBroker, u16, u16) {
     let mut config = MqttBrokerConfig::new("127.0.0.1", 0);
     config.ws_port = Some(0);
@@ -652,5 +651,225 @@ async fn max_clients_rejects_connections_past_the_limit() {
     assert_eq!(result.reason_code, 0x00);
 
     third.disconnect().await.unwrap();
+    broker.stop().await.unwrap();
+}
+
+// ── Broker-initiated QoS 1/2 redelivery ───────────────────────────────────
+// `MqttClient` always acks a delivered PUBLISH immediately, so proving the
+// broker actually *retries* an unacked one needs a client that can
+// deliberately withhold its ack — hence a minimal raw-TCP MQTT client here
+// instead of `mqtt_client::MqttClient`.
+
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+/// A bare-bones MQTT client speaking raw TCP directly via the wire-protocol
+/// codec, so tests can withhold acks deliberately (`mqtt_client::MqttClient`
+/// always acks a delivered PUBLISH immediately, which would make it
+/// impossible to observe the broker's redelivery behavior).
+struct RawClient {
+    stream: tokio::net::TcpStream,
+    buf: bytes::BytesMut,
+}
+
+impl RawClient {
+    async fn connect(port: u16, client_id: &str) -> Self {
+        let stream = tokio::net::TcpStream::connect(("127.0.0.1", port))
+            .await
+            .expect("TCP connect should succeed");
+        let mut me = RawClient {
+            stream,
+            buf: bytes::BytesMut::with_capacity(1024),
+        };
+        me.send(Packet::Connect(ConnectPacket {
+            version: MqttVersion::V5,
+            client_id: client_id.to_string(),
+            clean_start: true,
+            keep_alive: 30,
+            username: None,
+            password: None,
+            will: None,
+            properties: Properties::new(),
+        }))
+        .await;
+        match me.read_packet().await {
+            Packet::ConnAck(ack) => assert!(ack.reason_code.is_success()),
+            other => panic!("expected CONNACK, got {other:?}"),
+        }
+        me
+    }
+
+    async fn send(&mut self, packet: Packet) {
+        let bytes = packet
+            .encode(MqttVersion::V5)
+            .expect("packet should encode");
+        self.stream
+            .write_all(&bytes)
+            .await
+            .expect("write should succeed");
+    }
+
+    async fn read_packet(&mut self) -> Packet {
+        timeout(Duration::from_secs(5), async {
+            loop {
+                if let Some(packet) =
+                    Packet::decode(&mut self.buf, MqttVersion::V5).expect("packet should decode")
+                {
+                    return packet;
+                }
+                let n = self
+                    .stream
+                    .read_buf(&mut self.buf)
+                    .await
+                    .expect("read should succeed");
+                assert!(n > 0, "connection closed unexpectedly");
+            }
+        })
+        .await
+        .expect("timed out waiting for a packet")
+    }
+}
+
+#[tokio::test]
+async fn broker_retries_unacked_qos1_publish_with_dup_flag() {
+    // A short redelivery interval keeps this test fast without touching
+    // the 5s production default.
+    let (broker, port) = start_broker(|c| c.redelivery_interval_secs = 1).await;
+
+    let mut subscriber = RawClient::connect(port, "withholds-ack").await;
+    subscriber
+        .send(Packet::Subscribe(SubscribePacket {
+            packet_id: 1,
+            filters: vec![SubscribeFilter::new("t/redelivery", QoS::AtLeastOnce)],
+            properties: Properties::new(),
+        }))
+        .await;
+    match subscriber.read_packet().await {
+        Packet::SubAck(_) => {}
+        other => panic!("expected SUBACK, got {other:?}"),
+    }
+
+    let publisher = client(port, "pub");
+    publisher.connect().await.unwrap();
+    publisher
+        .publish(
+            "t/redelivery".into(),
+            b"resend me".to_vec(),
+            QoS::AtLeastOnce,
+            false,
+        )
+        .await
+        .unwrap();
+
+    // First delivery: DUP must be unset.
+    let first = match subscriber.read_packet().await {
+        Packet::Publish(p) => p,
+        other => panic!("expected PUBLISH, got {other:?}"),
+    };
+    assert_eq!(first.topic, "t/redelivery");
+    assert!(!first.dup, "the initial delivery must not have DUP set");
+
+    // Deliberately never PUBACK it. Past the 1s redelivery interval, the
+    // broker must resend the same PUBLISH with DUP=1.
+    let second = match subscriber.read_packet().await {
+        Packet::Publish(p) => p,
+        other => panic!("expected a redelivered PUBLISH, got {other:?}"),
+    };
+    assert_eq!(second.topic, "t/redelivery");
+    assert_eq!(second.packet_id, first.packet_id);
+    assert_eq!(second.payload, first.payload);
+    assert!(second.dup, "a redelivered PUBLISH must have DUP set");
+
+    // Now ack it — a third resend must never arrive.
+    subscriber
+        .send(Packet::PubAck(
+            mqtt_client::protocol::ack::SimpleAck::success(second.packet_id.unwrap()),
+        ))
+        .await;
+    let result = timeout(Duration::from_secs(2), subscriber.read_packet()).await;
+    assert!(
+        result.is_err(),
+        "no further redelivery should happen once PUBACK is sent"
+    );
+
+    publisher.disconnect().await.unwrap();
+    broker.stop().await.unwrap();
+}
+
+#[tokio::test]
+async fn broker_retries_unacked_pubrel_for_qos2() {
+    let (broker, port) = start_broker(|c| c.redelivery_interval_secs = 1).await;
+
+    let mut subscriber = RawClient::connect(port, "withholds-pubcomp").await;
+    subscriber
+        .send(Packet::Subscribe(SubscribePacket {
+            packet_id: 1,
+            filters: vec![SubscribeFilter::new("t/qos2-redelivery", QoS::ExactlyOnce)],
+            properties: Properties::new(),
+        }))
+        .await;
+    match subscriber.read_packet().await {
+        Packet::SubAck(_) => {}
+        other => panic!("expected SUBACK, got {other:?}"),
+    }
+
+    let publisher = client(port, "pub");
+    publisher.connect().await.unwrap();
+    let publish_task = tokio::spawn(async move {
+        publisher
+            .publish(
+                "t/qos2-redelivery".into(),
+                b"exactly once".to_vec(),
+                QoS::ExactlyOnce,
+                false,
+            )
+            .await
+            .unwrap();
+        publisher
+    });
+
+    // Receive the PUBLISH and promptly PUBREC it — this moves the broker's
+    // redelivery entry from "awaiting PUBREC" to "awaiting PUBCOMP".
+    let publish = match subscriber.read_packet().await {
+        Packet::Publish(p) => p,
+        other => panic!("expected PUBLISH, got {other:?}"),
+    };
+    let packet_id = publish.packet_id.unwrap();
+    subscriber
+        .send(Packet::PubRec(
+            mqtt_client::protocol::ack::SimpleAck::success(packet_id),
+        ))
+        .await;
+
+    // First PUBREL: must arrive promptly, before the redelivery interval.
+    let first_pubrel = match subscriber.read_packet().await {
+        Packet::PubRel(ack) => ack,
+        other => panic!("expected PUBREL, got {other:?}"),
+    };
+    assert_eq!(first_pubrel.packet_id, packet_id);
+
+    // Deliberately never PUBCOMP it. Past the 1s redelivery interval, the
+    // broker must resend the same PUBREL (PUBREL has no DUP flag; it's
+    // just the same packet again).
+    let second_pubrel = match subscriber.read_packet().await {
+        Packet::PubRel(ack) => ack,
+        other => panic!("expected a redelivered PUBREL, got {other:?}"),
+    };
+    assert_eq!(second_pubrel.packet_id, packet_id);
+
+    // Now complete the handshake — no further PUBREL should arrive, and
+    // the client's `publish()` call must finally resolve.
+    subscriber
+        .send(Packet::PubComp(
+            mqtt_client::protocol::ack::SimpleAck::success(packet_id),
+        ))
+        .await;
+    let result = timeout(Duration::from_secs(2), subscriber.read_packet()).await;
+    assert!(
+        result.is_err(),
+        "no further PUBREL redelivery should happen once PUBCOMP is sent"
+    );
+
+    let publisher = publish_task.await.unwrap();
+    publisher.disconnect().await.unwrap();
     broker.stop().await.unwrap();
 }

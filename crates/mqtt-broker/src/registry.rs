@@ -9,8 +9,10 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
+use std::time::{Duration, Instant};
 
 use bytes::Bytes;
+use mqtt_client::protocol::ack::SimpleAck;
 use mqtt_client::protocol::connect::Will;
 use mqtt_client::protocol::packet::Packet;
 use mqtt_client::protocol::properties::Properties;
@@ -18,8 +20,17 @@ use mqtt_client::protocol::publish::PublishPacket;
 use mqtt_client::{MqttVersion, QoS};
 use tokio::sync::{mpsc, oneshot};
 
-use crate::session::{QueuedMessage, Session, Subscription};
+use crate::session::{PendingRedelivery, QueuedMessage, RedeliveryEntry, Session, Subscription};
 use crate::topic::topic_matches;
+
+/// How often [`SessionRegistry::retry_pending`] sweeps for unacked
+/// outgoing QoS 1/2 packets to resend, unless overridden by
+/// [`crate::config::MqttBrokerConfig::redelivery_interval_secs`].
+pub const DEFAULT_REDELIVERY_INTERVAL: Duration = Duration::from_secs(5);
+/// Resends attempted before giving up on a packet (best-effort beyond
+/// this — there's no unbounded retry queue to avoid unbounded memory
+/// growth for a permanently-gone peer).
+pub const MAX_REDELIVERY_ATTEMPTS: u32 = 5;
 
 /// Registry of every client session the broker currently knows about,
 /// whether connected right now or persisted offline (`clean_start = false`).
@@ -165,12 +176,90 @@ impl SessionRegistry {
     }
 
     /// Called on receiving a PUBREC for a QoS 2 PUBLISH we sent. Returns
-    /// `true` (and clears the pending flag) if `packet_id` was one of
-    /// ours — the caller should then reply with PUBREL.
+    /// `true` (and transitions the pending-redelivery entry from awaiting
+    /// PUBREC to awaiting PUBCOMP) if `packet_id` was one of ours — the
+    /// caller should then reply with PUBREL.
     pub fn complete_outgoing_qos2(&self, client_id: &str, packet_id: u16) -> bool {
-        match self.sessions.read().unwrap().get(client_id) {
-            Some(session) => session.lock().unwrap().outgoing_qos2.remove(&packet_id),
-            None => false,
+        let Some(session) = self.sessions.read().unwrap().get(client_id).cloned() else {
+            return false;
+        };
+        let mut guard = session.lock().unwrap();
+        match guard.pending_redelivery.get_mut(&packet_id) {
+            Some(entry) if matches!(entry.kind, PendingRedelivery::Publish(_)) => {
+                entry.kind = PendingRedelivery::PubRel;
+                entry.attempts = 0;
+                entry.last_sent = Instant::now();
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Called on receiving a PUBACK (QoS 1) or PUBCOMP (QoS 2, final step)
+    /// for a packet we sent — clears its pending-redelivery entry so
+    /// [`Self::retry_pending`] stops resending it.
+    pub fn clear_pending_redelivery(&self, client_id: &str, packet_id: u16) {
+        if let Some(session) = self.sessions.read().unwrap().get(client_id) {
+            session
+                .lock()
+                .unwrap()
+                .pending_redelivery
+                .remove(&packet_id);
+        }
+    }
+
+    /// Resend, with DUP=1, every outgoing QoS 1/2 packet that's been
+    /// awaiting its ack for longer than `min_age` — covers both a QoS 1/2
+    /// PUBLISH awaiting PUBACK/PUBREC and a QoS 2 PUBREL awaiting PUBCOMP.
+    /// Packets that have already been retried [`MAX_REDELIVERY_ATTEMPTS`]
+    /// times are dropped instead (best-effort QoS beyond that point, to
+    /// bound memory for a peer that's gone for good but whose session
+    /// hasn't been reaped yet). Called periodically from a background task
+    /// spawned in `MqttBroker::start`, with `min_age` matching that task's
+    /// own tick interval (see [`MqttBrokerConfig::redelivery_interval_secs`](crate::config::MqttBrokerConfig::redelivery_interval_secs)).
+    pub fn retry_pending(&self, min_age: Duration) {
+        let now = Instant::now();
+        let sessions = self.sessions.read().unwrap();
+        for session in sessions.values() {
+            let mut guard = session.lock().unwrap();
+            if !guard.is_connected() {
+                continue;
+            }
+            let version = guard.version;
+            let due: Vec<(u16, PendingRedelivery)> = guard
+                .pending_redelivery
+                .iter_mut()
+                .filter(|(_, entry)| now.duration_since(entry.last_sent) >= min_age)
+                .filter_map(|(id, entry)| {
+                    if entry.attempts >= MAX_REDELIVERY_ATTEMPTS {
+                        return None; // reaped below instead of resent
+                    }
+                    entry.attempts += 1;
+                    entry.last_sent = now;
+                    Some((*id, entry.kind.clone()))
+                })
+                .collect();
+            guard
+                .pending_redelivery
+                .retain(|_, entry| entry.attempts < MAX_REDELIVERY_ATTEMPTS);
+
+            for (packet_id, kind) in due {
+                let packet = match kind {
+                    PendingRedelivery::Publish(msg) => Packet::Publish(PublishPacket {
+                        dup: true,
+                        qos: msg.qos,
+                        retain: msg.retain,
+                        topic: msg.topic,
+                        packet_id: Some(packet_id),
+                        payload: msg.payload,
+                        properties: Properties::new(),
+                    }),
+                    PendingRedelivery::PubRel => Packet::PubRel(SimpleAck::success(packet_id)),
+                };
+                if let Ok(bytes) = packet.encode(version) {
+                    guard.send_raw(bytes.freeze());
+                }
+            }
         }
     }
 
@@ -205,7 +294,7 @@ impl SessionRegistry {
         let Some(session) = sessions.get(client_id) else {
             return;
         };
-        let guard = session.lock().unwrap();
+        let mut guard = session.lock().unwrap();
         let version = guard.version;
         let packet_id = if qos != QoS::AtMostOnce {
             Some(guard.alloc_packet_id())
@@ -216,13 +305,28 @@ impl SessionRegistry {
             dup: false,
             qos,
             retain: true,
-            topic,
+            topic: topic.clone(),
             packet_id,
-            payload,
+            payload: payload.clone(),
             properties: Properties::new(),
         });
         if let Ok(bytes) = publish.encode(version) {
             guard.send_raw(bytes.freeze());
+            if let Some(id) = packet_id {
+                guard.pending_redelivery.insert(
+                    id,
+                    RedeliveryEntry {
+                        kind: PendingRedelivery::Publish(QueuedMessage {
+                            topic,
+                            payload,
+                            qos,
+                            retain: true,
+                        }),
+                        attempts: 0,
+                        last_sent: Instant::now(),
+                    },
+                );
+            }
         }
     }
 
@@ -252,11 +356,6 @@ impl SessionRegistry {
                 } else {
                     None
                 };
-                if qos == QoS::ExactlyOnce {
-                    if let Some(id) = packet_id {
-                        guard.outgoing_qos2.insert(id);
-                    }
-                }
                 let publish = Packet::Publish(PublishPacket {
                     dup: false,
                     qos,
@@ -268,6 +367,21 @@ impl SessionRegistry {
                 });
                 if let Ok(bytes) = publish.encode(guard.version) {
                     guard.send_raw(bytes.freeze());
+                    if let Some(id) = packet_id {
+                        guard.pending_redelivery.insert(
+                            id,
+                            RedeliveryEntry {
+                                kind: PendingRedelivery::Publish(QueuedMessage {
+                                    topic: message.topic.clone(),
+                                    payload: message.payload.clone(),
+                                    qos,
+                                    retain,
+                                }),
+                                attempts: 0,
+                                last_sent: Instant::now(),
+                            },
+                        );
+                    }
                 }
             } else if !guard.clean_start {
                 guard.enqueue_offline(QueuedMessage {

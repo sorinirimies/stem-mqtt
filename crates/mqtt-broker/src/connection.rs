@@ -250,7 +250,12 @@ async fn handle_packet(
             );
             true
         }
-        Packet::PubAck(_) => true, // no redelivery tracking for QoS 1 in this implementation
+        Packet::PubAck(ack) => {
+            state
+                .sessions
+                .clear_pending_redelivery(client_id, ack.packet_id);
+            true
+        }
         Packet::PubRec(ack) => {
             // A subscriber acking a QoS 2 PUBLISH *we* sent — complete the
             // handshake by sending PUBREL (MQTT-5.0 §4.3.3). Ignored if the
@@ -266,7 +271,12 @@ async fn handle_packet(
             }
             true
         }
-        Packet::PubComp(_) => true, // QoS 2 handshake we initiated is now complete
+        Packet::PubComp(ack) => {
+            state
+                .sessions
+                .clear_pending_redelivery(client_id, ack.packet_id);
+            true
+        }
         Packet::Subscribe(p) => {
             handle_subscribe(state, client_id, version, p).await;
             true
