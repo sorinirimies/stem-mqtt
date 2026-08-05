@@ -44,6 +44,22 @@ pub struct ConnectOptions {
     /// so the worst-case total wait for a single `publish()` call is up to
     /// 4x this value. `0` selects the built-in default (15s).
     pub operation_timeout_secs: u32,
+    /// If true, [`crate::client::MqttClient`] automatically reconnects
+    /// (with exponential backoff, see [`Self::reconnect_backoff_secs`] /
+    /// [`Self::reconnect_max_backoff_secs`]) after a connection loss that
+    /// wasn't caused by calling `disconnect()`, replaying every topic this
+    /// client is currently subscribed to (per its own bookkeeping) once
+    /// reconnected. Off by default — the caller must opt in.
+    pub auto_reconnect: bool,
+    /// Initial delay before the first reconnect attempt, doubling after
+    /// each failed attempt up to [`Self::reconnect_max_backoff_secs`].
+    /// `0` selects the built-in default (1s). Ignored unless
+    /// [`Self::auto_reconnect`] is set.
+    pub reconnect_backoff_secs: u32,
+    /// Cap on the exponential reconnect backoff delay. `0` selects the
+    /// built-in default (30s). Ignored unless [`Self::auto_reconnect`] is
+    /// set.
+    pub reconnect_max_backoff_secs: u32,
 }
 
 impl ConnectOptions {
@@ -65,6 +81,9 @@ impl ConnectOptions {
             will: None,
             connect_timeout_secs: 10,
             operation_timeout_secs: 0,
+            auto_reconnect: false,
+            reconnect_backoff_secs: 0,
+            reconnect_max_backoff_secs: 0,
         }
     }
 
@@ -73,6 +92,24 @@ impl ConnectOptions {
             DEFAULT_OPERATION_TIMEOUT_SECS
         } else {
             self.operation_timeout_secs
+        };
+        Duration::from_secs(secs as u64)
+    }
+
+    pub(super) fn initial_reconnect_backoff(&self) -> Duration {
+        let secs = if self.reconnect_backoff_secs == 0 {
+            1
+        } else {
+            self.reconnect_backoff_secs
+        };
+        Duration::from_secs(secs as u64)
+    }
+
+    pub(super) fn max_reconnect_backoff(&self) -> Duration {
+        let secs = if self.reconnect_max_backoff_secs == 0 {
+            30
+        } else {
+            self.reconnect_max_backoff_secs
         };
         Duration::from_secs(secs as u64)
     }
