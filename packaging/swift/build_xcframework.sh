@@ -15,6 +15,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 
 version="${1:?usage: $0 <version>}"
 crate="mqtt-client"
+package="stem-mqtt-client" # Cargo package name (see scripts/generate-bindings.sh for why this differs from `crate`)
 lib_name="mqtt_client"
 dist="packaging/swift/dist"
 work="packaging/swift/.build"
@@ -31,11 +32,11 @@ for t in "${ios_targets[@]}"; do
 done
 
 echo "==> building ${crate} (release, staticlib) for macOS + iOS device + iOS simulator"
-cargo build --release -p "${crate}" --target aarch64-apple-darwin
-cargo build --release -p "${crate}" --target x86_64-apple-darwin
-cargo build --release -p "${crate}" --target aarch64-apple-ios
-cargo build --release -p "${crate}" --target aarch64-apple-ios-sim
-cargo build --release -p "${crate}" --target x86_64-apple-ios
+cargo build --release -p "${package}" --target aarch64-apple-darwin
+cargo build --release -p "${package}" --target x86_64-apple-darwin
+cargo build --release -p "${package}" --target aarch64-apple-ios
+cargo build --release -p "${package}" --target aarch64-apple-ios-sim
+cargo build --release -p "${package}" --target x86_64-apple-ios
 
 echo "==> creating universal (lipo'd) static libs: macOS (arm64+x86_64), iOS simulator (arm64+x86_64)"
 mkdir -p "$work/macos-universal" "$work/ios-simulator-universal"
@@ -51,9 +52,9 @@ lipo -create \
 # from target/aarch64-apple-ios/release/ below.
 
 echo "==> generating Swift bindings"
-cargo build --release -p "${crate}" --features uniffi/cli
+cargo build --release -p "${package}" --features uniffi/cli
 mkdir -p "$work/swift"
-cargo run --release -p "${crate}" --features uniffi/cli --bin uniffi-bindgen -- \
+cargo run --release -p "${package}" --features uniffi/cli --bin uniffi-bindgen -- \
     generate --library "target/release/lib${lib_name}.dylib" \
     --language swift --out-dir "$work/swift"
 

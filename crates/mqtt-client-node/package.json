@@ -1,5 +1,5 @@
 {
-  "name": "@stem-mqtt/client",
+  "name": "stem-mqtt-client",
   "version": "0.2.1",
   "description": "A full MQTT 3.1.1 / MQTT 5.0 client, implemented in Rust, exposed to Node.js via napi-rs.",
   "main": "index.js",

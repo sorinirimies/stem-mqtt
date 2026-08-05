@@ -8,13 +8,13 @@
 //! Start a broker first (in another terminal):
 //!
 //! ```sh
-//! cargo run -p mqtt-broker --bin mqtt-broker -- --port 1883
+//! cargo run -p stem-mqtt-broker --bin mqtt-broker -- --port 1883
 //! ```
 //!
 //! Then run this example:
 //!
 //! ```sh
-//! cargo run -p mqtt-client --example long_lived_connection
+//! cargo run -p stem-mqtt-client --example long_lived_connection
 //! ```
 //!
 //! Runs for ~20 seconds. `keep_alive_secs` is set low (3s, vs. the default

@@ -16,7 +16,7 @@ WebSocket connections into the exact same connection handling as TCP ones
 ## Quickest path: plain binaries
 
 ```sh
-cargo run -p mqtt-broker --bin mqtt-broker -- --ws-port 8083
+cargo run -p stem-mqtt-broker --bin mqtt-broker -- --ws-port 8083
 cd demo/web && python3 -m http.server 8090   # or any static file server
 open http://localhost:8090
 ```

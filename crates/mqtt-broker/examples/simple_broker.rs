@@ -2,7 +2,7 @@
 //! CLI binary.
 //!
 //! ```sh
-//! cargo run -p mqtt-broker --example simple_broker
+//! cargo run -p stem-mqtt-broker --example simple_broker
 //! ```
 
 use mqtt_broker::{MqttBroker, MqttBrokerConfig};

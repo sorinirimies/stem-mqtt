@@ -20,7 +20,7 @@ COPY crates/mqtt-client-node/Cargo.toml ./crates/mqtt-client-node/Cargo.toml
 COPY crates/mqtt-client-node/build.rs ./crates/mqtt-client-node/build.rs
 COPY crates/mqtt-client-node/src ./crates/mqtt-client-node/src
 
-RUN cargo build --release -p mqtt-broker --bin mqtt-broker
+RUN cargo build --release -p stem-mqtt-broker --bin mqtt-broker
 
 # ── Runtime ──────────────────────────────────────────────────────────────────
 FROM debian:bookworm-slim

@@ -1,5 +1,5 @@
 [package]
-name = "mqtt-broker"
+name = "stem-mqtt-broker"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true

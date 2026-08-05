@@ -8,8 +8,8 @@ beyond `GITHUB_TOKEN`, which every workflow already has):
 
 | Module | Artifact | What it is |
 | --- | --- | --- |
-| `packaging/kotlin/` (JVM) | `com.github.sorinirimies.stemmqtt:mqtt-client-kotlin` | Plain Kotlin/JVM jar. Native lib embedded as a JNA-resource-path classpath resource (works on desktop JVM only). |
-| `packaging/kotlin/android/` | `com.github.sorinirimies.stemmqtt:mqtt-client-android` | Real Android AAR. Native libs under `jniLibs/<abi>/` for `arm64-v8a`, `armeabi-v7a`, `x86_64`, `x86`. |
+| `packaging/kotlin/` (JVM) | `com.github.sorinirimies.stemmqtt:stem-mqtt-client-kotlin` | Plain Kotlin/JVM jar. Native lib embedded as a JNA-resource-path classpath resource (works on desktop JVM only). |
+| `packaging/kotlin/android/` | `com.github.sorinirimies.stemmqtt:stem-mqtt-client-android` | Real Android AAR. Native libs under `jniLibs/<abi>/` for `arm64-v8a`, `armeabi-v7a`, `x86_64`, `x86`. |
 
 These are two **independent Gradle builds** (the Android module has its own
 `settings.gradle.kts`), not a multi-project build — mixing AGP 9's built-in
@@ -57,7 +57,7 @@ the convention was already established.)
    release cdylib into `packaging/kotlin/staged/{kotlin,resources}/`.
 3. `gradle publish` (via `gradle/actions/setup-gradle`, no vendored wrapper
    needed) builds a jar from `staged/` and publishes it as
-   `com.github.sorinirimies.stemmqtt:mqtt-client-kotlin:<version>`.
+   `com.github.sorinirimies.stemmqtt:stem-mqtt-client-kotlin:<version>`.
 
 ## How the Android module fits together
 
@@ -70,7 +70,7 @@ the convention was already established.)
 3. `gradle publish` (run from `packaging/kotlin/android/`) uses AGP 9's
    built-in Kotlin support (no `org.jetbrains.kotlin.android` plugin needed
    — see the note below) to assemble and publish the AAR as
-   `com.github.sorinirimies.stemmqtt:mqtt-client-android:<version>`.
+   `com.github.sorinirimies.stemmqtt:stem-mqtt-client-android:<version>`.
 
 ### A note on AGP 9's built-in Kotlin
 
@@ -100,14 +100,14 @@ dependencyResolutionManagement {
 ```kotlin
 // build.gradle.kts — JVM/desktop app
 dependencies {
-    implementation("com.github.sorinirimies.stemmqtt:mqtt-client-kotlin:0.2.0")
+    implementation("com.github.sorinirimies.stemmqtt:stem-mqtt-client-kotlin:0.2.0")
 }
 ```
 
 ```kotlin
 // build.gradle.kts — Android app
 dependencies {
-    implementation("com.github.sorinirimies.stemmqtt:mqtt-client-android:0.2.0")
+    implementation("com.github.sorinirimies.stemmqtt:stem-mqtt-client-android:0.2.0")
 }
 ```
 

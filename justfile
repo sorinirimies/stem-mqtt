@@ -59,15 +59,15 @@ build:
 
 # Build only the client + protocol codec crate (dev)
 build-client:
-    cargo build -p mqtt-client
+    cargo build -p stem-mqtt-client
 
 # Build only the broker crate + CLI binary (dev)
 build-broker:
-    cargo build -p mqtt-broker
+    cargo build -p stem-mqtt-broker
 
 # Build release binaries (currently just the mqtt-broker CLI)
 build-release:
-    cargo build --release -p mqtt-broker --bin mqtt-broker
+    cargo build --release -p stem-mqtt-broker --bin mqtt-broker
 
 # Build every example in the workspace
 build-examples:
@@ -77,13 +77,13 @@ build-examples:
 
 # Run the standalone mqtt-broker CLI on 0.0.0.0:1883
 run-broker:
-    cargo run -p mqtt-broker --bin mqtt-broker
+    cargo run -p stem-mqtt-broker --bin mqtt-broker
 
 # Run an example by name (e.g. `just run-example pub_sub`)
 run-example name:
     #!/usr/bin/env sh
-    if cargo run -p mqtt-client --example {{ name }} 2>/dev/null; then exit 0; fi
-    cargo run -p mqtt-broker --example {{ name }}
+    if cargo run -p stem-mqtt-client --example {{ name }} 2>/dev/null; then exit 0; fi
+    cargo run -p stem-mqtt-broker --example {{ name }}
 
 # ── Test ──────────────────────────────────────────────────────────────────────
 
@@ -93,15 +93,15 @@ test:
 
 # Test only the client + protocol codec
 test-client:
-    cargo test -p mqtt-client --all-features
+    cargo test -p stem-mqtt-client --all-features
 
 # Test only the broker (includes the client<->broker integration suite)
 test-broker:
-    cargo test -p mqtt-broker --all-features
+    cargo test -p stem-mqtt-broker --all-features
 
 # Run just the client<->broker integration tests
 test-integration:
-    cargo test -p mqtt-broker --test integration
+    cargo test -p stem-mqtt-broker --test integration
 
 # Run Nu script tests
 test-nu: _check-nu
@@ -192,7 +192,7 @@ test-node: build-node
 
 # Cross-compile the broker for aarch64 Linux (requires `cross`)
 package-linux-aarch64: _check-cross
-    cross build --release -p mqtt-broker --bin mqtt-broker --target aarch64-unknown-linux-gnu
+    cross build --release -p stem-mqtt-broker --bin mqtt-broker --target aarch64-unknown-linux-gnu
 
 # Stage the Kotlin/JVM package (generates bindings + builds the release
 # cdylib + stages packaging/kotlin/staged/) — run `gradle build` in
@@ -266,7 +266,7 @@ demo-run:
     set -e
     echo "Broker (TCP :1883, WebSocket :8083) + demo webpage (:8090) — Ctrl-C to stop both"
     trap 'kill 0' EXIT
-    cargo run -p mqtt-broker --bin mqtt-broker -- --ws-port 8083 &
+    cargo run -p stem-mqtt-broker --bin mqtt-broker -- --ws-port 8083 &
     (cd demo/web && python3 -m http.server 8090) &
     wait
 
@@ -282,11 +282,11 @@ demo-docker-down:
 
 # Generate and open docs for the client crate
 doc-client:
-    cargo doc --no-deps -p mqtt-client --open
+    cargo doc --no-deps -p stem-mqtt-client --open
 
 # Generate and open docs for the broker crate
 doc-broker:
-    cargo doc --no-deps -p mqtt-broker --open
+    cargo doc --no-deps -p stem-mqtt-broker --open
 
 # Generate docs for the full workspace (no browser)
 doc:
@@ -343,9 +343,9 @@ check-publish: _check-nu
 # Dry-run publish for both crates (in dependency order)
 publish-dry: check-all
     @echo "Dry-run: mqtt-client"
-    cargo publish --dry-run -p mqtt-client
+    cargo publish --dry-run -p stem-mqtt-client
     @echo "Dry-run: mqtt-broker"
-    cargo publish --dry-run -p mqtt-broker
+    cargo publish --dry-run -p stem-mqtt-broker
 
 # Publish both crates in dependency order: mqtt-client → mqtt-broker.
 publish: check-all publish-client publish-broker
@@ -354,14 +354,14 @@ publish: check-all publish-client publish-broker
 # Publish mqtt-client (mqtt-broker depends on it — must go first)
 publish-client:
     @echo "📦 Publishing mqtt-client…"
-    cargo publish -p mqtt-client
+    cargo publish -p stem-mqtt-client
     @echo "⏳ Waiting 30 s for the index to propagate…"
     sleep 30
 
 # Publish mqtt-broker
 publish-broker:
     @echo "📦 Publishing mqtt-broker…"
-    cargo publish -p mqtt-broker
+    cargo publish -p stem-mqtt-broker
 
 # Show what would be released without making any changes
 release-preview: _check-git-cliff

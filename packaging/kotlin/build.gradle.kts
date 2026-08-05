@@ -43,7 +43,7 @@ publishing {
     publications {
         create<MavenPublication>("mqttClient") {
             from(components["java"])
-            artifactId = "mqtt-client-kotlin"
+            artifactId = "stem-mqtt-client-kotlin"
             pom {
                 name.set("stem-mqtt Kotlin bindings")
                 description.set(

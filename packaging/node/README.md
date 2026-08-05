@@ -29,7 +29,7 @@ notifications can't themselves fail) — see `index.d.ts` for the exact
 generated types.
 
 ```ts
-import { MqttClient } from "@stem-mqtt/client";
+import { MqttClient } from "stem-mqtt-client";
 
 const client = new MqttClient({ host: "localhost", port: 1883, clientId: "demo", version: "5.0" });
 client.setMessageListener(

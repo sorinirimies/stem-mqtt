@@ -99,13 +99,13 @@ crate-level docs.
 ## Examples
 
 ```sh
-cargo run -p mqtt-client --example pub_sub
-cargo run -p mqtt-client --example will_and_retain
-cargo run -p mqtt-client --example mqtt_versions          # MQTT 3.1.1 + 5.0 on the same broker
-cargo run -p mqtt-client --example topics                 # topic hierarchies, `+`/`#` wildcards
-cargo run -p mqtt-client --example long_lived_connection  # persistent connection, keep-alive over ~20s
-cargo run -p mqtt-broker --example simple_broker
-cargo run -p mqtt-broker --example auth_broker
+cargo run -p stem-mqtt-client --example pub_sub
+cargo run -p stem-mqtt-client --example will_and_retain
+cargo run -p stem-mqtt-client --example mqtt_versions          # MQTT 3.1.1 + 5.0 on the same broker
+cargo run -p stem-mqtt-client --example topics                 # topic hierarchies, `+`/`#` wildcards
+cargo run -p stem-mqtt-client --example long_lived_connection  # persistent connection, keep-alive over ~20s
+cargo run -p stem-mqtt-broker --example simple_broker
+cargo run -p stem-mqtt-broker --example auth_broker
 ```
 
 (All `mqtt-client` examples need a broker already running — either
@@ -114,7 +114,7 @@ cargo run -p mqtt-broker --example auth_broker
 ## Running the broker
 
 ```sh
-cargo run -p mqtt-broker --bin mqtt-broker -- --bind 0.0.0.0 --port 1883
+cargo run -p stem-mqtt-broker --bin mqtt-broker -- --bind 0.0.0.0 --port 1883
 ```
 
 Add `--ws-port 8083` to also accept MQTT-over-WebSocket connections (for

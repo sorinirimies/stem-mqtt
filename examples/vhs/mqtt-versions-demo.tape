@@ -20,7 +20,7 @@ Set PlaybackSpeed 1.5
 Hide
 Type "set +m"
 Enter
-Type "cargo run -q -p mqtt-broker --bin mqtt-broker -- --port 1883 > /dev/null 2>&1 &"
+Type "cargo run -q -p stem-mqtt-broker --bin mqtt-broker -- --port 1883 > /dev/null 2>&1 &"
 Enter
 Sleep 3s
 Type "clear"
@@ -28,7 +28,7 @@ Enter
 Show
 
 # ── Run the mqtt_versions example against it ─────────────────────────────────
-Type "cargo run -q -p mqtt-client --example mqtt_versions"
+Type "cargo run -q -p stem-mqtt-client --example mqtt_versions"
 Sleep 500ms
 Enter
 Sleep 4s

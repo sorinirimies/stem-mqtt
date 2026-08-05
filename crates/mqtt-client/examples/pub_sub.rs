@@ -3,13 +3,13 @@
 //! Start a broker first (in another terminal):
 //!
 //! ```sh
-//! cargo run -p mqtt-broker --bin mqtt-broker -- --port 1883
+//! cargo run -p stem-mqtt-broker --bin mqtt-broker -- --port 1883
 //! ```
 //!
 //! Then run this example:
 //!
 //! ```sh
-//! cargo run -p mqtt-client --example pub_sub
+//! cargo run -p stem-mqtt-client --example pub_sub
 //! ```
 
 use std::sync::Arc;

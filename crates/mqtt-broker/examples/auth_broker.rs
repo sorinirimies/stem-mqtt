@@ -3,7 +3,7 @@
 //! callers get through UniFFI's `with_foreign` callback interfaces.
 //!
 //! ```sh
-//! cargo run -p mqtt-broker --example auth_broker
+//! cargo run -p stem-mqtt-broker --example auth_broker
 //! ```
 //!
 //! Only `username = "demo"` / `password = "demo"` (or no credentials, since

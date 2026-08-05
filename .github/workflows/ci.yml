@@ -90,10 +90,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Build mqtt-client (dev)
-        run: cargo build -p mqtt-client
+        run: cargo build -p stem-mqtt-client
 
       - name: Build mqtt-broker (dev)
-        run: cargo build -p mqtt-broker
+        run: cargo build -p stem-mqtt-broker
 
       - name: Build every example
         run: cargo build --workspace --examples
@@ -111,12 +111,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: cargo doc (mqtt-client)
-        run: cargo doc --no-deps -p mqtt-client --all-features
+        run: cargo doc --no-deps -p stem-mqtt-client --all-features
         env:
           RUSTDOCFLAGS: --cfg docsrs -D warnings
 
       - name: cargo doc (mqtt-broker)
-        run: cargo doc --no-deps -p mqtt-broker --all-features
+        run: cargo doc --no-deps -p stem-mqtt-broker --all-features
         env:
           RUSTDOCFLAGS: --cfg docsrs -D warnings
 
@@ -167,7 +167,7 @@ jobs:
         run: npm run build:debug
 
       - name: Build broker
-        run: cargo build -p mqtt-broker --bin mqtt-broker
+        run: cargo build -p stem-mqtt-broker --bin mqtt-broker
 
       - name: Start a broker and run the Node smoke test
         working-directory: crates/mqtt-client-node

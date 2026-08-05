@@ -64,8 +64,8 @@ impl MqttMessageListener for Printer {
 ## Foreign-language bindings
 
 ```sh
-cargo build --release -p mqtt-client
-cargo run -p mqtt-client --features uniffi/cli --bin uniffi-bindgen -- \
+cargo build --release -p stem-mqtt-client
+cargo run -p stem-mqtt-client --features uniffi/cli --bin uniffi-bindgen -- \
     generate --library ../../target/release/libmqtt_client.so \
     --language kotlin --out-dir bindings/kotlin
 ```
@@ -76,21 +76,21 @@ platform first: `../../scripts/generate-bindings.sh kotlin`.
 ## Examples
 
 ```sh
-cargo run -p mqtt-client --example pub_sub               # connect, subscribe, publish, receive
-cargo run -p mqtt-client --example will_and_retain        # Last-Will-and-Testament + retained messages
-cargo run -p mqtt-client --example mqtt_versions          # MQTT 3.1.1 + 5.0 on the same broker
-cargo run -p mqtt-client --example topics                 # topic hierarchies, `+`/`#` wildcards
-cargo run -p mqtt-client --example long_lived_connection  # persistent connection, keep-alive over ~20s
+cargo run -p stem-mqtt-client --example pub_sub               # connect, subscribe, publish, receive
+cargo run -p stem-mqtt-client --example will_and_retain        # Last-Will-and-Testament + retained messages
+cargo run -p stem-mqtt-client --example mqtt_versions          # MQTT 3.1.1 + 5.0 on the same broker
+cargo run -p stem-mqtt-client --example topics                 # topic hierarchies, `+`/`#` wildcards
+cargo run -p stem-mqtt-client --example long_lived_connection  # persistent connection, keep-alive over ~20s
 ```
 
 All expect a broker listening on `127.0.0.1:1883` (run
-`cargo run -p mqtt-broker --bin mqtt-broker` first, or
-`cargo run -p mqtt-broker --example simple_broker`).
+`cargo run -p stem-mqtt-broker --bin mqtt-broker` first, or
+`cargo run -p stem-mqtt-broker --example simple_broker`).
 
 ## Testing
 
 ```sh
-cargo test -p mqtt-client
+cargo test -p stem-mqtt-client
 ```
 
 Protocol round-trip tests live alongside each codec module (`#[cfg(test)]`);

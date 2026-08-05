@@ -29,6 +29,7 @@ rm -rf "$out"
 mkdir -p "$out/kotlin" "$out/resources"
 
 crate="mqtt-client"
+package="stem-mqtt-client" # Cargo package name (see scripts/generate-bindings.sh for why this differs from `crate`)
 lib_name="${crate//-/_}"
 src="bindings/kotlin/${crate}"
 if [ -d "$src" ]; then
@@ -50,7 +51,7 @@ if [ -f "$lib_path" ]; then
     cp "$lib_path" "$out/resources/${os_dir}/"
 else
     echo "==> building ${crate} release cdylib (not found at ${lib_path})"
-    cargo build --release -p "${crate}"
+    cargo build --release -p "${package}"
     mkdir -p "$out/resources/${os_dir}"
     cp "$lib_path" "$out/resources/${os_dir}/"
 fi

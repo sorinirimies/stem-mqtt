@@ -1,5 +1,5 @@
 [package]
-name = "mqtt-client"
+name = "stem-mqtt-client"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true

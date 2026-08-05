@@ -111,7 +111,7 @@ jobs:
           key: ${{ matrix.target }}
 
       - name: Build mqtt-broker
-        run: cargo build --release -p mqtt-broker --bin mqtt-broker --target ${{ matrix.target }}
+        run: cargo build --release -p stem-mqtt-broker --bin mqtt-broker --target ${{ matrix.target }}
 
       - name: Stage tarball
         run: |
@@ -161,7 +161,7 @@ jobs:
           key: x86_64-pc-windows-gnu
 
       - name: Build mqtt-broker for Windows
-        run: cargo build --release -p mqtt-broker --bin mqtt-broker --target x86_64-pc-windows-gnu
+        run: cargo build --release -p stem-mqtt-broker --bin mqtt-broker --target x86_64-pc-windows-gnu
 
       - name: Stage zip
         run: |
@@ -272,10 +272,10 @@ jobs:
         if: env.HAS_TOKEN == 'true'
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
-        run: nu scripts/ci/publish_crate.nu mqtt-client ${{ needs.validate.outputs.version }} --readme-dir crates/mqtt-client --wait 30
+        run: nu scripts/ci/publish_crate.nu stem-mqtt-client ${{ needs.validate.outputs.version }} --readme-dir crates/mqtt-client --wait 30
 
       - name: Publish mqtt-broker
         if: env.HAS_TOKEN == 'true'
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
-        run: nu scripts/ci/publish_crate.nu mqtt-broker ${{ needs.validate.outputs.version }} --readme-dir crates/mqtt-broker --wait 0
+        run: nu scripts/ci/publish_crate.nu stem-mqtt-broker ${{ needs.validate.outputs.version }} --readme-dir crates/mqtt-broker --wait 0

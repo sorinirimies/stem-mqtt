@@ -27,7 +27,7 @@ codec from [`mqtt-client`](../mqtt-client/README.md)
 ## Running the CLI binary
 
 ```sh
-cargo run -p mqtt-broker --bin mqtt-broker -- --bind 0.0.0.0 --port 1883
+cargo run -p stem-mqtt-broker --bin mqtt-broker -- --bind 0.0.0.0 --port 1883
 ```
 
 ```
@@ -46,7 +46,7 @@ Browser clients (and anything else that can't open a raw TCP socket) need
 `--ws-port`:
 
 ```sh
-cargo run -p mqtt-broker --bin mqtt-broker -- --ws-port 8083
+cargo run -p stem-mqtt-broker --bin mqtt-broker -- --ws-port 8083
 ```
 
 See [`demo/`](../../demo) for a full browser-based pub/sub demo webpage
@@ -93,14 +93,14 @@ Same pattern as `mqtt-client`:
 ## Examples
 
 ```sh
-cargo run -p mqtt-broker --example simple_broker   # bare-minimum embedded broker
-cargo run -p mqtt-broker --example auth_broker      # + MqttAuthProvider and MqttBrokerEventListener
+cargo run -p stem-mqtt-broker --example simple_broker   # bare-minimum embedded broker
+cargo run -p stem-mqtt-broker --example auth_broker      # + MqttAuthProvider and MqttBrokerEventListener
 ```
 
 ## Testing
 
 ```sh
-cargo test -p mqtt-broker
+cargo test -p stem-mqtt-broker
 ```
 
 [`tests/integration.rs`](tests/integration.rs) drives a real `MqttClient`

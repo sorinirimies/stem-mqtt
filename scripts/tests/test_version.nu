@@ -29,4 +29,22 @@ def "test version: internal mqtt-client dependency pin matches workspace version
     assert equal $pinned $workspace_version
 }
 
+# crates.io's "mqtt-client" name is taken by an unrelated project (since
+# 2019) that this repo doesn't own, so the *published* Cargo package names
+# are stem-mqtt-client / stem-mqtt-broker — only the [lib] name (Rust import
+# path, `use mqtt_client::...`) and the directory stay mqtt-client/
+# mqtt_client. This test guards against silently reverting that rename.
+def "test version: crates.io package names are stem-prefixed since mqtt-client and mqtt-broker are taken by unrelated crates" [] {
+    let client_pkg = (open crates/mqtt-client/Cargo.toml | get package.name)
+    let broker_pkg = (open crates/mqtt-broker/Cargo.toml | get package.name)
+    assert equal $client_pkg "stem-mqtt-client"
+    assert equal $broker_pkg "stem-mqtt-broker"
+
+    # The workspace.dependencies alias key stays "mqtt-client" for internal
+    # ergonomics (every crate says `mqtt-client = { workspace = true }`),
+    # but must resolve to the real, renamed package.
+    let aliased_package = (open Cargo.toml | get workspace.dependencies.mqtt-client.package)
+    assert equal $aliased_package "stem-mqtt-client"
+}
+
 def main [] { run-tests }

@@ -59,7 +59,7 @@ to the exact `cdylib` it was generated from.
 No published image yet. Build one locally:
 
 ```sh
-cargo build --release -p mqtt-broker --bin mqtt-broker
+cargo build --release -p stem-mqtt-broker --bin mqtt-broker
 docker build -t stem-mqtt-broker -f packaging/Dockerfile .
 ```
 

@@ -25,9 +25,13 @@ case "$(uname -s)" in
 esac
 
 for crate in mqtt-client mqtt-broker; do
+    case "$crate" in
+        mqtt-client) package="stem-mqtt-client" ;;
+        mqtt-broker) package="stem-mqtt-broker" ;;
+    esac
     lib_name="${crate//-/_}"
     echo "==> building ${crate} (release cdylib)"
-    cargo build --release -p "${crate}"
+    cargo build --release -p "${package}"
 
     echo "==> generating Ruby bindings for ${crate}"
     uniffi-bindgen-ruby \

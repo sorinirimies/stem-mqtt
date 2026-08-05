@@ -39,7 +39,7 @@ rand       = "0.9"
 clap       = { version = "4", features = ["derive"] }
 
 # Internal crates
-mqtt-client = { path = "crates/mqtt-client", version = "0.2.1" }
+mqtt-client = { package = "stem-mqtt-client", path = "crates/mqtt-client", version = "0.2.1" }
 
 [profile.dev]
 opt-level = 0

@@ -1,8 +1,8 @@
 //! Demonstrates a Last-Will-and-Testament message and a retained PUBLISH.
 //!
-//! Start a broker first: `cargo run -p mqtt-broker --bin mqtt-broker`
+//! Start a broker first: `cargo run -p stem-mqtt-broker --bin mqtt-broker`
 //!
-//! Then: `cargo run -p mqtt-client --example will_and_retain`
+//! Then: `cargo run -p stem-mqtt-client --example will_and_retain`
 //!
 //! What to expect: a first client connects with a will message and a
 //! second client subscribes to the will topic *before* the first client

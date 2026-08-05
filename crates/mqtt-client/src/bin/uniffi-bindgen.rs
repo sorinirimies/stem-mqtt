@@ -4,7 +4,7 @@
 //! Usage (after `cargo build --release`):
 //!
 //! ```sh
-//! cargo run -p mqtt-client --features uniffi/cli --bin uniffi-bindgen -- \
+//! cargo run -p stem-mqtt-client --features uniffi/cli --bin uniffi-bindgen -- \
 //!     generate --library target/release/libmqtt_client.so \
 //!     --language kotlin --out-dir bindings/kotlin
 //! ```

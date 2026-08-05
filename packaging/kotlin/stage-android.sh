@@ -39,6 +39,6 @@ echo "==> cross-compiling mqtt-client for: ${abis[*]}"
 cargo ndk \
     -t arm64-v8a -t armeabi-v7a -t x86_64 -t x86 \
     -o "$out" \
-    build --release -p mqtt-client
+    build --release -p stem-mqtt-client
 
 echo "staged Android native libs -> ${out}/{${abis[*]}}/"

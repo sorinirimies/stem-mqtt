@@ -76,7 +76,7 @@ publishing {
     publications {
         register<MavenPublication>("release") {
             groupId = "com.github.sorinirimies.stemmqtt"
-            artifactId = "mqtt-client-android"
+            artifactId = "stem-mqtt-client-android"
             afterEvaluate {
                 from(components["release"])
             }

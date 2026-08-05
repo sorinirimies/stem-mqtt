@@ -17,7 +17,7 @@ def main [] {
 
     # ── 1. Documentation checks ───────────────────────────────────────────────
     print "── Step 1: Documentation checks ──"
-    let doc_crates = ["mqtt-client" "mqtt-broker"]
+    let doc_crates = ["stem-mqtt-client" "stem-mqtt-broker"]
 
     for crate in $doc_crates {
         print $"  📖 Checking docs for ($crate)..."
@@ -34,7 +34,7 @@ def main [] {
     # ── 2. Publish dry-run for mqtt-client (published first) ─────────────────
     print "── Step 2: Publish dry-run (mqtt-client) ──"
     print "  📦 Running cargo publish --dry-run for mqtt-client..."
-    let publish_result = (do { cargo publish --dry-run -p mqtt-client } | complete)
+    let publish_result = (do { cargo publish --dry-run -p stem-mqtt-client } | complete)
     if $publish_result.exit_code != 0 {
         print "  ❌ Publish dry-run failed for mqtt-client:"
         print $publish_result.stderr
@@ -86,8 +86,8 @@ def main [] {
     print "  ✅ All pre-publish checks passed!"
     print ""
     print "  Publish order:"
-    print "    1. cargo publish -p mqtt-client   (mqtt-broker depends on it)"
-    print "    2. cargo publish -p mqtt-broker"
+    print "    1. cargo publish -p stem-mqtt-client   (mqtt-broker depends on it)"
+    print "    2. cargo publish -p stem-mqtt-broker"
     print ""
     print "  Wait ~30 seconds between publishes for crates.io"
     print "  to index each crate before its dependents."
