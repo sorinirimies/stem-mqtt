@@ -71,11 +71,7 @@ def update_readme_badge [version: string] {
     }
 }
 
-# Update crates/mqtt-client-node/package.json's "version" field so the repo
-# stays in sync with the workspace version between releases. Not strictly
-# required for publishing (release.yml's publish-node job re-sets it via
-# `npm version` right before `npm publish`), but leaving it stale in git is
-# confusing to anyone browsing the repo.
+# Update Node package metadata and lockfile together.
 def update_node_package_version [version: string] {
     let path = "crates/mqtt-client-node/package.json"
     if not ($path | path exists) {
@@ -85,7 +81,8 @@ def update_node_package_version [version: string] {
     let pkg = (open $path --raw)
     let updated = ($pkg | str replace --regex '"version":\s*"[^"]+"' $'"version": "($version)"')
     $updated | save --force $path
-    print $"(ansi green)✓(ansi reset) Updated ($path) version → ($version)"
+    run-external "npm" "install" "--package-lock-only" "--ignore-scripts" "--no-audit" "--no-fund" "--prefix" "crates/mqtt-client-node"
+    print $"(ansi green)✓(ansi reset) Updated Node package + lockfile → ($version)"
 }
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -99,6 +96,12 @@ def main [
     print $"(ansi cyan)  stem-mqtt — Bump Version(ansi reset)"
     print $"(ansi cyan)══════════════════════════════════════════════════════════════(ansi reset)"
     print ""
+
+    let dirty = (do { git status --porcelain } | complete)
+    if (($dirty.stdout | str trim) | is-not-empty) {
+        print $"(ansi red)Error:(ansi reset) working tree is dirty. Commit or stash changes before bumping a release."
+        exit 1
+    }
 
     let current_version = (open Cargo.toml | get workspace.package.version)
     print $"  Current version : (ansi yellow)($current_version)(ansi reset)"

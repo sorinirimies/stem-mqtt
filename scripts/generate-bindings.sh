@@ -29,10 +29,18 @@ case "$crate" in
     *)           package="$crate" ;;
 esac
 
-if [ "$language" = "ruby" ]; then
-    echo "ruby bindings use a separate generator — run packaging/ruby/build_and_publish.sh instead" >&2
-    exit 1
-fi
+case "$language" in
+    kotlin|swift|python) ;;
+    ruby)
+        echo "Ruby is not an official UniFFI 0.29 backend and no production-ready generator is available." >&2
+        echo "Supported languages: kotlin, swift, python" >&2
+        exit 1
+        ;;
+    *)
+        echo "unsupported language '$language' (expected kotlin, swift, or python)" >&2
+        exit 1
+        ;;
+esac
 
 case "$(uname -s)" in
     Darwin) ext="dylib" ;;
@@ -50,5 +58,10 @@ echo "==> generating ${language} bindings -> ${out_dir}"
 mkdir -p "${out_dir}"
 cargo run --release -p "${package}" --features uniffi/cli --bin uniffi-bindgen -- \
     generate --library "${lib_path}" --language "${language}" --out-dir "${out_dir}"
+
+if [ -z "$(find "${out_dir}" -type f -print -quit 2>/dev/null)" ]; then
+    echo "error: ${language} binding generation produced no files in ${out_dir}" >&2
+    exit 1
+fi
 
 echo "done: ${out_dir}"

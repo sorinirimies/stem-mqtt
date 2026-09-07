@@ -17,6 +17,7 @@ use crate::config::{
     MqttAuthProvider, MqttBrokerConfig, MqttBrokerEventListener, SharedAuthProvider,
 };
 use crate::connection::handle_connection;
+use crate::error::{MqttBrokerError, MqttBrokerResult};
 use crate::events::EventHub;
 use crate::registry::SessionRegistry;
 use crate::retain::RetainStore;
@@ -145,9 +146,9 @@ impl MqttBroker {
     /// binds a second, MQTT-over-WebSocket listener on
     /// `config.ws_port` if it's non-zero (see
     /// [`MqttBrokerConfig::ws_port`]).
-    pub async fn start(&self) -> mqtt_client::error::MqttResult<()> {
+    pub async fn start(&self) -> MqttBrokerResult<()> {
         if self.accept_task.lock().unwrap().is_some() {
-            return Err(mqtt_client::MqttError::AlreadyConnected);
+            return Err(MqttBrokerError::AlreadyRunning);
         }
         let addr = format!(
             "{}:{}",
@@ -207,8 +208,7 @@ impl MqttBroker {
         }
 
         if let Some(tls_config) = self.state.config.tls.clone() {
-            let acceptor = crate::tls::build_acceptor(&tls_config)
-                .map_err(mqtt_client::MqttError::Protocol)?;
+            let acceptor = crate::tls::build_acceptor(&tls_config).map_err(MqttBrokerError::Tls)?;
             let tls_addr = format!("{}:{}", self.state.config.bind_address, tls_config.port);
             let tls_listener = TcpListener::bind(&tls_addr).await?;
             let local_tls_port = tls_listener
@@ -266,7 +266,7 @@ impl MqttBroker {
     /// Stop accepting new connections and abort the accept loop(s).
     /// Existing client connections are left running until they naturally
     /// close.
-    pub async fn stop(&self) -> mqtt_client::error::MqttResult<()> {
+    pub async fn stop(&self) -> MqttBrokerResult<()> {
         if let Some(handle) = self.accept_task.lock().unwrap().take() {
             handle.abort();
         }

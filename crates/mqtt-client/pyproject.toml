@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "stem-mqtt-client"
-description = "A full MQTT 3.1.1 / MQTT 5.0 client, implemented in Rust (UniFFI bindings)."
+description = "An MQTT 3.1.1 / MQTT 5.0 client implemented in Rust (UniFFI bindings)."
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.9"

@@ -162,9 +162,13 @@ jobs:
         working-directory: crates/mqtt-client-node
         run: npm ci
 
-      - name: Build native addon (debug)
+      - name: Build and inspect native addon package
         working-directory: crates/mqtt-client-node
-        run: npm run build:debug
+        run: |
+          npm run build:debug
+          test -s index.js
+          test -s index.d.ts
+          npm pack --dry-run
 
       - name: Build broker
         run: cargo build -p stem-mqtt-broker --bin mqtt-broker
@@ -172,11 +176,18 @@ jobs:
       - name: Start a broker and run the Node smoke test
         working-directory: crates/mqtt-client-node
         run: |
-          ../../target/debug/mqtt-broker --port 18830 &
-          for i in $(seq 1 30); do
+          set -euo pipefail
+          ../../target/debug/mqtt-broker --port 18830 >broker.log 2>&1 &
+          broker_pid=$!
+          trap 'kill "$broker_pid" 2>/dev/null || true' EXIT
+          for _ in $(seq 1 30); do
             if (echo > /dev/tcp/127.0.0.1/18830) 2>/dev/null; then
               break
             fi
             sleep 0.5
           done
+          (echo > /dev/tcp/127.0.0.1/18830) 2>/dev/null || {
+            cat broker.log
+            exit 1
+          }
           node scripts/smoke_test.mjs

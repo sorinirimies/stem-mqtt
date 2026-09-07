@@ -1,9 +1,9 @@
 # stem-mqtt
 
-Full MQTT 3.1.1 / MQTT 5.0 client and broker, written in Rust and exposed
-to Kotlin, Swift, Python, and Ruby via [UniFFI](https://mozilla.github.io/uniffi-rs/),
-plus Node.js/TypeScript via a hand-written [napi-rs](https://napi.rs/) addon
-(JavaScript isn't a UniFFI target).
+MQTT 3.1.1 / MQTT 5.0 client and broker, written in Rust and exposed
+to Kotlin, Swift, and Python via [UniFFI](https://mozilla.github.io/uniffi-rs/),
+plus Node.js/TypeScript client bindings via a hand-written
+[napi-rs](https://napi.rs/) addon (JavaScript isn't a UniFFI target).
 
 [![CI](https://github.com/sorinirimies/stem-mqtt/actions/workflows/ci.yml/badge.svg)](https://github.com/sorinirimies/stem-mqtt/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -41,7 +41,7 @@ filenames above, minus the extension), or render every tape under
 
 ## Installation
 
-Every published package name is prefixed `stem-mqtt-`/`stem_mqtt` —
+Every published package name is prefixed `stem-mqtt-` —
 `mqtt-client`/`mqtt-broker` are already taken by unrelated projects on
 crates.io and PyPI, so this project uses the `stem-mqtt-` prefix
 consistently everywhere to avoid that collision. Language-facing import/use
@@ -97,41 +97,30 @@ dependencyResolutionManagement {
 ```kotlin
 // build.gradle.kts
 dependencies {
-    // JVM/desktop:
-    implementation("com.github.sorinirimies.stemmqtt:stem-mqtt-client-kotlin:0.2.1")
-    // Android (real AAR with jniLibs for arm64-v8a/armeabi-v7a/x86_64/x86), instead:
-    implementation("com.github.sorinirimies.stemmqtt:stem-mqtt-client-android:0.2.1")
+    // JVM/desktop, client + broker:
+    implementation("com.github.sorinirimies.stemmqtt:stem-mqtt-kotlin:<version>")
+    // Android AAR, client + broker, with all four Android ABIs:
+    implementation("com.github.sorinirimies.stemmqtt:stem-mqtt-android:<version>")
 }
 ```
 
-Reading a GitHub Package still requires an authenticated `GITHUB_TOKEN`/PAT
-with `read:packages`, even for a public repo — a GitHub Packages platform
-limitation. `mqtt-client` only (not `mqtt-broker` — an
-[upstream uniffi-rs bug](https://github.com/mozilla/uniffi-rs/issues/2392)
-blocks the broker's Kotlin bindings specifically; see
-[`packaging/kotlin/README.md`](packaging/kotlin/README.md)). Full details:
+Reading a GitHub Package requires an authenticated `GITHUB_TOKEN`/PAT with
+`read:packages`, including for a public repository. Full details:
 [`packaging/kotlin/README.md`](packaging/kotlin/README.md).
 
-### Swift (Swift Package Manager)
+### Swift
 
-```swift
-// Package.swift
-dependencies: [
-    .package(url: "https://github.com/sorinirimies/stem-mqtt", from: "0.2.1"),
-]
-```
+Download `StemMqttSwift-<version>.zip` from the matching GitHub Release,
+extract it, then add the contained `StemMqttSwift` directory as a local Swift
+package. It includes client and broker products plus prebuilt XCFrameworks for
+macOS, iOS devices, and iOS simulators.
 
 ```swift
 import MqttClient
-
-let client = MqttClient(options: ConnectOptions(host: "localhost", port: 1883, clientId: "demo", version: .v5))
-try await client.connect()
+import MqttBroker
 ```
 
-Pre-built XCFramework (macOS + iOS device + iOS simulator) attached as a
-GitHub Release asset — no local Rust toolchain needed to consume it. Client
-only, same reasoning as Node. Full details:
-[`packaging/swift/README.md`](packaging/swift/README.md).
+Full details: [`packaging/swift/README.md`](packaging/swift/README.md).
 
 ### Python (PyPI)
 
@@ -143,22 +132,27 @@ pip install stem-mqtt-broker   # broker
 ```python
 import mqtt_client  # import name unaffected by the package rename
 
-client = mqtt_client.MqttClient(mqtt_client.ConnectOptions("localhost", 1883, "demo", mqtt_client.MqttVersion.V5))
+options = mqtt_client.ConnectOptions(
+    host="localhost", port=1883, client_id="demo",
+    version=mqtt_client.MqttVersion.V5,
+    clean_start=True, keep_alive_secs=30,
+    username=None, password=None, will=None,
+    connect_timeout_secs=10, operation_timeout_secs=15,
+    auto_reconnect=True, reconnect_backoff_secs=1,
+    reconnect_max_backoff_secs=30, tls=None,
+)
+client = mqtt_client.MqttClient(options)
 ```
 
 Not yet published (requires the `PYPI_API_TOKEN` repository secret to be
 configured — the release workflow's `publish-python` job skips gracefully
 until then). Full details: [`packaging/python/README.md`](packaging/python/README.md).
 
-### Ruby (RubyGems)
+### Ruby
 
-```sh
-gem install stem_mqtt   # one gem, both client and broker bindings
-```
-
-Not yet published (requires the `RUBYGEMS_API_KEY` repository secret to be
-configured — the release workflow's `publish-ruby` job skips gracefully
-until then). Full details: [`packaging/ruby/README.md`](packaging/ruby/README.md).
+Not currently supported. UniFFI 0.29 has no official Ruby backend, and no
+production-ready Ruby generator is available. See
+[`packaging/ruby/README.md`](packaging/ruby/README.md).
 
 ## Workspace layout
 
@@ -181,9 +175,10 @@ the broker.
   four-part handshake (PUBLISH → PUBREC → PUBREL → PUBCOMP), with real
   redelivery (DUP=1 resend on timeout) on both the client and broker side
   — not just a single fire-and-hope attempt.
-- **All standard packet types** — CONNECT/CONNACK, PUBLISH and its ack
-  chain, SUBSCRIBE/SUBACK, UNSUBSCRIBE/UNSUBACK, PING, DISCONNECT, and
-  MQTT 5 AUTH.
+- **Wire codec for all control packet types** — CONNECT/CONNACK, PUBLISH and
+  its ack chain, SUBSCRIBE/SUBACK, UNSUBSCRIBE/UNSUBACK, PING, DISCONNECT,
+  and MQTT 5 AUTH. Enhanced-authentication flows beyond packet encoding are
+  not currently implemented.
 - **TLS** (client + broker, `mqtt-client::TlsOptions` /
   `mqtt-broker::BrokerTlsConfig`) — pure-Rust `rustls`, custom CA support,
   and mutual TLS (mTLS) client-certificate verification. No OpenSSL/system-
@@ -198,8 +193,7 @@ the broker.
 - **Pluggable broker auth** (`MqttAuthProvider`) and event observation
   (`MqttBrokerEventListener`) for foreign callers.
 - **UniFFI bindings** — both crates build as `cdylib`/`staticlib` and ship a
-  `uniffi-bindgen` binary to generate Kotlin, Swift, or Python bindings
-  (Ruby via the separate `uniffi-bindgen-ruby` generator).
+  `uniffi-bindgen` binary to generate Kotlin, Swift, or Python bindings.
 - **Node.js / TypeScript bindings** for `mqtt-client` via napi-rs
   (`crates/mqtt-client-node`) — server-side Node, not the browser (no
   MQTT-over-WebSocket transport yet).
@@ -265,7 +259,7 @@ Deployment+Service Kubernetes demo.
 
 ```sh
 ./scripts/generate-bindings.sh kotlin   # or: swift, python
-just bindings-ruby                        # ruby uses a separate generator
+just bindings-all
 ```
 
 Node.js/TypeScript bindings are a separate crate, not a UniFFI target:
@@ -274,19 +268,13 @@ Node.js/TypeScript bindings are a separate crate, not a UniFFI target:
 cd crates/mqtt-client-node && npm ci && npm run build:debug
 ```
 
-UniFFI's own CLI (bundled with the `uniffi` crate) natively supports Kotlin,
-Swift, and Python. Ruby bindings come from the separate
-[`uniffi-bindgen-ruby`](https://github.com/mozilla/uniffi-rs) generator, so
-they're wired up through `packaging/ruby/build_and_publish.sh` instead of
-`scripts/generate-bindings.sh` (which will tell you as much if you pass it
-`ruby`).
+UniFFI's CLI natively supports Kotlin, Swift, and Python. Ruby is not
+advertised because UniFFI 0.29 has no production Ruby backend.
 
-See [`packaging/README.md`](packaging/README.md) for details on what the
-script produces and how release artifacts are laid out, and
-[`packaging/python`](packaging/python), [`packaging/kotlin`](packaging/kotlin),
-[`packaging/swift`](packaging/swift), [`packaging/ruby`](packaging/ruby) for
-how each language's package actually gets published (PyPI, GitHub Packages
-Maven, an SPM binary target, and RubyGems respectively).
+See [`packaging/README.md`](packaging/README.md) for release artifact layout,
+and [`packaging/python`](packaging/python),
+[`packaging/kotlin`](packaging/kotlin), and
+[`packaging/swift`](packaging/swift) for language-specific packaging.
 
 ## Development
 
@@ -320,21 +308,20 @@ reachable as `just test-nu`).
 
 - **GitHub** (`.github/workflows/`): `ci.yml` (fmt/clippy/test/build/doc/nu/node
   tests), `release.yml` (on `vX.Y.Z` tag: cross-platform `mqtt-broker` +
-  `mqtt-client` native library artifacts, all-language bindings including a
-  multi-platform Node addon, GitHub Release, then crates.io + PyPI +
-  GitHub Packages (Kotlin) + Swift Package Manager + RubyGems + npm
-  publishing — each publish job skips gracefully if its registry secret
-  isn't configured), `auto-merge.yml` (Dependabot), `dependabot.yml`
+  `mqtt-client` native library artifacts, validated Kotlin/Swift/Python
+  bindings, multi-platform Python wheels, a verified Swift client+broker
+  package, a multi-platform Node addon, GitHub Release, then crates.io + PyPI +
+  GitHub Packages (Kotlin) + npm publishing — token-gated registry jobs skip
+  when their secret isn't configured), `auto-merge.yml` (Dependabot), `dependabot.yml`
   (GitHub Actions version bumps).
-- **Gitea** (`.gitea/workflows/`): mirrored `ci.yml`/`release.yml` (curl-installed
-  Rust instead of marketplace actions, for portability across Gitea runner
-  setups) plus `deps-update.yml` (nightly `cargo upgrade` sweep, auto-committed
-  if the quality gate stays green).
+- **Gitea** (`.gitea/workflows/`): mirrored CI plus a reduced Linux/Windows
+  broker-binary release workflow (Apple/mobile and registry publishing remain
+  GitHub-hosted), and `deps-update.yml` for dependency updates.
 
 ## Release process
 
 ```sh
-just release 0.2.0   # bump + quality gate + commit + tag + push --follow-tags
+just release <version>   # preflight + bump + quality gate + tag + push
 ```
 
 See the [`justfile`](justfile) for the full release/version-bump/multi-remote

@@ -1,48 +1,43 @@
-# Swift packaging (XCFramework + Swift Package Manager)
+# Swift packaging (client + broker)
 
-SPM has no external registry like npm/PyPI/crates.io — the package
-"registry" entry *is* this git repository, referenced by tag. Consumers add
-it as a Swift Package dependency directly:
+`build_xcframework.sh` produces one self-contained Swift package archive with
+both UniFFI APIs:
 
-```swift
-// Package.swift
-dependencies: [
-    .package(url: "https://github.com/sorinirimies/stem-mqtt", from: "0.2.0"),
-]
-```
+- `MqttClient` — client wrapper + `MqttClientFFI.xcframework`
+- `MqttBroker` — broker wrapper + `MqttBrokerFFI.xcframework`
 
-pointing at `packaging/swift/Package.swift`, which declares a
-`.binaryTarget(url:checksum:)` for a prebuilt `MqttClient.xcframework`
-(macOS arm64 + x86_64, universal).
+Each XCFramework contains macOS arm64/x86_64, iOS arm64, and iOS Simulator
+arm64/x86_64 slices. The generated Swift wrappers are separate targets because
+UniFFI emits crate-local helper names that would collide if both generated
+files were compiled in one Swift module.
 
-## How a release updates it
+## Build locally
 
-1. `packaging/swift/build_xcframework.sh <version>` — builds `mqtt-client`
-   for macOS (arm64 + x86_64), iOS device (arm64), and the iOS simulator
-   (arm64 + x86_64, universal), generates the Swift bindings via
-   `uniffi-bindgen`, `lipo`s each multi-arch slice into a universal static
-   lib, and assembles `MqttClient.xcframework` with
-   `xcodebuild -create-xcframework` (3 slices: `macos-arm64_x86_64`,
-   `ios-arm64`, `ios-arm64_x86_64-simulator`).
-2. The zipped XCFramework is attached to the GitHub release as an asset.
-3. `packaging/swift/update_manifest.sh <tag>` computes its checksum
-   (`swift package compute-checksum`) and rewrites `Package.swift` to point
-   at that release asset + checksum.
-4. CI commits the updated `Package.swift` back to `main`.
-
-Both scripts only run on macOS (`xcodebuild`/`lipo`/`swift` aren't available
-elsewhere), which is why `publish-swift` in
-`.github/workflows/release.yml` uses `runs-on: macos-latest`.
-
-## Building locally
+Requires macOS, Xcode command-line tools, Swift, and Rust targets for macOS/iOS:
 
 ```sh
-./packaging/swift/build_xcframework.sh 0.0.0-dev
-# -> packaging/swift/dist/MqttClient-0.0.0-dev.xcframework.zip
+./packaging/swift/build_xcframework.sh 0.2.3
+# -> packaging/swift/dist/StemMqttSwift-0.2.3.zip
 ```
 
-## Caveats
+The script builds both Rust crates for every Apple target, generates both Swift
+wrappers, assembles both XCFrameworks, then runs `swift build` against the
+packaged result. A release fails if either wrapper or native framework cannot
+compile together.
 
-- `mqtt-broker`'s Swift bindings aren't packaged here (a broker embedded in
-  an iOS/macOS app is a less common use case than the client); follow the
-  same pattern with a second XCFramework if needed.
+## Consume
+
+Download `StemMqttSwift-<version>.zip` from the matching GitHub Release, extract
+it, then add the extracted `StemMqttSwift` directory as a local Swift package.
+Import either or both products:
+
+```swift
+import MqttClient
+import MqttBroker
+```
+
+A remote `.package(url:from:)` declaration is intentionally not advertised.
+SwiftPM reads `Package.swift` from the immutable git tag, while release-asset
+checksums only exist after that tag's CI build. The release therefore ships a
+verified self-contained package archive instead of committing a manifest whose
+checksum points at a future artifact.

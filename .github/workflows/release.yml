@@ -43,7 +43,7 @@ jobs:
           else
             TAG="${{ github.ref_name }}"
           fi
-          nu scripts/ci/validate_tag.nu "$TAG" >> "$GITHUB_OUTPUT"
+          nu scripts/ci/validate_tag.nu "$TAG" --check-workspace >> "$GITHUB_OUTPUT"
 
   # ── 1. Quality gate ───────────────────────────────────────────────────────────
   test:
@@ -239,7 +239,7 @@ jobs:
             mqtt-client-*.zip
           retention-days: 1
 
-  # ── 4. UniFFI bindings (Kotlin, Swift, Python, Ruby) ──────────────────────────
+  # ── 4. UniFFI source bindings (official backends) ────────────────────────────
   bindings:
     name: UniFFI bindings — ${{ matrix.language }}
     needs: [validate, test]
@@ -247,7 +247,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        language: [kotlin, swift, python, ruby]
+        language: [kotlin, swift, python]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -256,35 +256,182 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
 
-      - name: Install uniffi-bindgen-ruby
-        if: matrix.language == 'ruby'
-        run: cargo install uniffi-bindgen-ruby --locked || echo "⚠️  uniffi-bindgen-ruby unavailable — skipping"
-
       - name: Generate bindings (mqtt-client)
         run: ./scripts/generate-bindings.sh ${{ matrix.language }} mqtt-client
-        continue-on-error: ${{ matrix.language == 'ruby' }}
 
       - name: Generate bindings (mqtt-broker)
         run: ./scripts/generate-bindings.sh ${{ matrix.language }} mqtt-broker
-        continue-on-error: ${{ matrix.language == 'ruby' }}
 
-      - name: Zip bindings
+      - name: Validate and zip bindings
         run: |
-          if [ -d "bindings/${{ matrix.language }}" ]; then
-            zip -r "bindings-${{ matrix.language }}.zip" "bindings/${{ matrix.language }}"
-          fi
+          set -euo pipefail
+          root="bindings/${{ matrix.language }}"
+          for crate in mqtt-client mqtt-broker; do
+            count="$(find "$root/$crate" -type f | wc -l | tr -d ' ')"
+            if [ "$count" -eq 0 ]; then
+              echo "error: generated ${{ matrix.language }} bindings for $crate are empty" >&2
+              exit 1
+            fi
+          done
+          zip -qr "bindings-${{ matrix.language }}.zip" "$root"
+          unzip -t "bindings-${{ matrix.language }}.zip" >/dev/null
 
       - uses: actions/upload-artifact@v4
         with:
           name: bindings-${{ matrix.language }}
           path: bindings-${{ matrix.language }}.zip
-          if-no-files-found: ignore
+          if-no-files-found: error
           retention-days: 1
 
-  # ── 4. GitHub Release ──────────────────────────────────────────────────────────
+  # ── 5. Python wheels (client + broker, desktop platforms) ─────────────────────
+  build-python:
+    name: Build Python — ${{ matrix.crate }} / ${{ matrix.runner }}
+    needs: [validate, test]
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, macos-latest, windows-latest]
+        crate: [mqtt-client, mqtt-broker]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate.outputs.tag }}
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install maturin
+        run: pip install maturin
+
+      - name: Build wheel
+        run: maturin build --release --manifest-path crates/${{ matrix.crate }}/Cargo.toml
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: python-${{ matrix.crate }}-${{ matrix.runner }}
+          path: target/wheels/*.whl
+          if-no-files-found: error
+          retention-days: 1
+
+  test-python:
+    name: Test Python wheels — ${{ matrix.runner }}
+    needs: [validate, build-python]
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate.outputs.tag }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: python-*
+          path: wheels
+          merge-multiple: true
+
+      - name: Install matching client + broker wheels
+        run: >-
+          python -m pip install --no-index --find-links wheels
+          stem-mqtt-client==${{ needs.validate.outputs.version }}
+          stem-mqtt-broker==${{ needs.validate.outputs.version }}
+
+      - name: Run client/broker round-trip
+        run: python packaging/python/smoke_test.py
+
+  # ── 6. Kotlin JVM + Android packages (client + broker) ────────────────────────
+  build-kotlin:
+    name: Build Kotlin packages
+    needs: [validate, test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate.outputs.tag }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android,i686-linux-android
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --locked
+
+      - uses: nttld/setup-ndk@v1
+        id: setup-ndk
+        with:
+          ndk-version: r27c
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Ensure Android SDK platform 34 + build-tools are installed
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "platforms;android-34" "build-tools;34.0.0" >/dev/null
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Generate and stage client + broker
+        run: |
+          ./scripts/generate-bindings.sh kotlin mqtt-client
+          ./scripts/generate-bindings.sh kotlin mqtt-broker
+          ./packaging/kotlin/stage.sh ${{ needs.validate.outputs.version }}
+          ANDROID_NDK_HOME=${{ steps.setup-ndk.outputs.ndk-path }} ./packaging/kotlin/stage-android.sh
+
+      - name: Build JVM jar
+        working-directory: packaging/kotlin
+        env:
+          PACKAGE_VERSION: ${{ needs.validate.outputs.version }}
+        run: gradle clean build --no-daemon
+
+      - name: Build Android AAR
+        working-directory: packaging/kotlin/android
+        env:
+          PACKAGE_VERSION: ${{ needs.validate.outputs.version }}
+        run: gradle clean assembleRelease --no-daemon
+
+      - name: Validate and stage publication inputs
+        run: |
+          set -euo pipefail
+          jar_path="packaging/kotlin/build/libs/stem-mqtt-kotlin-${{ needs.validate.outputs.version }}.jar"
+          aar_path="packaging/kotlin/android/build/outputs/aar/stem-mqtt-kotlin-android-release.aar"
+          jar tf "$jar_path" > kotlin-jar-files.txt
+          grep -q 'uniffi/mqtt_client/MqttClient.class' kotlin-jar-files.txt
+          grep -q 'uniffi/mqtt_broker/MqttBroker.class' kotlin-jar-files.txt
+          for abi in arm64-v8a armeabi-v7a x86_64 x86; do
+            unzip -p "$aar_path" "jni/$abi/libmqtt_client.so" >/dev/null
+            unzip -p "$aar_path" "jni/$abi/libmqtt_broker.so" >/dev/null
+          done
+          tar czf kotlin-publish-inputs.tar.gz \
+            packaging/kotlin/staged \
+            packaging/kotlin/android/staged-jniLibs
+          cp "$jar_path" .
+          cp "$aar_path" stem-mqtt-android-${{ needs.validate.outputs.version }}.aar
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kotlin-packages
+          path: |
+            kotlin-publish-inputs.tar.gz
+            stem-mqtt-kotlin-*.jar
+            stem-mqtt-android-*.aar
+          if-no-files-found: error
+          retention-days: 1
+
+  # ── 7. GitHub Release ──────────────────────────────────────────────────────────
   release:
     name: Create GitHub Release
-    needs: [validate, build-broker, build-client, bindings]
+    needs: [validate, build-broker, build-client, bindings, build-python, test-python, build-kotlin, build-swift, build-node]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -318,7 +465,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # ── 5. Publish to crates.io ────────────────────────────────────────────────────
+  # ── 8. Publish to crates.io ────────────────────────────────────────────────────
   publish-crates:
     name: Publish to crates.io
     needs: [validate, release]
@@ -354,7 +501,7 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
         run: nu scripts/ci/publish_crate.nu stem-mqtt-broker ${{ needs.validate.outputs.version }} --readme-dir crates/mqtt-broker --wait 0
 
-  # ── 6. Publish Python wheels to PyPI ───────────────────────────────────────────
+  # ── 9. Publish Python wheels to PyPI ───────────────────────────────────────────
   publish-python:
     name: Publish to PyPI
     needs: [validate, release]
@@ -366,12 +513,6 @@ jobs:
         if: env.HAS_TOKEN != 'true'
         run: echo "⏭️  PYPI_API_TOKEN not set — skipping. See packaging/python/README.md."
 
-      - uses: actions/checkout@v4
-        if: env.HAS_TOKEN == 'true'
-        with:
-          ref: ${{ needs.validate.outputs.tag }}
-      - uses: dtolnay/rust-toolchain@stable
-        if: env.HAS_TOKEN == 'true'
       - uses: actions/setup-python@v5
         if: env.HAS_TOKEN == 'true'
         with:
@@ -381,44 +522,28 @@ jobs:
         if: env.HAS_TOKEN == 'true'
         run: pip install maturin
 
-      - name: Build + publish mqtt-client wheel
+      - uses: actions/download-artifact@v4
         if: env.HAS_TOKEN == 'true'
-        working-directory: crates/mqtt-client
+        with:
+          pattern: python-*
+          path: wheels
+          merge-multiple: true
+
+      - name: Publish verified wheels
+        if: env.HAS_TOKEN == 'true'
         env:
           MATURIN_PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
-        run: maturin publish --skip-existing
+        run: maturin upload --skip-existing wheels/*.whl
 
-      - name: Build + publish mqtt-broker wheel
-        if: env.HAS_TOKEN == 'true'
-        working-directory: crates/mqtt-broker
-        env:
-          MATURIN_PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
-        run: maturin publish --skip-existing
-
-  # ── 7. Publish Kotlin/JVM package to GitHub Packages (Maven) ──────────────────
+  # ── 10. Publish verified Kotlin packages to GitHub Packages ──────────────────
   publish-kotlin:
-    name: Publish Kotlin package
-    needs: [validate, release]
+    name: Publish Kotlin packages
+    needs: [validate, build-kotlin, release]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ needs.validate.outputs.tag }}
-
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android,i686-linux-android
-
-      - name: Install cargo-ndk
-        run: cargo install cargo-ndk --locked
-
-      - uses: nttld/setup-ndk@v1
-        id: setup-ndk
-        with:
-          ndk-version: r27c
-
-      - name: Generate Kotlin bindings
-        run: ./scripts/generate-bindings.sh kotlin mqtt-client
 
       - uses: actions/setup-java@v4
         with:
@@ -431,13 +556,13 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Stage generated sources + native libs (JVM)
-        run: ./packaging/kotlin/stage.sh ${{ needs.validate.outputs.version }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: kotlin-packages
+          path: .
 
-      - name: Cross-compile + stage native libs (Android, all ABIs)
-        env:
-          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
-        run: ./packaging/kotlin/stage-android.sh
+      - name: Restore verified publication inputs
+        run: tar xzf kotlin-publish-inputs.tar.gz
 
       - name: Publish Kotlin/JVM package to GitHub Packages
         working-directory: packaging/kotlin
@@ -453,10 +578,10 @@ jobs:
           PACKAGE_VERSION: ${{ needs.validate.outputs.version }}
         run: gradle publish --no-daemon
 
-  # ── 8. Publish Swift package (XCFramework + Package.swift) ────────────────────
-  publish-swift:
-    name: Publish Swift package
-    needs: [validate, build-broker, release]
+  # ── 11. Build Swift client+broker package archive ─────────────────────────────
+  build-swift:
+    name: Build Swift package
+    needs: [validate, test]
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -467,65 +592,17 @@ jobs:
         with:
           targets: aarch64-apple-darwin,x86_64-apple-darwin,aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios
 
-      - name: Generate Swift bindings + build XCFramework
+      - name: Build and verify client + broker Swift package
         run: ./packaging/swift/build_xcframework.sh ${{ needs.validate.outputs.version }}
 
-      - name: Upload XCFramework artifact
+      - name: Upload Swift package artifact
         uses: actions/upload-artifact@v4
         with:
-          name: mqtt-client-swift-xcframework
-          path: packaging/swift/dist/*.zip
+          name: stem-mqtt-swift
+          path: packaging/swift/dist/StemMqttSwift-*.zip
+          if-no-files-found: error
 
-      - name: Attach XCFramework to the GitHub Release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload ${{ needs.validate.outputs.tag }} packaging/swift/dist/*.zip --clobber
-
-      - name: Update Package.swift with release checksum
-        run: ./packaging/swift/update_manifest.sh ${{ needs.validate.outputs.tag }}
-
-      - name: Commit updated Package.swift
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add packaging/swift/Package.swift
-          git diff --cached --quiet || git commit -m "chore(swift): update Package.swift for ${{ needs.validate.outputs.tag }}"
-          git push origin HEAD:main || echo "⚠️  Could not push Package.swift update (branch protection?) — update it manually."
-
-  # ── 9. Publish Ruby gem to RubyGems ────────────────────────────────────────────
-  publish-ruby:
-    name: Publish Ruby gem
-    needs: [validate, release]
-    runs-on: ubuntu-latest
-    env:
-      HAS_TOKEN: ${{ secrets.RUBYGEMS_API_KEY != '' }}
-    steps:
-      - name: Skip (no token)
-        if: env.HAS_TOKEN != 'true'
-        run: echo "⏭️  RUBYGEMS_API_KEY not set — skipping. See packaging/ruby/README.md."
-
-      - uses: actions/checkout@v4
-        if: env.HAS_TOKEN == 'true'
-        with:
-          ref: ${{ needs.validate.outputs.tag }}
-      - uses: dtolnay/rust-toolchain@stable
-        if: env.HAS_TOKEN == 'true'
-      - uses: ruby/setup-ruby@v1
-        if: env.HAS_TOKEN == 'true'
-        with:
-          ruby-version: "3.3"
-
-      - name: Install uniffi-bindgen-ruby
-        if: env.HAS_TOKEN == 'true'
-        run: cargo install uniffi-bindgen-ruby --locked
-
-      - name: Build + publish gem
-        if: env.HAS_TOKEN == 'true'
-        env:
-          GEM_HOST_API_KEY: ${{ secrets.RUBYGEMS_API_KEY }}
-        run: ./packaging/ruby/build_and_publish.sh ${{ needs.validate.outputs.version }}
-
-  # ── 10. Node.js native addon (napi-rs) ─────────────────────────────────────────
+  # ── 12. Node.js native addon (napi-rs; client only) ────────────────────────────
   build-node:
     name: Build Node addon — ${{ matrix.target }}
     needs: [validate, test]
@@ -536,12 +613,19 @@ jobs:
         include:
           - runner: ubuntu-latest
             target: x86_64-unknown-linux-gnu
+            cross: false
+          - runner: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            cross: true
           - runner: macos-latest
             target: x86_64-apple-darwin
+            cross: false
           - runner: macos-latest
             target: aarch64-apple-darwin
+            cross: false
           - runner: windows-latest
             target: x86_64-pc-windows-msvc
+            cross: false
     steps:
       - uses: actions/checkout@v4
         with:
@@ -564,13 +648,31 @@ jobs:
         run: npm ci
 
       - name: Build native addon (release)
+        if: ${{ !matrix.cross }}
         working-directory: crates/mqtt-client-node
         run: npx napi build --platform --release --target ${{ matrix.target }} --js index.js --dts index.d.ts
+
+      # `--use-napi-cross` downloads a prebuilt glibc cross-toolchain from
+      # `@napi-rs/cross-toolchain` (x64 host -> arm64 glibc target) instead of
+      # needing Docker/`cross`-rs or a local `zig` install — napi-rs's own
+      # blessed path for cross-compiling a native addon to another Linux
+      # glibc arch. N-API's headers are vendored in `napi-sys` (no libnode/
+      # Node headers needed at compile time), so this is just a normal cdylib
+      # cross-compile under the hood, same idea as `build-broker`'s
+      # `cross`-based aarch64 job, just via napi-rs's own toolchain fetcher.
+      - name: Build native addon (release, cross-compiled)
+        if: matrix.cross
+        working-directory: crates/mqtt-client-node
+        run: npx napi build --platform --release --target ${{ matrix.target }} --use-napi-cross --js index.js --dts index.d.ts
 
       - uses: actions/upload-artifact@v4
         with:
           name: node-addon-${{ matrix.target }}
-          path: crates/mqtt-client-node/*.node
+          path: |
+            crates/mqtt-client-node/*.node
+            crates/mqtt-client-node/index.js
+            crates/mqtt-client-node/index.d.ts
+          if-no-files-found: error
           retention-days: 1
 
   publish-node:
@@ -607,10 +709,22 @@ jobs:
           path: crates/mqtt-client-node/artifacts
           merge-multiple: true
 
-      - name: Stage all platform binaries next to index.js
+      - name: Stage and validate package files
         if: env.HAS_TOKEN == 'true'
         working-directory: crates/mqtt-client-node
-        run: cp artifacts/*.node .
+        run: |
+          cp artifacts/*.node artifacts/index.js artifacts/index.d.ts .
+          test -s index.js
+          test -s index.d.ts
+          for binary in \
+            mqtt-client.linux-x64-gnu.node \
+            mqtt-client.linux-arm64-gnu.node \
+            mqtt-client.darwin-x64.node \
+            mqtt-client.darwin-arm64.node \
+            mqtt-client.win32-x64-msvc.node; do
+            test -s "$binary" || { echo "error: missing $binary" >&2; exit 1; }
+          done
+          npm pack --dry-run
 
       - name: Set package version
         if: env.HAS_TOKEN == 'true'

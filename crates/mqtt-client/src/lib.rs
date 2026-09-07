@@ -1,5 +1,5 @@
-//! `mqtt-client` — a full MQTT 3.1.1 / MQTT 5.0 client written in Rust,
-//! exposed to other languages (Kotlin, Swift, Python, Ruby, Go, ...) via
+//! `mqtt-client` — an MQTT 3.1.1 / MQTT 5.0 client written in Rust,
+//! exposed to other languages (Kotlin, Swift, and Python) via
 //! [UniFFI](https://mozilla.github.io/uniffi-rs/).
 //!
 //! The [`protocol`] module is a pure, allocation-friendly codec for the MQTT

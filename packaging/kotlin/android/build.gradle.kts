@@ -37,9 +37,8 @@ android {
             // themselves are platform-agnostic Kotlin/JNA code; only the
             // native-lib delivery mechanism differs per platform.
             kotlin.directories.add("../staged/kotlin")
-            // Populated by packaging/kotlin/stage-android.sh, one
-            // libmqtt_client.so per ABI (mqtt-broker isn't packaged here —
-            // see stage.sh for why).
+            // Populated by packaging/kotlin/stage-android.sh, with
+            // libmqtt_client.so + libmqtt_broker.so for every ABI.
             jniLibs.directories.add("staged-jniLibs")
         }
     }
@@ -76,14 +75,14 @@ publishing {
     publications {
         register<MavenPublication>("release") {
             groupId = "com.github.sorinirimies.stemmqtt"
-            artifactId = "stem-mqtt-client-android"
+            artifactId = "stem-mqtt-android"
             afterEvaluate {
                 from(components["release"])
             }
             pom {
                 name.set("stem-mqtt Kotlin/Android bindings")
                 description.set(
-                    "UniFFI-generated Kotlin bindings for the stem-mqtt client, " +
+                    "UniFFI-generated Kotlin bindings for the stem-mqtt client and broker, " +
                         "packaged as an Android AAR (jniLibs for arm64-v8a/armeabi-v7a/x86_64/x86)."
                 )
                 url.set("https://github.com/sorinirimies/stem-mqtt")

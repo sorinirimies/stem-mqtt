@@ -4,12 +4,11 @@
 //! doesn't map onto JavaScript the way it does onto the JVM/Swift/CPython
 //! runtimes, so Node gets its own native addon crate instead.
 //!
-//! Scope: this wraps the existing `tokio`-based, raw-TCP `MqttClient`, so it
+//! Scope: this wraps the existing `tokio`-based TCP/TLS `MqttClient`, so it
 //! targets **Node.js (server-side / Electron main process)**, not the
 //! browser. A browser/WASM MQTT client would need an MQTT-over-WebSocket
-//! transport (browsers can't open raw TCP sockets) — the broker and client
-//! here only speak plain MQTT-over-TCP today, so that's future work, not
-//! something this crate papers over.
+//! transport (browsers can't open raw TCP sockets), so that's future work,
+//! not something this crate papers over.
 
 #![deny(clippy::all)]
 
@@ -21,7 +20,8 @@ use napi_derive::napi;
 
 use mqtt_client::{
     ConnectOptions as CoreConnectOptions, MqttClient as CoreClient, MqttMessage as CoreMessage,
-    MqttMessageListener, MqttVersion as CoreVersion, QoS as CoreQoS, WillOptions as CoreWill,
+    MqttMessageListener, MqttVersion as CoreVersion, QoS as CoreQoS, TlsOptions as CoreTls,
+    WillOptions as CoreWill,
 };
 
 fn qos_from_u8(qos: u8) -> Result<CoreQoS> {
@@ -45,6 +45,15 @@ pub struct WillOptions {
     pub retain: bool,
 }
 
+/// TLS configuration. Certificate and key values contain PEM bytes.
+#[napi(object)]
+pub struct TlsOptions {
+    pub ca_cert_pem: Option<Buffer>,
+    pub client_cert_pem: Option<Buffer>,
+    pub client_key_pem: Option<Buffer>,
+    pub insecure_skip_certificate_verification: Option<bool>,
+}
+
 /// Everything needed to establish an MQTT connection.
 /// `version` is `"3.1.1"` or `"5.0"`.
 #[napi(object)]
@@ -60,6 +69,10 @@ pub struct ConnectOptions {
     pub will: Option<WillOptions>,
     pub connect_timeout_secs: Option<u32>,
     pub operation_timeout_secs: Option<u32>,
+    pub auto_reconnect: Option<bool>,
+    pub reconnect_backoff_secs: Option<u32>,
+    pub reconnect_max_backoff_secs: Option<u32>,
+    pub tls: Option<TlsOptions>,
 }
 
 impl ConnectOptions {
@@ -95,6 +108,25 @@ impl ConnectOptions {
         }
         if let Some(v) = self.operation_timeout_secs {
             opts.operation_timeout_secs = v;
+        }
+        if let Some(v) = self.auto_reconnect {
+            opts.auto_reconnect = v;
+        }
+        if let Some(v) = self.reconnect_backoff_secs {
+            opts.reconnect_backoff_secs = v;
+        }
+        if let Some(v) = self.reconnect_max_backoff_secs {
+            opts.reconnect_max_backoff_secs = v;
+        }
+        if let Some(tls) = self.tls {
+            opts.tls = Some(CoreTls {
+                ca_cert_pem: tls.ca_cert_pem.map(|value| value.to_vec()),
+                client_cert_pem: tls.client_cert_pem.map(|value| value.to_vec()),
+                client_key_pem: tls.client_key_pem.map(|value| value.to_vec()),
+                insecure_skip_certificate_verification: tls
+                    .insecure_skip_certificate_verification
+                    .unwrap_or(false),
+            });
         }
         Ok(opts)
     }

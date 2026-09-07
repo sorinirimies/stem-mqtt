@@ -1,6 +1,6 @@
 # mqtt-broker
 
-A full MQTT 3.1.1 / MQTT 5.0 broker, implemented in Rust and exposed to
+An MQTT 3.1.1 / MQTT 5.0 broker, implemented in Rust and exposed to
 Kotlin, Swift, Python, and other languages via
 [UniFFI](https://mozilla.github.io/uniffi-rs/). Reuses the wire-protocol
 codec from [`mqtt-client`](../mqtt-client/README.md)
@@ -20,12 +20,11 @@ cargo add stem-mqtt-broker
 use mqtt_broker::{MqttBroker, MqttBrokerConfig};
 ```
 
-Note: only `mqtt-client`'s bindings are published to Kotlin/npm/SPM (not
-`mqtt-broker`'s — see [`packaging/kotlin/README.md`](../../packaging/kotlin/README.md)
-for why Kotlin specifically can't ship them yet). Rust/crates.io, Python/PyPI,
-and Ruby/RubyGems do ship the broker. See the
+Both client and broker bindings ship for Kotlin, Android, Swift, and Python.
+Node.js remains client-only because it uses a separate hand-written napi-rs
+addon rather than UniFFI. See the
 [root README's Installation section](../../README.md#installation) for every
-language.
+supported language.
 
 ## Layout
 

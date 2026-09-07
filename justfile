@@ -44,6 +44,11 @@ _check-vhs:
         exit 1; \
     }
 
+_check-topcoat:
+    @command -v topcoat >/dev/null 2>&1 || { \
+        echo "❌ topcoat CLI not found. Install with: cargo install topcoat-cli"; exit 1; \
+    }
+
 # Install all recommended development tools
 install-tools:
     @echo "Installing development tools…"
@@ -142,7 +147,7 @@ check-release: check-all build-release
 
 # ── UniFFI bindings ───────────────────────────────────────────────────────────
 
-# Generate bindings for one language, one crate (kotlin | swift | python | ruby)
+# Generate bindings for one language, one crate (kotlin | swift | python)
 bindings language crate="mqtt-client":
     ./scripts/generate-bindings.sh {{ language }} {{ crate }}
 
@@ -161,14 +166,9 @@ bindings-python:
     ./scripts/generate-bindings.sh python mqtt-client
     ./scripts/generate-bindings.sh python mqtt-broker
 
-# Generate Ruby bindings for both crates (requires uniffi-bindgen-ruby)
-bindings-ruby:
-    ./scripts/generate-bindings.sh ruby mqtt-client
-    ./scripts/generate-bindings.sh ruby mqtt-broker
-
-# Generate bindings for every supported language, both crates
-bindings-all: bindings-kotlin bindings-swift bindings-python bindings-ruby
-    @echo "✅ All language bindings generated under bindings/"
+# Generate bindings for every officially supported UniFFI language
+bindings-all: bindings-kotlin bindings-swift bindings-python
+    @echo "✅ Kotlin, Swift, and Python bindings generated under bindings/"
 
 # ── Node.js / TypeScript (napi-rs, not a UniFFI target) ────────────────
 
@@ -194,19 +194,21 @@ test-node: build-node
 package-linux-aarch64: _check-cross
     cross build --release -p stem-mqtt-broker --bin mqtt-broker --target aarch64-unknown-linux-gnu
 
-# Stage the Kotlin/JVM package (generates bindings + builds the release
-# cdylib + stages packaging/kotlin/staged/) — run `gradle build` in
-# packaging/kotlin/ afterwards to actually build the jar.
+# Stage the Kotlin/JVM client+broker package (generates bindings + builds
+# release cdylibs + stages packaging/kotlin/staged/) — run `gradle build` in
+# packaging/kotlin/ afterwards to build the jar.
 package-kotlin-jvm:
     ./scripts/generate-bindings.sh kotlin mqtt-client
+    ./scripts/generate-bindings.sh kotlin mqtt-broker
     ./packaging/kotlin/stage.sh 0.0.0-dev
 
-# Cross-compile mqtt-client for every Android ABI (arm64-v8a/armeabi-v7a/
-# x86_64/x86) and stage the .so files for the :android AAR module (requires
-# `cargo-ndk` + an installed NDK — see packaging/kotlin/README.md). Run
-# `gradle assembleRelease` in packaging/kotlin/android/ afterwards to
-# actually build the AAR.
+# Cross-compile client+broker for every Android ABI (arm64-v8a/armeabi-v7a/
+# x86_64/x86), stage generated Kotlin sources + .so files, then run Gradle
+# under packaging/kotlin/android/ to build the AAR.
 package-kotlin-android: _check-cargo-ndk
+    ./scripts/generate-bindings.sh kotlin mqtt-client
+    ./scripts/generate-bindings.sh kotlin mqtt-broker
+    ./packaging/kotlin/stage.sh 0.0.0-dev
     ./packaging/kotlin/stage-android.sh
 
 # Build a Docker image for the broker (multi-stage packaging/Dockerfile —
@@ -268,6 +270,20 @@ demo-run:
     trap 'kill 0' EXIT
     cargo run -p stem-mqtt-broker --bin mqtt-broker -- --ws-port 8083 &
     (cd demo/web && python3 -m http.server 8090) &
+    wait
+
+# Run the broker (TCP :1883) + the Topcoat dashboard dev server (:3000)
+# together. `topcoat dev` builds the dashboard, bundles its client-runtime
+# assets, starts it, and live-reloads on source changes. The dashboard's
+# "New connection" form defaults to 127.0.0.1:1883, matching this broker.
+# Ctrl-C stops both.
+demo-dashboard: _check-topcoat
+    #!/usr/bin/env sh
+    set -e
+    echo "Broker (TCP :1883) + Topcoat dashboard (http://127.0.0.1:3000) — Ctrl-C to stop both"
+    trap 'kill 0' EXIT
+    cargo run -p stem-mqtt-broker --bin mqtt-broker &
+    topcoat dev --package stem-mqtt-dashboard &
     wait
 
 # Build and run the full demo (broker + demo webpage) via Docker Compose
@@ -507,34 +523,82 @@ push-tags-all:
 
 # ── Release workflows ─────────────────────────────────────────────────────────
 
-# Bump, commit, tag, then push to GitHub — triggers the Release workflow.
-release version: (bump version)
+# Verify remote CI + required registry credentials before creating a release tag.
+release-preflight:
+    #!/usr/bin/env sh
+    set -eu
+    [ "$(git branch --show-current)" = "main" ] || { echo "❌ Releases must run from main."; exit 1; }
+    [ -z "$(git status --porcelain)" ] || { echo "❌ Working tree is dirty."; exit 1; }
+    command -v gh >/dev/null 2>&1 || { echo "❌ gh CLI not found."; exit 1; }
+    for secret in CRATES_IO_TOKEN NPM_TOKEN PYPI_API_TOKEN; do
+        gh secret list --json name --jq '.[].name' | rg -qx "$secret" || {
+            echo "❌ Required GitHub secret missing: $secret"; exit 1;
+        }
+    done
+    conclusion=$(gh run list --workflow CI --commit "$(git rev-parse HEAD)" --limit 1 --json conclusion --jq '.[0].conclusion // "missing"')
+    [ "$conclusion" = "success" ] || {
+        echo "❌ Latest CI for HEAD is '$conclusion' (billing/runner failures also block release)."; exit 1;
+    }
+    echo "✅ Release preflight passed."
+
+# Prepare an unpushed annotated tag. Supports either bumping from an older
+# version or tagging an already-prepared version commit.
+_prepare-release-tag version: (validate-tag version)
+    #!/usr/bin/env sh
+    set -eu
+    tag="v{{ version }}"
+    if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+        echo "❌ Tag $tag already exists."
+        exit 1
+    fi
+    current=$(just version)
+    if [ "$current" != "{{ version }}" ]; then
+        just bump "{{ version }}"
+    else
+        just check-release
+        [ -z "$(git status --porcelain)" ] || {
+            echo "❌ Quality gate changed tracked files; commit them before tagging."
+            exit 1
+        }
+        git tag -a "$tag" -m "Release $tag"
+    fi
+
+# Prepare, tag, then push to GitHub — triggers the Release workflow.
+release version:
+    just release-preflight
+    just _prepare-release-tag "{{ version }}"
     @echo "Pushing release v{{ version }} to GitHub…"
     git push --follow-tags origin main
     @echo "✅ Release v{{ version }} pushed — Release workflow will trigger automatically."
     @echo "   https://github.com/$(git remote get-url origin | sed 's/.*github.com[:/]//' | sed 's/\.git//')/actions"
 
-# Bump, commit, tag, then push to Gitea Microlab only.
-release-gitea-microlab version: (bump version)
+# Prepare, tag, then push to Gitea Microlab only.
+release-gitea-microlab version:
+    just _prepare-release-tag "{{ version }}"
     @echo "Pushing release v{{ version }} to Gitea Microlab…"
     git push --follow-tags gitea-microlab main
     @echo "✅ Release v{{ version }} live on Gitea Microlab."
 
-# Bump, commit, tag, then push to Gitea (nexus-lab instance) only.
-release-gitea-nexus-lab version: (bump version)
+# Prepare, tag, then push to Gitea (nexus-lab instance) only.
+release-gitea-nexus-lab version:
+    just _prepare-release-tag "{{ version }}"
     @echo "Pushing release v{{ version }} to Gitea (nexus-lab)…"
     git push --follow-tags gitea-nexus-lab main
     @echo "✅ Release v{{ version }} live on Gitea (nexus-lab)."
 
-# Bump, commit, tag, then push to Gitea Starscream only.
-release-gitea-starscream version: (bump version)
+# Prepare, tag, then push to Gitea Starscream only.
+release-gitea-starscream version:
+    just _prepare-release-tag "{{ version }}"
     @echo "Pushing release v{{ version }} to Gitea Starscream…"
     git push --follow-tags gitea-starscream main
     @echo "✅ Release v{{ version }} live on Gitea Starscream."
 
-# Bump, commit, tag, then push to all remotes (continues on failure).
-release-all version: (bump version)
+# Prepare, tag, then push to all remotes (continues on failure).
+release-all version:
     #!/usr/bin/env sh
+    set -eu
+    just release-preflight
+    just _prepare-release-tag "{{ version }}"
     echo "Pushing release v{{ version }} to all remotes…"
     failed=""
     git push --follow-tags origin main             || failed="$failed origin"

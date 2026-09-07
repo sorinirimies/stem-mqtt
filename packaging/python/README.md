@@ -18,16 +18,18 @@ maturin build --release
 
 ## Publishing (CI)
 
-`.github/workflows/release.yml`'s `publish-python` job runs
-`maturin publish` for both crates on every `vX.Y.Z` tag, gated on the
-`PYPI_API_TOKEN` repository secret:
+`.github/workflows/release.yml` first builds both crates' wheels on Linux,
+macOS, and Windows and gates GitHub Release creation on those builds. Its
+`publish-python` job uploads those exact verified wheels to PyPI when the
+`PYPI_API_TOKEN` repository secret is configured:
 
 ```sh
 gh secret set PYPI_API_TOKEN --body "pypi-AgEI..."
 ```
 
-If the secret isn't set, the job skips with a message instead of failing —
-same pattern as the crates.io publish job.
+If the secret isn't set, registry upload skips, but wheel construction and a
+real client-to-broker runtime smoke test are still required on Linux, macOS,
+and Windows before GitHub Release creation.
 
 ## Distribution vs. import name
 
@@ -37,5 +39,12 @@ PyPI), but the importable module names stay `mqtt_client` / `mqtt_broker`:
 
 ```python
 import mqtt_client
+import mqtt_broker
+
 client = mqtt_client.MqttClient(...)
+broker_config = mqtt_broker.MqttBrokerConfig(
+    # Broker records use the broker wheel's generated external enum copy.
+    max_qos=mqtt_broker.QoS.EXACTLY_ONCE,
+    ...
+)
 ```

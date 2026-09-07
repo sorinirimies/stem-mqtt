@@ -3,11 +3,12 @@ members = [
     "crates/mqtt-client",
     "crates/mqtt-broker",
     "crates/mqtt-client-node",
+    "demo/dashboard",
 ]
 resolver = "2"
 
 [workspace.package]
-version      = "0.2.2"
+version      = "0.2.3"
 edition      = "2021"
 authors      = ["Sorin Irimies <sorinirimies@gmail.com>"]
 license      = "MIT"
@@ -47,7 +48,7 @@ rand       = "0.9"
 clap       = { version = "4", features = ["derive"] }
 
 # Internal crates
-mqtt-client = { package = "stem-mqtt-client", path = "crates/mqtt-client", version = "0.2.2" }
+mqtt-client = { package = "stem-mqtt-client", path = "crates/mqtt-client", version = "0.2.3" }
 
 [profile.dev]
 opt-level = 0

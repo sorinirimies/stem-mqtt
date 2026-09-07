@@ -105,7 +105,7 @@ def main [
                 repo_owner: $target_org,
                 mirror: true,
                 service: "git",
-                description: "stem-mqtt — a full MQTT 3.1.1 / MQTT 5.0 client and broker in Rust (mirror)"
+                description: "stem-mqtt — an MQTT 3.1.1 / MQTT 5.0 client and broker in Rust (mirror)"
             }
 
             let migrate_result = (do {
@@ -128,7 +128,7 @@ def main [
             print $"(ansi yellow)▶ Step 3: Creating repository on Gitea …(ansi reset)"
             let create_body = {
                 name: $target_repo,
-                description: "stem-mqtt — a full MQTT 3.1.1 / MQTT 5.0 client and broker in Rust",
+                description: "stem-mqtt — an MQTT 3.1.1 / MQTT 5.0 client and broker in Rust",
                 private: false,
                 auto_init: false
             }

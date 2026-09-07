@@ -1,16 +1,8 @@
 #!/usr/bin/env bash
-# Cross-compiles mqtt-client + mqtt-broker for every Android ABI via
-# cargo-ndk, staging the resulting .so files into
-# packaging/kotlin/android/staged-jniLibs/<abi>/ for the :android AAR
-# module (packaging/kotlin/android/build.gradle.kts) to bundle.
+# Cross-compile mqtt-client + mqtt-broker for every Android ABI via cargo-ndk,
+# staging both .so files into packaging/kotlin/android/staged-jniLibs/<abi>/.
 #
-# Requires:
-#   - `cargo install cargo-ndk --locked`
-#   - Android NDK, with $ANDROID_NDK_HOME (or $ANDROID_NDK_ROOT) set
-#     (CI: nttld/setup-ndk; locally: `brew install --cask android-ndk` on
-#     macOS, then `export ANDROID_NDK_HOME=/opt/homebrew/share/android-ndk`)
-#
-# Usage: packaging/kotlin/stage-android.sh
+# Requires cargo-ndk plus ANDROID_NDK_HOME (or ANDROID_NDK_ROOT).
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 
@@ -29,16 +21,18 @@ out="packaging/kotlin/android/staged-jniLibs"
 rm -rf "$out"
 mkdir -p "$out"
 
-# cargo-ndk's own ABI names.
 abis=(arm64-v8a armeabi-v7a x86_64 x86)
-
-# mqtt-client only — see stage.sh for why mqtt-broker's Kotlin bindings
-# aren't packaged (upstream uniffi-rs Kotlin-bindgen bug with external
-# error types, https://github.com/mozilla/uniffi-rs/issues/2392).
-echo "==> cross-compiling mqtt-client for: ${abis[*]}"
+echo "==> cross-compiling mqtt-client + mqtt-broker for: ${abis[*]}"
 cargo ndk \
     -t arm64-v8a -t armeabi-v7a -t x86_64 -t x86 \
     -o "$out" \
-    build --release -p stem-mqtt-client
+    build --release -p stem-mqtt-client -p stem-mqtt-broker
 
-echo "staged Android native libs -> ${out}/{${abis[*]}}/"
+for abi in "${abis[@]}"; do
+    for lib in mqtt_client mqtt_broker; do
+        path="$out/$abi/lib${lib}.so"
+        test -s "$path" || { echo "error: missing Android library ${path}" >&2; exit 1; }
+    done
+done
+
+echo "staged Android client + broker libs -> ${out}/{${abis[*]}}/"

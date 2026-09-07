@@ -1,79 +1,147 @@
 #!/usr/bin/env bash
-# Builds an XCFramework bundling mqtt-client for macOS, iOS device, and the
-# iOS simulator, and generates the matching Swift bindings — ready to ship
-# as an SPM binary target.
-#
-#   macOS         -> universal (arm64 + x86_64) static lib
-#   iOS device    -> arm64 static lib (Apple dropped 32-bit/x86 devices)
-#   iOS simulator -> universal (Apple Silicon arm64 + Intel x86_64) static lib
+# Build a self-contained local Swift package containing UniFFI client+broker
+# wrappers and macOS/iOS XCFrameworks.
 #
 # Usage: packaging/swift/build_xcframework.sh <version>
-#
-# Output: packaging/swift/dist/MqttClient-<version>.xcframework.zip
+# Output: packaging/swift/dist/StemMqttSwift-<version>.zip
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 
 version="${1:?usage: $0 <version>}"
-crate="mqtt-client"
-package="stem-mqtt-client" # Cargo package name (see scripts/generate-bindings.sh for why this differs from `crate`)
-lib_name="mqtt_client"
 dist="packaging/swift/dist"
 work="packaging/swift/.build"
+package_dir="$dist/StemMqttSwift"
 
 rm -rf "$dist" "$work"
-mkdir -p "$dist" "$work"
+mkdir -p "$dist" "$work" "$package_dir/Sources/MqttClient" "$package_dir/Sources/MqttBroker"
 
-# rustup targets required for the iOS device + simulator slices. macOS
-# targets (aarch64-apple-darwin / x86_64-apple-darwin) are assumed already
-# installed, as they were before this script grew iOS support.
-ios_targets=(aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios)
-for t in "${ios_targets[@]}"; do
-    rustup target add "$t" >/dev/null 2>&1 || true
+rust_targets=(
+    aarch64-apple-darwin
+    x86_64-apple-darwin
+    aarch64-apple-ios
+    aarch64-apple-ios-sim
+    x86_64-apple-ios
+)
+for target in "${rust_targets[@]}"; do
+    rustup target add "$target" >/dev/null 2>&1 || true
 done
 
-echo "==> building ${crate} (release, staticlib) for macOS + iOS device + iOS simulator"
-cargo build --release -p "${package}" --target aarch64-apple-darwin
-cargo build --release -p "${package}" --target x86_64-apple-darwin
-cargo build --release -p "${package}" --target aarch64-apple-ios
-cargo build --release -p "${package}" --target aarch64-apple-ios-sim
-cargo build --release -p "${package}" --target x86_64-apple-ios
+build_xcframework() {
+    crate="$1"
+    cargo_package="$2"
+    lib_name="$3"
+    swift_name="$4"
+    ffi_module="$5"
 
-echo "==> creating universal (lipo'd) static libs: macOS (arm64+x86_64), iOS simulator (arm64+x86_64)"
-mkdir -p "$work/macos-universal" "$work/ios-simulator-universal"
-lipo -create \
-    "target/aarch64-apple-darwin/release/lib${lib_name}.a" \
-    "target/x86_64-apple-darwin/release/lib${lib_name}.a" \
-    -output "$work/macos-universal/lib${lib_name}.a"
-lipo -create \
-    "target/aarch64-apple-ios-sim/release/lib${lib_name}.a" \
-    "target/x86_64-apple-ios/release/lib${lib_name}.a" \
-    -output "$work/ios-simulator-universal/lib${lib_name}.a"
-# iOS device has only one slice (arm64) — no lipo needed, used directly
-# from target/aarch64-apple-ios/release/ below.
+    echo "==> building ${crate} static libraries"
+    for target in "${rust_targets[@]}"; do
+        cargo build --release -p "$cargo_package" --target "$target"
+    done
 
-echo "==> generating Swift bindings"
-cargo build --release -p "${package}" --features uniffi/cli
-mkdir -p "$work/swift"
-cargo run --release -p "${package}" --features uniffi/cli --bin uniffi-bindgen -- \
-    generate --library "target/release/lib${lib_name}.dylib" \
-    --language swift --out-dir "$work/swift"
+    crate_work="$work/$crate"
+    mkdir -p "$crate_work/macos-universal" "$crate_work/ios-simulator-universal"
+    lipo -create \
+        "target/aarch64-apple-darwin/release/lib${lib_name}.a" \
+        "target/x86_64-apple-darwin/release/lib${lib_name}.a" \
+        -output "$crate_work/macos-universal/lib${lib_name}.a"
+    lipo -create \
+        "target/aarch64-apple-ios-sim/release/lib${lib_name}.a" \
+        "target/x86_64-apple-ios/release/lib${lib_name}.a" \
+        -output "$crate_work/ios-simulator-universal/lib${lib_name}.a"
 
-echo "==> assembling the XCFramework headers module"
-headers_dir="$work/headers"
-mkdir -p "$headers_dir"
-cp "$work/swift"/*.h "$headers_dir/" 2>/dev/null || true
-cp "$work/swift"/*.modulemap "$headers_dir/module.modulemap" 2>/dev/null || true
+    echo "==> generating ${swift_name} Swift bindings"
+    generated="$crate_work/generated"
+    ./scripts/generate-bindings.sh swift "$crate" "$generated"
 
-echo "==> building MqttClient.xcframework (macOS + iOS device + iOS simulator)"
-xcodebuild -create-xcframework \
-    -library "$work/macos-universal/lib${lib_name}.a" -headers "$headers_dir" \
-    -library "target/aarch64-apple-ios/release/lib${lib_name}.a" -headers "$headers_dir" \
-    -library "$work/ios-simulator-universal/lib${lib_name}.a" -headers "$headers_dir" \
-    -output "$dist/MqttClient.xcframework"
+    header="$generated/${lib_name}FFI.h"
+    modulemap="$generated/${lib_name}FFI.modulemap"
+    swift_source="$generated/${lib_name}.swift"
+    for required in "$header" "$modulemap" "$swift_source"; do
+        test -s "$required" || { echo "error: missing generated Swift file ${required}" >&2; exit 1; }
+    done
 
-cp "$work/swift"/*.swift "$dist/" 2>/dev/null || true
+    headers="$crate_work/headers"
+    mkdir -p "$headers"
+    cp "$header" "$headers/"
+    cp "$modulemap" "$headers/module.modulemap"
 
-echo "==> zipping for release + checksum"
-(cd "$dist" && zip -r "MqttClient-${version}.xcframework.zip" "MqttClient.xcframework")
+    echo "==> assembling ${swift_name}FFI.xcframework"
+    xcodebuild -create-xcframework \
+        -library "$crate_work/macos-universal/lib${lib_name}.a" -headers "$headers" \
+        -library "target/aarch64-apple-ios/release/lib${lib_name}.a" -headers "$headers" \
+        -library "$crate_work/ios-simulator-universal/lib${lib_name}.a" -headers "$headers" \
+        -output "$package_dir/${swift_name}FFI.xcframework"
 
-echo "done: $dist/MqttClient-${version}.xcframework.zip"
+    cp "$swift_source" "$package_dir/Sources/${swift_name}/${lib_name}.swift"
+
+    # Broker bindings reference public types/functions generated by the client
+    # crate. Keep wrappers in separate Swift modules (UniFFI emits duplicate
+    # private helpers) and import the client module from broker source.
+    if [ "$swift_name" = "MqttBroker" ]; then
+        python3 - "$package_dir/Sources/${swift_name}/${lib_name}.swift" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+text = path.read_text()
+needle = "import Foundation\n"
+if "import MqttClient\n" not in text:
+    text = text.replace(needle, needle + "import MqttClient\n", 1)
+path.write_text(text)
+PY
+    fi
+
+    # Ensure expected low-level module name survived xcodebuild packaging.
+    rg -q "module ${ffi_module}" "$headers/module.modulemap" || {
+        echo "error: ${ffi_module} missing from modulemap" >&2
+        exit 1
+    }
+}
+
+build_xcframework mqtt-client stem-mqtt-client mqtt_client MqttClient mqtt_clientFFI
+build_xcframework mqtt-broker stem-mqtt-broker mqtt_broker MqttBroker mqtt_brokerFFI
+
+cat > "$package_dir/Package.swift" <<'SWIFT'
+// swift-tools-version:5.9
+import PackageDescription
+
+let package = Package(
+    name: "StemMqttSwift",
+    platforms: [.macOS(.v11), .iOS(.v13)],
+    products: [
+        .library(name: "MqttClient", targets: ["MqttClient"]),
+        .library(name: "MqttBroker", targets: ["MqttBroker"]),
+    ],
+    targets: [
+        .binaryTarget(name: "MqttClientFFI", path: "MqttClientFFI.xcframework"),
+        .target(name: "MqttClient", dependencies: ["MqttClientFFI"]),
+        .binaryTarget(name: "MqttBrokerFFI", path: "MqttBrokerFFI.xcframework"),
+        .target(name: "MqttBroker", dependencies: ["MqttBrokerFFI", "MqttClient"]),
+    ]
+)
+SWIFT
+
+cat > "$package_dir/README.md" <<EOF
+# StemMqttSwift ${version}
+
+Prebuilt UniFFI Swift package for stem-mqtt client and broker.
+
+Add this extracted directory as a local Swift package, then import
+\`MqttClient\` and/or \`MqttBroker\`. Includes macOS arm64/x86_64, iOS arm64,
+and iOS Simulator arm64/x86_64 slices.
+EOF
+
+# Prove generated wrappers compile against packaged FFI modules.
+(
+    cd "$package_dir"
+    swift build
+)
+rm -rf "$package_dir/.build" "$package_dir/.swiftpm"
+
+zip_path="$dist/StemMqttSwift-${version}.zip"
+(
+    cd "$dist"
+    zip -qr "$(basename "$zip_path")" StemMqttSwift
+)
+unzip -t "$zip_path" >/dev/null
+
+echo "done: $zip_path"

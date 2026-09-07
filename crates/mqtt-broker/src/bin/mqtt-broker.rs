@@ -7,7 +7,7 @@
 use clap::Parser;
 use mqtt_broker::{MqttBroker, MqttBrokerConfig};
 
-/// A full MQTT 3.1.1 / MQTT 5.0 broker.
+/// An MQTT 3.1.1 / MQTT 5.0 broker.
 #[derive(Parser, Debug)]
 #[command(name = "mqtt-broker", version, about)]
 struct Args {

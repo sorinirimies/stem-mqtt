@@ -1,0 +1,21 @@
+[package]
+name = "stem-mqtt-dashboard"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "A Rust + Topcoat (tokio-rs/topcoat) web dashboard for stem-mqtt: multi-client connections, topic subscribe/publish, MQTT version + QoS switching, live message feed."
+publish = false
+
+[[bin]]
+name = "stem-mqtt-dashboard"
+path = "src/main.rs"
+
+[dependencies]
+mqtt-client = { workspace = true }
+tokio = { workspace = true }
+topcoat = { version = "0.5", features = ["datastar", "sse", "runtime", "asset", "discover"] }
+futures-util = { workspace = true }
+serde = { version = "1", features = ["derive"] }
+tracing-subscriber = { workspace = true }

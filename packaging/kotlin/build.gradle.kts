@@ -16,6 +16,8 @@ dependencies {
     // async-exported methods (MqttClient.connect/publish/..., MqttBroker
     // .start/stop use `#[uniffi::export(async_runtime = "tokio")]`).
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
+    testImplementation(kotlin("test-junit5"))
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
 sourceSets {
@@ -27,6 +29,10 @@ sourceSets {
 
 java {
     withSourcesJar()
+}
+
+tasks.test {
+    useJUnitPlatform()
 }
 
 publishing {
@@ -41,13 +47,13 @@ publishing {
         }
     }
     publications {
-        create<MavenPublication>("mqttClient") {
+        create<MavenPublication>("stemMqtt") {
             from(components["java"])
-            artifactId = "stem-mqtt-client-kotlin"
+            artifactId = "stem-mqtt-kotlin"
             pom {
                 name.set("stem-mqtt Kotlin bindings")
                 description.set(
-                    "UniFFI-generated Kotlin bindings for the stem-mqtt client + broker (native libs bundled)."
+                    "UniFFI-generated Kotlin bindings for the stem-mqtt client and broker (native libs bundled)."
                 )
                 url.set("https://github.com/sorinirimies/stem-mqtt")
                 licenses {
