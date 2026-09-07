@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.3] - 2026-09-07
+### ✨ Features
+- real QoS 1/2 redelivery instead of send-once-and-hope
+- real QoS 1/2 redelivery + fix spurious immediate keep-alive ping
+- opt-in auto-reconnect with backoff + subscription replay
+- TLS support (client + broker), pure-Rust rustls, incl. mutual TLS
+- prepare multi-language MQTT 0.2.3 release
+### 🔧 Chores
+- remove project-local skill copy
+### 🧪 Testing
+- cover session resumption, retained-clear, max_clients
+**Full Changelog**: https://github.com/sorinirimies/stem-mqtt/compare/v0.2.2...v0.2.3
 ## [0.2.2] - 2026-08-05
 ### 🐛 Bug Fixes
 - rename published packages to stem-mqtt-client / stem-mqtt-broker
