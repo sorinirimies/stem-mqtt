@@ -68,6 +68,10 @@ jobs:
     name: Build mqtt-broker — ${{ matrix.name }}
     needs: [validate, test]
     runs-on: ${{ matrix.runner }}
+    env:
+      # macOS cross-target strip produced a correctly-sized all-zero file once;
+      # package unstripped binaries and validate their executable magic below.
+      CARGO_PROFILE_RELEASE_STRIP: none
     strategy:
       fail-fast: false
       matrix:
@@ -110,6 +114,10 @@ jobs:
         with:
           key: ${{ matrix.target }}
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
       - name: Install cross
         if: matrix.cross
         run: cargo install cross --git https://github.com/cross-rs/cross
@@ -121,6 +129,10 @@ jobs:
       - name: Build (cross)
         if: matrix.cross
         run: cross build --release -p stem-mqtt-broker --bin mqtt-broker --target ${{ matrix.target }}
+
+      - name: Validate executable
+        shell: bash
+        run: python scripts/ci/validate_binary.py "target/${{ matrix.target }}/release/mqtt-broker${{ matrix.suffix }}" "${{ matrix.target }}"
 
       - name: Package
         shell: bash
