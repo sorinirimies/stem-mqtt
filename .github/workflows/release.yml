@@ -663,6 +663,9 @@ jobs:
       - name: Build native addon (release, cross-compiled)
         if: matrix.cross
         working-directory: crates/mqtt-client-node
+        env:
+          # napi-rs cross-toolchain GCC needs this for ring's AArch64 asm.
+          CFLAGS_aarch64_unknown_linux_gnu: -D__ARM_ARCH=8
         run: npx napi build --platform --release --target ${{ matrix.target }} --use-napi-cross --js index.js --dts index.d.ts
 
       - uses: actions/upload-artifact@v4

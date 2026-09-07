@@ -250,6 +250,10 @@ jobs:
         run: npm ci --include=optional
       - name: Build Linux aarch64 addon
         working-directory: crates/mqtt-client-node
+        env:
+          # napi-rs cross-toolchain GCC does not predefine this for ring's
+          # pre-generated AArch64 assembly, unlike distro cross-GCC.
+          CFLAGS_aarch64_unknown_linux_gnu: -D__ARM_ARCH=8
         run: npx napi build --platform --release --target aarch64-unknown-linux-gnu --use-napi-cross --js index.js --dts index.d.ts
       - name: Verify artifact
         run: test -s crates/mqtt-client-node/mqtt-client.linux-arm64-gnu.node
