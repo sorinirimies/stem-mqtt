@@ -156,7 +156,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24.12"
 
       - name: npm ci
         working-directory: crates/mqtt-client-node
@@ -191,3 +191,65 @@ jobs:
             exit 1
           }
           node scripts/smoke_test.mjs
+
+  # ── 8. Linux UniFFI metadata + generated bindings ────────────────────────────
+  test-bindings-linux:
+    name: test-bindings-linux
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Generate Kotlin client + broker bindings
+        run: |
+          ./scripts/generate-bindings.sh kotlin mqtt-client
+          ./scripts/generate-bindings.sh kotlin mqtt-broker
+      - name: Verify generated broker lifecycle API
+        run: |
+          test -s bindings/kotlin/mqtt-client/uniffi/mqtt_client/mqtt_client.kt
+          test -s bindings/kotlin/mqtt-broker/uniffi/mqtt_broker/mqtt_broker.kt
+          grep -q 'override suspend fun .*start' bindings/kotlin/mqtt-broker/uniffi/mqtt_broker/mqtt_broker.kt
+          grep -q 'override suspend fun .*stop' bindings/kotlin/mqtt-broker/uniffi/mqtt_broker/mqtt_broker.kt
+
+  # ── 9. Linux Python wheel runtime ─────────────────────────────────────────────
+  test-python-packaging:
+    name: test-python-packaging
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build client + broker wheels
+        run: |
+          pip install maturin
+          maturin build --release --manifest-path crates/mqtt-client/Cargo.toml
+          maturin build --release --manifest-path crates/mqtt-broker/Cargo.toml
+      - name: Install and smoke-test wheels
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "stem-mqtt-client") | .version')
+          python -m pip install --no-index --find-links target/wheels \
+            "stem-mqtt-client==$version" "stem-mqtt-broker==$version"
+          python packaging/python/smoke_test.py
+
+  # ── 10. Linux aarch64 Node cross-build ───────────────────────────────────────
+  build-node-linux-arm64:
+    name: build-node-linux-arm64
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-gnu
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24.12"
+      - name: Install Node dependencies, including optional cross-toolchain
+        working-directory: crates/mqtt-client-node
+        run: npm ci --include=optional
+      - name: Build Linux aarch64 addon
+        working-directory: crates/mqtt-client-node
+        run: npx napi build --platform --release --target aarch64-unknown-linux-gnu --use-napi-cross --js index.js --dts index.d.ts
+      - name: Verify artifact
+        run: test -s crates/mqtt-client-node/mqtt-client.linux-arm64-gnu.node

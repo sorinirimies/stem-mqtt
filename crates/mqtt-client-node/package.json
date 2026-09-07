@@ -34,7 +34,11 @@
     "version": "napi version"
   },
   "devDependencies": {
-    "@napi-rs/cli": "^3.8.2"
+    "@napi-rs/cli": "^3.8.2",
+    "@napi-rs/cross-toolchain": "^1.0.3"
+  },
+  "optionalDependencies": {
+    "@napi-rs/cross-toolchain-x64-target-aarch64": "^1.0.3"
   },
   "packageManager": "npm@11.0.0"
 }

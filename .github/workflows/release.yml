@@ -641,7 +641,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24.12"
 
       - name: npm ci
         working-directory: crates/mqtt-client-node
@@ -694,7 +694,7 @@ jobs:
       - uses: actions/setup-node@v4
         if: env.HAS_TOKEN == 'true'
         with:
-          node-version: "20"
+          node-version: "24.12"
           registry-url: "https://registry.npmjs.org"
 
       - name: npm ci

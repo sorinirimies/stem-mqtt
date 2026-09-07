@@ -57,4 +57,6 @@ opt-level = 0
 opt-level     = 3
 lto           = "thin"
 codegen-units = 1
-strip         = "symbols"
+# Keep exported UniFFI metadata symbols on ELF platforms; stripping all
+# symbols makes Linux bindgen silently generate empty output directories.
+strip         = "debuginfo"

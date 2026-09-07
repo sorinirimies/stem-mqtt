@@ -14,6 +14,11 @@
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
+# UniFFI bindgen reads metadata symbols from the compiled library. Never let a
+# workspace/profile override strip those symbols before generation (Linux/ELF
+# otherwise succeeds with an empty output directory).
+export CARGO_PROFILE_RELEASE_STRIP=none
+
 language="${1:?usage: $0 <kotlin|swift|python> [crate] [out-dir]}"
 crate="${2:-mqtt-client}"
 lib_name="${crate//-/_}"

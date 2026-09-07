@@ -91,7 +91,7 @@ PY
     fi
 
     # Ensure expected low-level module name survived xcodebuild packaging.
-    rg -q "module ${ffi_module}" "$headers/module.modulemap" || {
+    grep -q "module ${ffi_module}" "$headers/module.modulemap" || {
         echo "error: ${ffi_module} missing from modulemap" >&2
         exit 1
     }
