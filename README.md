@@ -1,9 +1,9 @@
 # stem-mqtt
 
-MQTT 3.1.1 / MQTT 5.0 client and broker, written in Rust and exposed
-to Kotlin, Swift, and Python via [UniFFI](https://mozilla.github.io/uniffi-rs/),
-plus Node.js/TypeScript client bindings via a hand-written
-[napi-rs](https://napi.rs/) addon (JavaScript isn't a UniFFI target).
+MQTT 3.1.1 / MQTT 5.0 client and broker, written in Rust and exposed via
+[UniFFI](https://mozilla.github.io/uniffi-rs/) to Kotlin, Swift, Python, Go, C#, Java, Dart,
+Node.js and Haskell — every binding runtime-tested against a real broker in CI — plus a
+hand-written [napi-rs](https://napi.rs/) Node.js client addon.
 
 [![CI](https://github.com/sorinirimies/stem-mqtt/actions/workflows/ci.yml/badge.svg)](https://github.com/sorinirimies/stem-mqtt/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -160,6 +160,7 @@ production-ready Ruby generator is available. See
 | --- | --- |
 | [`crates/mqtt-client`](crates/mqtt-client) | Async, `tokio`-based MQTT client. Also hosts the wire-protocol codec (`mqtt_client::protocol`) shared by the broker. |
 | [`crates/mqtt-broker`](crates/mqtt-broker) | Standalone MQTT broker (library + `mqtt-broker` CLI binary), reusing the client crate's codec instead of duplicating it. |
+| [`tests/bindings`](tests/bindings) | One end-to-end smoke test per language, run by `scripts/test_bindings.nu`. |
 | [`crates/mqtt-client-node`](crates/mqtt-client-node) | Node.js/TypeScript bindings for `mqtt-client` via napi-rs (server-side Node only — see [`packaging/node`](packaging/node)). |
 
 There is intentionally no separate "core" crate — `mqtt-client::protocol` is
@@ -193,7 +194,11 @@ the broker.
 - **Pluggable broker auth** (`MqttAuthProvider`) and event observation
   (`MqttBrokerEventListener`) for foreign callers.
 - **UniFFI bindings** — both crates build as `cdylib`/`staticlib` and ship a
-  `uniffi-bindgen` binary to generate Kotlin, Swift, or Python bindings.
+  `uniffi-bindgen` binary for Kotlin, Swift and Python; Go, C#, Java, Dart,
+  Node.js and Haskell are generated through pinned community generators.
+- **Hardened by default** — packet-size limits, bounded per-client send queues,
+  keep-alive timeout detection, credential-redacting `Debug`, and foreign
+  callbacks that can't crash I/O tasks (see `CHANGELOG.md`).
 - **Node.js / TypeScript bindings** for `mqtt-client` via napi-rs
   (`crates/mqtt-client-node`) — server-side Node, not the browser (no
   MQTT-over-WebSocket transport yet).
@@ -257,19 +262,96 @@ Deployment+Service Kubernetes demo.
 
 ## Generating foreign-language bindings
 
+Everything is driven by [Nushell](https://www.nushell.sh/) scripts; the generator
+table (languages, pinned generator versions, required UniFFI release, registry)
+lives in one file, [`scripts/bindings/spec.nu`](scripts/bindings/spec.nu).
+
 ```sh
-./scripts/generate-bindings.sh kotlin   # or: swift, python
-just bindings-all
+nu scripts/generate_bindings.nu kotlin            # kotlin | swift | python (built into UniFFI)
+nu scripts/install_bindgens.nu                    # install the pinned third-party generators
+nu scripts/generate_bindings.nu go mqtt-broker    # go | csharp | java | dart | node | node-livekit | haskell
+just bindings-all                                 # or: just bindings-third-party
 ```
 
-Node.js/TypeScript bindings are a separate crate, not a UniFFI target:
+| Language | Generator | Runtime-tested | Status |
+| --- | --- | :-: | --- |
+| Kotlin, Swift | UniFFI (built in) | CI packaging tests | stable |
+| Python | UniFFI (built in) | ✅ | stable |
+| Go | [uniffi-bindgen-go](https://github.com/NordSecurity/uniffi-bindgen-go) | ✅ client + broker + all callbacks | stable |
+| C# | [uniffi-bindgen-cs](https://github.com/NordSecurity/uniffi-bindgen-cs) | ✅ client + broker + all callbacks | stable |
+| Java (JDK 22+) | [uniffi-bindgen-java](https://github.com/IronCoreLabs/uniffi-bindgen-java) | ✅ client + broker + all callbacks | stable |
+| Dart | [uniffi-dart](https://github.com/acterglobal/uniffi-dart) | ✅ client + broker, **no callbacks** ² | experimental |
+| Node.js | [uniffi-bindgen-node-js](https://github.com/criccomini/uniffi-bindgen-node-js) | ✅ client + listener callback; broker ❌ ¹ | experimental |
+| Node.js (early dev.) | [uniffi-bindgen-node](https://github.com/livekit/uniffi-bindgen-node) | ❌ broken ³ | not published |
+| Haskell | [uniffi-bindgen-haskell](https://github.com/mercury/uniffi-bindgen-haskell) + [our patch](packaging/haskell) | ✅ client + broker, **no callbacks** ² | experimental |
+
+¹ That generator rejects UniFFI *external types* and the broker imports `QoS`
+from the client crate.
+² Dart: foreign callbacks cannot be invoked from Rust's own threads (the VM aborts).
+Haskell: callback interfaces are exposed only as opaque handles. Either way
+`MqttMessageListener`, `MqttAuthProvider` and `MqttBrokerEventListener` cannot be
+implemented, so publishing/subscribing work but incoming messages cannot be received.
+³ Emits TypeScript referencing an undefined `FfiConverterBytes`; no client can be constructed.
+⁴ Upstream's Haskell generator had two bugs that made every binding unusable: constructors never
+lowered their arguments (generated code didn't compile) and flat-error variants dropped their message
+(decoder failed with "left N trailing bytes"). [`packaging/haskell/uniffi-bindgen-haskell.patch`](packaging/haskell/uniffi-bindgen-haskell.patch)
+fixes both; `install_bindgens.nu` builds the generator from the pinned revision with the patch applied.
+
+³ is tracked as `known-broken` in `scripts/bindings/spec.nu`: its smoke test keeps running and
+reports `XFAIL`; the day upstream fixes it it reports `XPASS` and fails CI so the flag gets removed.
+
+UniFFI bindgens can only read metadata from the UniFFI release they were built
+for, and the third-party generators disagree (most target 0.31, livekit Node
+0.30, Haskell 0.32). `generate_bindings.nu` therefore builds the library for
+such a generator in a scratch workspace under `target/uniffi-<version>/` pinned
+to the right release; your workspace is never touched.
+
+The hand-written napi-rs addon (`crates/mqtt-client-node`) remains the
+production Node client:
 
 ```sh
 cd crates/mqtt-client-node && npm ci && npm run build:debug
 ```
 
-UniFFI's CLI natively supports Kotlin, Swift, and Python. Ruby is not
-advertised because UniFFI 0.29 has no production Ruby backend.
+### Do the bindings actually work?
+
+```sh
+nu scripts/test_bindings.nu            # every language (missing toolchains are skipped)
+nu scripts/test_bindings.nu go java --strict
+just test-bindings go
+```
+
+For each language this builds the native libraries, generates the bindings, stages a
+scratch project with the smoke test from [`tests/bindings/<language>/`](tests/bindings) and runs
+it against real sockets: start a broker, subscribe, publish QoS 1, receive it through a *foreign*
+callback, refuse a bad client through a *foreign* auth callback, observe connections through a
+*foreign* event listener, stop. Languages that can't do callbacks run a reduced scenario (see the
+header of each test). Verdicts: `PASS`, `FAIL`, `SKIP` (toolchain missing), `XFAIL`/`XPASS`
+(known upstream breakage). CI (Gitea `.gitea/workflows/ci.yml`, Linux runner; mirrored in
+`.github/workflows/ci.yml`) runs the same command per language (`test-bindings-runtime`), builds each
+package (`test-packaging`: `dotnet pack`, `gradle build`, `npm pack`, OCI bundle) and runs the Kotlin
+Gradle test; the release workflow runs the runtime test before packaging each language.
+
+### GitHub Packages
+
+```sh
+nu scripts/publish_packages.nu stage <language>                  # bindings + native libs -> dist/<language>
+nu scripts/publish_packages.nu publish <language> <version> --dry-run
+```
+
+GitHub Packages hosts Maven, npm, NuGet and containers only, so each language
+goes where it fits and the rest ship as OCI artifacts on `ghcr.io`:
+
+| Language | Package |
+| --- | --- |
+| Kotlin | Maven (existing Gradle flow, `packaging/kotlin`) |
+| Java | Maven — `com.github.sorinirimies.stemmqtt:stem-mqtt-java` |
+| C# | NuGet — `StemMqtt` |
+| Node.js | npm — `@sorinirimies/stem-mqtt-node` |
+| Go, Dart, Haskell | `ghcr.io/sorinirimies/stem-mqtt-<language>:<version>` (`oras pull`) |
+
+The release workflow stages each package on Linux and macOS, merges the native
+libraries, and publishes once.
 
 See [`packaging/README.md`](packaging/README.md) for release artifact layout,
 and [`packaging/python`](packaging/python),
@@ -296,6 +378,21 @@ just check-all      # fmt + clippy + test + doc + nu script tests
 ./scripts/check.sh  # equivalent, no `just`/`nu` required
 ```
 
+### Bindings, packages and CI
+
+```sh
+just install-bindgens          # the pinned third-party generators (scripts/bindings/spec.nu)
+just test-bindings             # runtime-test every language (or: just test-bindings go java)
+just package-verify-all        # compile + pack every publishable package, no upload
+just ci-bindings               # all of the above, strict — what the Gitea CI runs
+just clean-bindings            # remove generated artifacts and scratch dirs
+```
+
+CI runs on Gitea (`.gitea/workflows/ci.yml`, Linux runner; also mirrored in
+`.github/workflows/ci.yml`): fmt, clippy, test, doc, the nu tests, then one
+`test-bindings-runtime` job per language, the Kotlin Gradle test, and one `test-packaging` job per
+package. A weekly scheduled run catches upstream generator drift.
+
 ### Nushell scripts
 
 Deterministic release/CI plumbing (tag validation, version bump, changelog,
@@ -314,7 +411,8 @@ reachable as `just test-nu`).
   GitHub Packages (Kotlin) + npm publishing — token-gated registry jobs skip
   when their secret isn't configured), `auto-merge.yml` (Dependabot), `dependabot.yml`
   (GitHub Actions version bumps).
-- **Gitea** (`.gitea/workflows/`): mirrored CI plus a reduced Linux/Windows
+- **Gitea** (`.gitea/workflows/`): the CI above including the per-language binding runtime tests and
+  package builds (it's the Linux runner these run on), plus a reduced Linux/Windows
   broker-binary release workflow (Apple/mobile and registry publishing remain
   GitHub-hosted), and `deps-update.yml` for dependency updates.
 
