@@ -251,7 +251,15 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-      - uses: gradle/actions/setup-gradle@v4
+      # gradle/actions/setup-gradle can't be resolved by this Gitea ("Unable to resolve
+      # v4: unsupported object type" at job setup — it fails every job that references it,
+      # even behind an `if:`), so install Gradle directly.
+      - name: Install Gradle
+        run: |
+          (command -v unzip >/dev/null || sudo apt-get install -y -qq unzip)
+          curl -fsSL --retry 5 --retry-delay 10 -o /tmp/gradle.zip https://services.gradle.org/distributions/gradle-8.14.3-bin.zip
+          mkdir -p "$HOME/gradle" && unzip -q -o /tmp/gradle.zip -d "$HOME/gradle"
+          echo "$HOME/gradle/gradle-8.14.3/bin" >> $GITHUB_PATH
 
       - name: Generate + stage client and broker
         run: |
@@ -305,8 +313,16 @@ jobs:
         with:
           distribution: temurin
           java-version: "22"
-      - uses: gradle/actions/setup-gradle@v4
+      # gradle/actions/setup-gradle can't be resolved by this Gitea ("Unable to resolve
+      # v4: unsupported object type" at job setup — it fails every job that references it,
+      # even behind an `if:`), so install Gradle directly.
+      - name: Install Gradle
         if: matrix.language == 'java'
+        run: |
+          (command -v unzip >/dev/null || sudo apt-get install -y -qq unzip)
+          curl -fsSL --retry 5 --retry-delay 10 -o /tmp/gradle.zip https://services.gradle.org/distributions/gradle-8.14.3-bin.zip
+          mkdir -p "$HOME/gradle" && unzip -q -o /tmp/gradle.zip -d "$HOME/gradle"
+          echo "$HOME/gradle/gradle-8.14.3/bin" >> $GITHUB_PATH
       - uses: actions/setup-node@v4
         if: matrix.language == 'node'
         with:
