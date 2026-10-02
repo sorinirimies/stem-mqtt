@@ -267,12 +267,14 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - name: Install Nushell
+        run: cargo install nu --locked
 
       - name: Generate bindings (mqtt-client)
-        run: ./scripts/generate-bindings.sh ${{ matrix.language }} mqtt-client
+        run: nu scripts/generate_bindings.nu ${{ matrix.language }} mqtt-client
 
       - name: Generate bindings (mqtt-broker)
-        run: ./scripts/generate-bindings.sh ${{ matrix.language }} mqtt-broker
+        run: nu scripts/generate_bindings.nu ${{ matrix.language }} mqtt-broker
 
       - name: Validate and zip bindings
         run: |
@@ -393,10 +395,13 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      - name: Install Nushell
+        run: cargo install nu --locked
+
       - name: Generate and stage client + broker
         run: |
-          ./scripts/generate-bindings.sh kotlin mqtt-client
-          ./scripts/generate-bindings.sh kotlin mqtt-broker
+          nu scripts/generate_bindings.nu kotlin mqtt-client
+          nu scripts/generate_bindings.nu kotlin mqtt-broker
           ./packaging/kotlin/stage.sh ${{ needs.validate.outputs.version }}
           ANDROID_NDK_HOME=${{ steps.setup-ndk.outputs.ndk-path }} ./packaging/kotlin/stage-android.sh
 
@@ -589,6 +594,117 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PACKAGE_VERSION: ${{ needs.validate.outputs.version }}
         run: gradle publish --no-daemon
+
+  # ── 10b. Third-party language packages → GitHub Packages ──────────────────────
+  # GitHub Packages hosts Maven, npm, NuGet and containers; Go, Dart, Haskell
+  # (and Node-livekit once its generator works — see known-broken in
+  # scripts/bindings/spec.nu) travel as OCI artifacts on ghcr.io. All driven by
+  # scripts/publish_packages.nu (registry table: scripts/bindings/spec.nu).
+  # `stage` runs per OS so each native library is built on its own platform;
+  # `publish-github-packages` merges every platform and publishes once.
+  stage-packages:
+    name: Stage ${{ matrix.language }} — ${{ matrix.runner }}
+    needs: [validate, test]
+    runs-on: ${{ matrix.runner }}
+    continue-on-error: ${{ matrix.experimental }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest]
+        language: [java, csharp, go]
+        experimental: [false]
+        include:
+          - { runner: ubuntu-latest, language: dart, experimental: true }
+          - { runner: ubuntu-latest, language: node, experimental: true }
+          - { runner: ubuntu-latest, language: haskell, experimental: true }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate.outputs.tag }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install Nushell
+        run: cargo install nu --locked
+      - name: Install the ${{ matrix.language }} generator
+        run: nu scripts/install_bindgens.nu ${{ matrix.language }}
+      - name: Runtime-test the generated bindings before packaging them
+        if: matrix.runner == 'ubuntu-latest'
+        run: nu scripts/test_bindings.nu ${{ matrix.language }} --strict
+      - name: Stage ${{ matrix.language }} package
+        run: nu scripts/publish_packages.nu stage ${{ matrix.language }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stage-${{ matrix.language }}-${{ matrix.runner }}
+          path: dist/${{ matrix.language }}
+          if-no-files-found: error
+          retention-days: 1
+
+  publish-github-packages:
+    name: Publish ${{ matrix.language }} to GitHub Packages
+    needs: [validate, stage-packages, release]
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ matrix.experimental }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { language: java, experimental: false }
+          - { language: csharp, experimental: false }
+          - { language: go, experimental: false }
+          - { language: dart, experimental: true }
+          - { language: node, experimental: true }
+          - { language: haskell, experimental: true }
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate.outputs.tag }}
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Nushell
+        run: cargo install nu --locked
+
+      # Merge every platform's staged native libraries into one tree.
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: stage-${{ matrix.language }}-*
+          path: staged
+          merge-multiple: true
+      - name: Place staged package under dist/
+        run: mkdir -p dist && mv staged dist/${{ matrix.language }}
+
+      - uses: actions/setup-node@v4
+        if: matrix.language == 'node'
+        with:
+          node-version: "20"
+          registry-url: https://npm.pkg.github.com
+          scope: "@${{ github.repository_owner }}"
+      - uses: actions/setup-dotnet@v4
+        if: matrix.language == 'csharp'
+        with:
+          dotnet-version: "8.0.x"
+      - uses: actions/setup-java@v4
+        if: matrix.language == 'java'
+        with:
+          distribution: temurin
+          java-version: "22"
+      - uses: gradle/actions/setup-gradle@v4
+        if: matrix.language == 'java'
+      - uses: oras-project/setup-oras@v1
+        if: matrix.language != 'java' && matrix.language != 'csharp' && matrix.language != 'node'
+      - name: Log in to ghcr.io
+        if: matrix.language != 'java' && matrix.language != 'csharp' && matrix.language != 'node'
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Publish ${{ matrix.language }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >
+          nu scripts/publish_packages.nu publish ${{ matrix.language }}
+          ${{ needs.validate.outputs.version }}
+          --owner ${{ github.repository_owner }}
 
   # ── 11. Build Swift client+broker package archive ─────────────────────────────
   build-swift:

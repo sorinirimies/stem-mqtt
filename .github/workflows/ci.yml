@@ -7,6 +7,12 @@ on:
       - main
       - master
       - develop
+  workflow_dispatch:
+  # Weekly: the third-party generators are community projects pinned in
+  # scripts/bindings/spec.nu — a scheduled run surfaces upstream drift (and
+  # XPASS, when a known-broken generator gets fixed) without waiting for a push.
+  schedule:
+    - cron: "0 5 * * 1"
 
 env:
   CARGO_TERM_COLOR: always
@@ -200,16 +206,133 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - name: Install Nushell
+        run: cargo install nu --locked
       - name: Generate Kotlin client + broker bindings
         run: |
-          ./scripts/generate-bindings.sh kotlin mqtt-client
-          ./scripts/generate-bindings.sh kotlin mqtt-broker
+          nu scripts/generate_bindings.nu kotlin mqtt-client
+          nu scripts/generate_bindings.nu kotlin mqtt-broker
       - name: Verify generated broker lifecycle API
         run: |
           test -s bindings/kotlin/mqtt-client/uniffi/mqtt_client/mqtt_client.kt
           test -s bindings/kotlin/mqtt-broker/uniffi/mqtt_broker/mqtt_broker.kt
           grep -q 'override suspend fun .*start' bindings/kotlin/mqtt-broker/uniffi/mqtt_broker/mqtt_broker.kt
           grep -q 'override suspend fun .*stop' bindings/kotlin/mqtt-broker/uniffi/mqtt_broker/mqtt_broker.kt
+
+  # ── 8c. Runtime tests: do the generated bindings actually WORK? ───────────────
+  # Generates every language's bindings, stages a scratch project with the
+  # smoke test in tests/bindings/<language>/, and runs a real broker + clients
+  # through them (see scripts/test_bindings.nu). Languages with known upstream
+  # generator bugs run as XFAIL and turn red (XPASS) when upstream fixes them.
+  test-bindings-runtime:
+    name: runtime-${{ matrix.language }} (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest]
+        language: [python, go, csharp, java, dart, node, node-livekit, haskell]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install Nushell
+        run: cargo install nu --locked
+      - uses: actions/setup-python@v5
+        if: matrix.language == 'python'
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-go@v5
+        if: matrix.language == 'go'
+        with:
+          go-version: stable
+      - uses: actions/setup-dotnet@v4
+        if: matrix.language == 'csharp'
+        with:
+          dotnet-version: "8.0.x"
+      - uses: actions/setup-java@v4
+        if: matrix.language == 'java'
+        with:
+          distribution: temurin
+          java-version: "22"
+      - uses: dart-lang/setup-dart@v1
+        if: matrix.language == 'dart'
+      - uses: actions/setup-node@v4
+        if: matrix.language == 'node' || matrix.language == 'node-livekit'
+        with:
+          node-version: "22"
+      - uses: haskell-actions/setup@v2
+        if: matrix.language == 'haskell'
+      - name: Install the generator
+        if: matrix.language != 'python'
+        run: nu scripts/install_bindgens.nu ${{ matrix.language }}
+      - name: Runtime-test ${{ matrix.language }}
+        run: nu scripts/test_bindings.nu ${{ matrix.language }} --strict
+
+  # ── 8d. Kotlin: packaged bindings + the existing Gradle smoke test ───────────
+  test-kotlin-runtime:
+    name: runtime-kotlin
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install Nushell
+        run: cargo install nu --locked
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Generate + stage client and broker
+        run: |
+          nu scripts/generate_bindings.nu kotlin mqtt-client
+          nu scripts/generate_bindings.nu kotlin mqtt-broker
+          ./packaging/kotlin/stage.sh 0.0.0-ci
+      - name: Run the packaged-library smoke test
+        working-directory: packaging/kotlin
+        run: gradle test --no-daemon
+
+  # ── 8e. Do the per-language packages build? (no upload, no credentials) ──────
+  # Stages each language and runs its registry's build step: dotnet pack
+  # (NuGet), gradle build (Maven), npm pack, or assembling the OCI bundle.
+  test-packaging:
+    name: package-${{ matrix.language }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [java, csharp, node, go, dart, haskell]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install Nushell
+        run: cargo install nu --locked
+      - uses: actions/setup-dotnet@v4
+        if: matrix.language == 'csharp'
+        with:
+          dotnet-version: "8.0.x"
+      - uses: actions/setup-java@v4
+        if: matrix.language == 'java'
+        with:
+          distribution: temurin
+          java-version: "22"
+      - uses: gradle/actions/setup-gradle@v4
+        if: matrix.language == 'java'
+      - uses: actions/setup-node@v4
+        if: matrix.language == 'node'
+        with:
+          node-version: "22"
+      - uses: dart-lang/setup-dart@v1
+        if: matrix.language == 'dart'
+      - name: Install the generator
+        run: nu scripts/install_bindgens.nu ${{ matrix.language }}
+      - name: Stage and build the ${{ matrix.language }} package
+        run: nu scripts/publish_packages.nu verify ${{ matrix.language }}
 
   # ── 9. Linux Python wheel runtime ─────────────────────────────────────────────
   test-python-packaging:

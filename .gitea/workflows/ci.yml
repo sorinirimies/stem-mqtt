@@ -7,6 +7,11 @@ on:
       - main
       - master
       - develop
+  workflow_dispatch:
+  # Weekly: the third-party generators are community projects pinned in
+  # scripts/bindings/spec.nu — a scheduled run surfaces upstream drift.
+  schedule:
+    - cron: "0 5 * * 1"
 
 env:
   CARGO_TERM_COLOR: always
@@ -145,3 +150,143 @@ jobs:
 
       - name: Run Nu script tests
         run: nu scripts/tests/run_all.nu
+
+  # ── 7. Do the generated bindings actually WORK? ──────────────────────────────
+  # One job per language: generates the bindings, stages a scratch project with
+  # tests/bindings/<language>/ and runs a real broker + clients through it
+  # (scripts/test_bindings.nu, scenario described in its header). Languages with
+  # a known upstream generator bug run as XFAIL and go red (XPASS) once fixed.
+  test-bindings-runtime:
+    name: runtime-${{ matrix.language }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [python, go, csharp, java, dart, node, node-livekit, haskell]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install Nushell
+        run: cargo install nu --locked
+
+      - uses: actions/setup-python@v5
+        if: matrix.language == 'python'
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-go@v5
+        if: matrix.language == 'go'
+        with:
+          go-version: stable
+      - uses: actions/setup-dotnet@v4
+        if: matrix.language == 'csharp'
+        with:
+          dotnet-version: "8.0.x"
+      - uses: actions/setup-java@v4
+        if: matrix.language == 'java'
+        with:
+          distribution: temurin
+          java-version: "22"
+      - uses: dart-lang/setup-dart@v1
+        if: matrix.language == 'dart'
+      - uses: actions/setup-node@v4
+        if: matrix.language == 'node' || matrix.language == 'node-livekit'
+        with:
+          node-version: "22"
+      - uses: haskell-actions/setup@v2
+        if: matrix.language == 'haskell'
+
+      - name: Install the generator
+        if: matrix.language != 'python'
+        run: nu scripts/install_bindgens.nu ${{ matrix.language }}
+
+      - name: Runtime-test ${{ matrix.language }}
+        run: nu scripts/test_bindings.nu ${{ matrix.language }} --strict
+
+  # ── 8. Kotlin: packaged bindings + the Gradle smoke test ─────────────────────
+  test-kotlin-runtime:
+    name: runtime-kotlin
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install Nushell
+        run: cargo install nu --locked
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Generate + stage client and broker
+        run: |
+          nu scripts/generate_bindings.nu kotlin mqtt-client
+          nu scripts/generate_bindings.nu kotlin mqtt-broker
+          ./packaging/kotlin/stage.sh 0.0.0-ci
+
+      - name: Run the packaged-library smoke test
+        working-directory: packaging/kotlin
+        run: gradle test --no-daemon
+
+  # ── 9. Do the per-language packages build? (no upload, no credentials) ───────
+  # dotnet pack (NuGet), gradle build (Maven), npm pack, OCI bundle assembly.
+  test-packaging:
+    name: package-${{ matrix.language }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [java, csharp, node, go, dart, haskell]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install Nushell
+        run: cargo install nu --locked
+
+      - uses: actions/setup-dotnet@v4
+        if: matrix.language == 'csharp'
+        with:
+          dotnet-version: "8.0.x"
+      - uses: actions/setup-java@v4
+        if: matrix.language == 'java'
+        with:
+          distribution: temurin
+          java-version: "22"
+      - uses: gradle/actions/setup-gradle@v4
+        if: matrix.language == 'java'
+      - uses: actions/setup-node@v4
+        if: matrix.language == 'node'
+        with:
+          node-version: "22"
+      - uses: dart-lang/setup-dart@v1
+        if: matrix.language == 'dart'
+
+      - name: Install the generator
+        run: nu scripts/install_bindgens.nu ${{ matrix.language }}
+
+      - name: Stage and build the ${{ matrix.language }} package
+        run: nu scripts/publish_packages.nu verify ${{ matrix.language }}
