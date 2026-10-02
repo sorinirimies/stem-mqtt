@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.0] - 2026-10-02
+### ✨ Features
+- harden client and broker — session takeover race, packet limits, bounded queues, half-open detection; uniffi 0.31 **[BREAKING]**
+- Go, C#, Java, Dart, Node and Haskell bindings with nushell tooling and per-language runtime tests
+### 🐛 Bug Fixes
+- validate packaged broker executables
+- gate deps-update on Cargo.lock only, add permissions, drop auto-release
+### 📚 Documentation
+- document bindings, limits, GitHub Packages and the new CI
+### 🔄 CI
+- run binding runtime tests and package builds on Gitea and GitHub, publish to GitHub Packages on release
+**Full Changelog**: https://github.com/sorinirimies/stem-mqtt/compare/v0.2.3...v0.3.0
 ## [0.2.3] - 2026-09-07
 ### ✨ Features
 - real QoS 1/2 redelivery instead of send-once-and-hope
@@ -9,8 +21,12 @@ All notable changes to this project will be documented in this file.
 - opt-in auto-reconnect with backoff + subscription replay
 - TLS support (client + broker), pure-Rust rustls, incl. mutual TLS
 - prepare multi-language MQTT 0.2.3 release
+### 🐛 Bug Fixes
+- preserve UniFFI metadata across Linux packaging
+- define ARM architecture for cross-compiled ring
 ### 🔧 Chores
 - remove project-local skill copy
+- update changelog for v0.2.3
 ### 🧪 Testing
 - cover session resumption, retained-clear, max_clients
 **Full Changelog**: https://github.com/sorinirimies/stem-mqtt/compare/v0.2.2...v0.2.3
