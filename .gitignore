@@ -1,6 +1,6 @@
 /target
 .codegraph/
-bindings/
+/bindings/
 packaging/kotlin/staged/
 packaging/kotlin/android/staged-jniLibs/
 packaging/kotlin/build/
@@ -18,3 +18,4 @@ crates/mqtt-client-node/*.node
 crates/mqtt-client-node/npm/
 *.log
 .DS_Store
+dist/

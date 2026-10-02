@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <!-- The runner passes -p:SmokeTfm=net<major> matching the installed SDK. -->
+    <TargetFramework Condition="'$(SmokeTfm)' == ''">net8.0</TargetFramework>
+    <TargetFramework Condition="'$(SmokeTfm)' != ''">$(SmokeTfm)</TargetFramework>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <NoWarn>$(NoWarn);CS8618;CS8625;CS0108;CS0162;CS0168;CS0219;CS8600;CS8601;CS8602;CS8603;CS8604;CS8618;CS8619;CS8620;CS8714;CS1591;CS0649</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Staged by scripts/test_bindings.nu: generated sources + native libraries. -->
+    <Compile Include="Program.cs" />
+    <Compile Include="generated/*.cs" />
+    <None Include="native/*" CopyToOutputDirectory="PreserveNewest" Link="%(Filename)%(Extension)" />
+  </ItemGroup>
+</Project>

@@ -51,7 +51,7 @@ build_xcframework() {
 
     echo "==> generating ${swift_name} Swift bindings"
     generated="$crate_work/generated"
-    ./scripts/generate-bindings.sh swift "$crate" "$generated"
+    nu scripts/generate_bindings.nu swift "$crate" "$generated"
 
     header="$generated/${lib_name}FFI.h"
     modulemap="$generated/${lib_name}FFI.modulemap"

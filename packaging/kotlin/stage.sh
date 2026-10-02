@@ -5,8 +5,8 @@
 # Usage: packaging/kotlin/stage.sh <version>
 #
 # Expects both generators to have run first:
-#   scripts/generate-bindings.sh kotlin mqtt-client
-#   scripts/generate-bindings.sh kotlin mqtt-broker
+#   scripts/generate_bindings.nu kotlin mqtt-client
+#   scripts/generate_bindings.nu kotlin mqtt-broker
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 
@@ -21,7 +21,7 @@ for crate in "${crates[@]}"; do
     src="bindings/kotlin/${crate}"
     if [ -z "$(find "$src" -type f -print -quit 2>/dev/null)" ]; then
         echo "error: no generated Kotlin bindings under ${src}" >&2
-        echo "run: scripts/generate-bindings.sh kotlin ${crate}" >&2
+        echo "run: scripts/generate_bindings.nu kotlin ${crate}" >&2
         exit 1
     fi
     echo "==> staging Kotlin sources for ${crate}"

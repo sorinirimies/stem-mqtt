@@ -1,0 +1,14 @@
+cabal-version: 3.0
+name: smoke
+version: 0.0.0
+build-type: Simple
+
+executable smoke
+  main-is: Main.hs
+  build-depends:
+      base >=4.15 && <5
+    , bytestring
+    , text
+    , stem-mqtt-bindings
+  default-language: GHC2021
+  ghc-options: -Wall -threaded

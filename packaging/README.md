@@ -14,17 +14,30 @@ The release workflow builds:
 
 ## UniFFI targets
 
-UniFFI 0.29 officially supports Kotlin, Swift, and Python. Both stem-mqtt crates
-export bindings for all three languages.
+UniFFI itself generates Kotlin, Swift and Python. Go, C#, Java, Dart, Node.js
+and Haskell come from community generators pinned in
+[`scripts/bindings/spec.nu`](../scripts/bindings/spec.nu). Both crates export
+bindings for all of them (except the broker for the `node` generator — see the
+root README).
 
 ```sh
-./scripts/generate-bindings.sh <kotlin|swift|python> mqtt-client
-./scripts/generate-bindings.sh <kotlin|swift|python> mqtt-broker
+nu scripts/install_bindgens.nu                      # once
+nu scripts/generate_bindings.nu <language> mqtt-client
+nu scripts/generate_bindings.nu <language> mqtt-broker
 ```
 
 Release jobs reject empty generated directories before creating binding
 archives. This prevents the zero-byte binding archives produced by older
 releases.
+
+### GitHub Packages
+
+`nu scripts/publish_packages.nu stage|publish` builds and publishes per-language
+packages: Maven (Java), NuGet (C#), npm (Node) and OCI artifacts on `ghcr.io`
+(Go, Dart, Haskell). Native libraries are shipped for Linux
+x86_64 and macOS arm64; each package carries `native/<platform>/` and the
+consumer must point the generated loader at it (Go: `CGO_LDFLAGS=-L…`; Dart:
+`DynamicLibrary.open`; Haskell: link `libmqtt_*.a`).
 
 ### Kotlin
 

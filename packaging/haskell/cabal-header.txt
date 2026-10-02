@@ -1,0 +1,6 @@
+cabal-version: 3.0
+name: stem-mqtt-bindings
+version: 0.1.0
+synopsis: MQTT 3.1.1 / 5.0 client and broker (Rust core, UniFFI Haskell bindings)
+license: MIT
+build-type: Simple

@@ -1,0 +1,5 @@
+# uniffi-bindgen-cs configuration. Generated types default to `internal`,
+# which makes the library unusable from another assembly (i.e. from a NuGet
+# consumer), so export them.
+[bindings.csharp]
+access_modifier = "public"

@@ -147,28 +147,73 @@ check-release: check-all build-release
 
 # ── UniFFI bindings ───────────────────────────────────────────────────────────
 
-# Generate bindings for one language, one crate (kotlin | swift | python)
+# Generate bindings for one language, one crate.
+# language: kotlin swift python go csharp java dart node node-livekit haskell
 bindings language crate="mqtt-client":
-    ./scripts/generate-bindings.sh {{ language }} {{ crate }}
+    nu scripts/generate_bindings.nu {{ language }} {{ crate }}
+
+# Generate one language's bindings for BOTH crates
+bindings-lang language:
+    nu scripts/generate_bindings.nu {{ language }} mqtt-client
+    nu scripts/generate_bindings.nu {{ language }} mqtt-broker
 
 # Generate Kotlin bindings for both crates
-bindings-kotlin:
-    ./scripts/generate-bindings.sh kotlin mqtt-client
-    ./scripts/generate-bindings.sh kotlin mqtt-broker
+bindings-kotlin: (bindings-lang "kotlin")
 
 # Generate Swift bindings for both crates
-bindings-swift:
-    ./scripts/generate-bindings.sh swift mqtt-client
-    ./scripts/generate-bindings.sh swift mqtt-broker
+bindings-swift: (bindings-lang "swift")
 
 # Generate Python bindings for both crates
-bindings-python:
-    ./scripts/generate-bindings.sh python mqtt-client
-    ./scripts/generate-bindings.sh python mqtt-broker
+bindings-python: (bindings-lang "python")
 
 # Generate bindings for every officially supported UniFFI language
 bindings-all: bindings-kotlin bindings-swift bindings-python
     @echo "✅ Kotlin, Swift, and Python bindings generated under bindings/"
+
+# Install the pinned third-party generators (Go, C#, Java, Dart, Node, Haskell)
+install-bindgens *languages:
+    nu scripts/install_bindgens.nu {{ languages }}
+
+# Generate Go, C#, Java, Dart, Haskell + experimental Node bindings (see scripts/bindings/spec.nu for the Node broker caveat)
+bindings-third-party: (bindings-lang "go") (bindings-lang "csharp") (bindings-lang "java") (bindings-lang "dart") (bindings-lang "haskell") (bindings-lang "node-livekit")
+    nu scripts/generate_bindings.nu node mqtt-client
+    @echo "✅ Go, C#, Java, Dart, Node, Haskell bindings generated under bindings/"
+
+# Runtime-test the generated bindings (real broker + clients through each language). `just test-bindings go java`
+test-bindings *languages:
+    nu scripts/test_bindings.nu {{ languages }}
+
+# Run what the Gitea CI runs for bindings (needs go, dotnet, JDK 22+, dart, node, cabal on PATH)
+ci-bindings: install-bindgens
+    nu scripts/test_bindings.nu --strict
+    just package-verify-all
+
+# Build (compile + pack) one language's package WITHOUT publishing it
+package-verify language:
+    nu scripts/publish_packages.nu verify {{ language }}
+
+# Build every publishable language's package (java csharp node go dart haskell)
+package-verify-all:
+    #!/usr/bin/env sh
+    set -eu
+    for lang in java csharp node go dart haskell; do
+        nu scripts/publish_packages.nu verify "$lang"
+    done
+    echo "✅ every package builds"
+
+# Remove generated bindings, staged packages and binding-test scratch (keeps the Rust cache)
+clean-bindings:
+    rm -rf bindings dist target/bindings-test target/bindgen-src target/uniffi-0.30.0 target/uniffi-0.32.0
+    rm -rf packaging/kotlin/staged packaging/kotlin/android/staged-jniLibs packaging/swift/.build packaging/swift/dist
+    @echo "🧹 generated binding artifacts removed"
+
+# Stage one language's package (bindings + this host's native libs) under dist/
+package-stage language:
+    nu scripts/publish_packages.nu stage {{ language }}
+
+# Show what publishing a staged language to GitHub Packages would run
+publish-dry-run language version:
+    nu scripts/publish_packages.nu publish {{ language }} {{ version }} --dry-run
 
 # ── Node.js / TypeScript (napi-rs, not a UniFFI target) ────────────────
 
@@ -198,16 +243,16 @@ package-linux-aarch64: _check-cross
 # release cdylibs + stages packaging/kotlin/staged/) — run `gradle build` in
 # packaging/kotlin/ afterwards to build the jar.
 package-kotlin-jvm:
-    ./scripts/generate-bindings.sh kotlin mqtt-client
-    ./scripts/generate-bindings.sh kotlin mqtt-broker
+    nu scripts/generate_bindings.nu kotlin mqtt-client
+    nu scripts/generate_bindings.nu kotlin mqtt-broker
     ./packaging/kotlin/stage.sh 0.0.0-dev
 
 # Cross-compile client+broker for every Android ABI (arm64-v8a/armeabi-v7a/
 # x86_64/x86), stage generated Kotlin sources + .so files, then run Gradle
 # under packaging/kotlin/android/ to build the AAR.
 package-kotlin-android: _check-cargo-ndk
-    ./scripts/generate-bindings.sh kotlin mqtt-client
-    ./scripts/generate-bindings.sh kotlin mqtt-broker
+    nu scripts/generate_bindings.nu kotlin mqtt-client
+    nu scripts/generate_bindings.nu kotlin mqtt-broker
     ./packaging/kotlin/stage.sh 0.0.0-dev
     ./packaging/kotlin/stage-android.sh
 
