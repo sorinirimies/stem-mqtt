@@ -63,6 +63,27 @@ pub fn decode_varint(buf: &mut Bytes) -> MqttResult<Option<u32>> {
     Ok(Some(value))
 }
 
+/// Parse a Variable Byte Integer from the front of `bytes` **without
+/// consuming or copying anything**, returning `(value, encoded_len)`.
+/// Returns `Ok(None)` if `bytes` ends before the encoding does.
+///
+/// This is what [`Packet::decode`](super::Packet::decode) uses to read the
+/// remaining-length field: it runs once per read-loop iteration, so it must
+/// not allocate.
+pub fn peek_varint(bytes: &[u8]) -> MqttResult<Option<(u32, usize)>> {
+    let mut value: u32 = 0;
+    for (i, &byte) in bytes.iter().take(4).enumerate() {
+        value |= u32::from(byte & 0x7F) << (7 * i);
+        if byte & 0x80 == 0 {
+            return Ok(Some((value, i + 1)));
+        }
+    }
+    if bytes.len() >= 4 {
+        return Err(MqttError::Protocol("variable byte integer too long".into()));
+    }
+    Ok(None)
+}
+
 /// Number of bytes required to encode `value` as a Variable Byte Integer.
 pub fn varint_len(value: u32) -> usize {
     match value {
@@ -95,8 +116,15 @@ pub fn decode_utf8_string(buf: &mut Bytes) -> MqttResult<String> {
         return Err(MqttError::MalformedPacket("truncated string body".into()));
     }
     let raw = buf.copy_to_bytes(len);
-    String::from_utf8(raw.to_vec())
-        .map_err(|e| MqttError::MalformedPacket(format!("invalid UTF-8 string: {e}")))
+    let s = String::from_utf8(raw.to_vec())
+        .map_err(|e| MqttError::MalformedPacket(format!("invalid UTF-8 string: {e}")))?;
+    // MQTT-1.5.4-2: a UTF-8 Encoded String MUST NOT include U+0000.
+    if s.contains('\0') {
+        return Err(MqttError::MalformedPacket(
+            "UTF-8 string contains U+0000".into(),
+        ));
+    }
+    Ok(s)
 }
 
 /// Encode length-prefixed binary data (2-byte big-endian length prefix).
@@ -151,6 +179,32 @@ mod tests {
     fn varint_incomplete_returns_none() {
         let mut buf = Bytes::from_static(&[0x80]);
         assert_eq!(decode_varint(&mut buf).unwrap(), None);
+    }
+
+    #[test]
+    fn peek_varint_matches_decode_without_consuming() {
+        for value in [
+            0u32, 127, 128, 16_383, 16_384, 2_097_151, 2_097_152, MAX_VARINT,
+        ] {
+            let mut out = BytesMut::new();
+            encode_varint(value, &mut out).unwrap();
+            out.extend_from_slice(b"trailing");
+            assert_eq!(
+                peek_varint(&out).unwrap(),
+                Some((value, varint_len(value))),
+                "value {value}"
+            );
+        }
+        assert_eq!(peek_varint(&[0x80]).unwrap(), None);
+        assert_eq!(peek_varint(&[]).unwrap(), None);
+        assert!(peek_varint(&[0x80, 0x80, 0x80, 0x80]).is_err());
+    }
+
+    #[test]
+    fn utf8_string_rejects_nul() {
+        let mut out = BytesMut::new();
+        encode_utf8_string("a\0b", &mut out).unwrap();
+        assert!(decode_utf8_string(&mut out.freeze()).is_err());
     }
 
     #[test]

@@ -24,16 +24,33 @@ use mqtt_client::{
     WillOptions as CoreWill,
 };
 
+/// Copy each listed `Option<T>` field from `$src` onto the same-named field
+/// of `$dst`, but only when it is `Some` — so an omitted JS option keeps the
+/// core library's default instead of being overwritten. Every optional
+/// numeric/boolean connect option follows this exact shape.
+macro_rules! apply_some {
+    ($dst:ident <- $src:ident: $($field:ident),+ $(,)?) => {
+        $( if let Some(value) = $src.$field { $dst.$field = value; } )+
+    };
+}
+
 fn qos_from_u8(qos: u8) -> Result<CoreQoS> {
     CoreQoS::from_u8(qos).ok_or_else(|| Error::from_reason(format!("invalid QoS: {qos}")))
 }
 
-fn qos_to_u8(qos: CoreQoS) -> u8 {
-    qos.as_u8()
-}
-
 fn map_err(e: mqtt_client::MqttError) -> Error {
     Error::from_reason(e.to_string())
+}
+
+/// Parse the JS-facing protocol version string.
+fn parse_version(version: &str) -> Result<CoreVersion> {
+    match version {
+        "3.1.1" | "311" => Ok(CoreVersion::V311),
+        "5.0" | "5" => Ok(CoreVersion::V5),
+        other => Err(Error::from_reason(format!(
+            "invalid MQTT version {other:?}, expected \"3.1.1\" or \"5.0\""
+        ))),
+    }
 }
 
 /// Last-Will-and-Testament configuration, mirrors [`mqtt_client::WillOptions`].
@@ -73,26 +90,25 @@ pub struct ConnectOptions {
     pub reconnect_backoff_secs: Option<u32>,
     pub reconnect_max_backoff_secs: Option<u32>,
     pub tls: Option<TlsOptions>,
+    /// Largest packet (bytes) accepted from the broker; larger ones drop
+    /// the connection. Omit for the library default.
+    pub max_packet_size: Option<u32>,
 }
 
 impl ConnectOptions {
     fn into_core(self) -> Result<CoreConnectOptions> {
-        let version = match self.version.as_str() {
-            "3.1.1" | "311" => CoreVersion::V311,
-            "5.0" | "5" => CoreVersion::V5,
-            other => {
-                return Err(Error::from_reason(format!(
-                    "invalid MQTT version {other:?}, expected \"3.1.1\" or \"5.0\""
-                )))
-            }
-        };
+        let version = parse_version(&self.version)?;
         let mut opts = CoreConnectOptions::new(self.host, self.port, self.client_id, version);
-        if let Some(v) = self.clean_start {
-            opts.clean_start = v;
-        }
-        if let Some(v) = self.keep_alive_secs {
-            opts.keep_alive_secs = v;
-        }
+        apply_some!(opts <- self:
+            clean_start,
+            keep_alive_secs,
+            connect_timeout_secs,
+            operation_timeout_secs,
+            auto_reconnect,
+            reconnect_backoff_secs,
+            reconnect_max_backoff_secs,
+            max_packet_size,
+        );
         opts.username = self.username;
         opts.password = self.password.map(|b| b.to_vec());
         if let Some(w) = self.will {
@@ -102,21 +118,6 @@ impl ConnectOptions {
                 qos: qos_from_u8(w.qos)?,
                 retain: w.retain,
             });
-        }
-        if let Some(v) = self.connect_timeout_secs {
-            opts.connect_timeout_secs = v;
-        }
-        if let Some(v) = self.operation_timeout_secs {
-            opts.operation_timeout_secs = v;
-        }
-        if let Some(v) = self.auto_reconnect {
-            opts.auto_reconnect = v;
-        }
-        if let Some(v) = self.reconnect_backoff_secs {
-            opts.reconnect_backoff_secs = v;
-        }
-        if let Some(v) = self.reconnect_max_backoff_secs {
-            opts.reconnect_max_backoff_secs = v;
         }
         if let Some(tls) = self.tls {
             opts.tls = Some(CoreTls {
@@ -153,7 +154,7 @@ impl From<CoreMessage> for MqttMessage {
         MqttMessage {
             topic: m.topic,
             payload: m.payload.into(),
-            qos: qos_to_u8(m.qos),
+            qos: m.qos.as_u8(),
             retain: m.retain,
         }
     }

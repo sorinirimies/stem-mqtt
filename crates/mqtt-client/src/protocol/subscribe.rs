@@ -154,6 +154,8 @@ impl SubAckReasonCode {
     }
 
     pub const FAILURE: SubAckReasonCode = SubAckReasonCode(0x80);
+    /// MQTT 5.0 "Shared Subscriptions not supported".
+    pub const SHARED_SUBSCRIPTIONS_NOT_SUPPORTED: SubAckReasonCode = SubAckReasonCode(0x9E);
 
     pub fn is_success(self) -> bool {
         self.0 < 0x80
@@ -175,7 +177,14 @@ impl SubAckPacket {
             self.properties.encode(out)?;
         }
         for code in &self.reason_codes {
-            out.put_u8(code.0);
+            // MQTT 3.1.1 (§3.9.3) only knows 0x00-0x02 and 0x80; any 5.0
+            // failure code collapses to the generic 0x80 for those clients.
+            let wire = if version.is_v5() || code.is_success() {
+                code.0
+            } else {
+                SubAckReasonCode::FAILURE.0
+            };
+            out.put_u8(wire);
         }
         Ok(())
     }
@@ -337,6 +346,24 @@ mod tests {
         pkt.encode_body(MqttVersion::V5, &mut out).unwrap();
         let decoded = SubscribePacket::decode_body(MqttVersion::V5, out.freeze()).unwrap();
         assert_eq!(decoded, pkt);
+    }
+
+    #[test]
+    fn suback_v311_collapses_v5_failure_codes() {
+        let pkt = SubAckPacket {
+            packet_id: 1,
+            reason_codes: vec![
+                SubAckReasonCode::granted(QoS::AtMostOnce),
+                SubAckReasonCode::SHARED_SUBSCRIPTIONS_NOT_SUPPORTED,
+            ],
+            properties: Properties::new(),
+        };
+        let mut v311 = BytesMut::new();
+        pkt.encode_body(MqttVersion::V311, &mut v311).unwrap();
+        assert_eq!(&v311[2..], &[0x00, 0x80]);
+        let mut v5 = BytesMut::new();
+        pkt.encode_body(MqttVersion::V5, &mut v5).unwrap();
+        assert_eq!(*v5.last().unwrap(), 0x9E);
     }
 
     #[test]

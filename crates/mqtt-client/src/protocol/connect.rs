@@ -22,7 +22,7 @@ pub struct Will {
 }
 
 /// A CONNECT packet.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct ConnectPacket {
     pub version: MqttVersion,
     pub client_id: String,
@@ -33,6 +33,13 @@ pub struct ConnectPacket {
     pub will: Option<Will>,
     pub properties: Properties,
 }
+
+// Hand-rolled `Debug` (via the macro) so `{:?}` on a CONNECT never prints the
+// password — this packet is `Debug`-formatted in error paths such as
+// "expected CONNECT, got ...".
+crate::redacted_debug!(ConnectPacket {
+    version, client_id, clean_start, keep_alive, username, will, properties
+} secret { password });
 
 impl ConnectPacket {
     pub fn encode_body(&self, out: &mut BytesMut) -> MqttResult<()> {
@@ -184,6 +191,8 @@ impl ConnectReasonCode {
     pub const BAD_USERNAME_OR_PASSWORD: ConnectReasonCode = ConnectReasonCode(0x86);
     pub const CLIENT_IDENTIFIER_NOT_VALID: ConnectReasonCode = ConnectReasonCode(0x85);
     pub const UNSUPPORTED_PROTOCOL_VERSION: ConnectReasonCode = ConnectReasonCode(0x84);
+    pub const SERVER_UNAVAILABLE: ConnectReasonCode = ConnectReasonCode(0x88);
+    pub const QUOTA_EXCEEDED: ConnectReasonCode = ConnectReasonCode(0x97);
 
     pub fn is_success(self) -> bool {
         self.0 == 0
@@ -210,7 +219,8 @@ impl ConnectReasonCode {
             0x00 => 0,
             0x84 => 1,
             0x85 => 2,
-            0x88 | 0x89 => 3,
+            // server unavailable / server busy / quota exceeded
+            0x88 | 0x89 | 0x97 => 3,
             0x86 => 4,
             0x87 => 5,
             _ => 5,

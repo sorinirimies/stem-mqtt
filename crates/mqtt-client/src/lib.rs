@@ -10,6 +10,7 @@
 pub mod client;
 pub mod error;
 pub mod protocol;
+pub mod support;
 
 pub use client::{
     ConnectOptions, ConnectResult, MqttClient, MqttMessage, MqttMessageListener, TlsOptions,

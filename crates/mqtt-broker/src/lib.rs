@@ -19,7 +19,10 @@ mod topic;
 mod ws;
 
 pub use broker::MqttBroker;
-pub use config::{BrokerTlsConfig, MqttAuthProvider, MqttBrokerConfig, MqttBrokerEventListener};
+pub use config::{
+    BrokerTlsConfig, MqttAuthProvider, MqttBrokerConfig, MqttBrokerEventListener,
+    DEFAULT_MAX_OUTBOUND_QUEUE, DEFAULT_MAX_PACKET_SIZE,
+};
 pub use error::{MqttBrokerError, MqttBrokerResult};
 
 uniffi::setup_scaffolding!();

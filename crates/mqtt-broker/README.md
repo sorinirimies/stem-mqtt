@@ -117,12 +117,32 @@ impl MqttAuthProvider for FixedCreds {
 }
 ```
 
+## Limits and robustness
+
+All of these are fields on `MqttBrokerConfig` (and CLI flags on `mqtt-broker`):
+
+| Setting | Default | Effect |
+| --- | --- | --- |
+| `max_packet_size` / `--max-packet-size` | 1 MiB | A client announcing a bigger packet is disconnected as soon as the header is read — before the body is buffered. |
+| `max_outbound_queue` / `--max-outbound-queue` | 4096 | Packets queued per client socket; a slow consumer past this has further deliveries dropped (QoS 1/2 are retried) instead of growing memory without bound. |
+| `max_clients` / `--max-clients` | unlimited | Checked atomically; a client taking over its own session doesn't count against it. |
+| `redelivery_interval_secs` | 5 | Resend (DUP=1) interval for unacked QoS 1/2 deliveries. |
+
+Behaviour worth knowing: `start()` is all-or-nothing and serialised; `stop()` closes live
+connections (without publishing Last Wills) and keeps persistent sessions; dropping a broker stops
+it; a client id taken over by a newer connection never disturbs its replacement; an empty client id
+with `clean_start = false` is refused; MQTT 5 shared subscriptions (`$share/…`) are refused with
+reason code `0x9E`; `SIGTERM` shuts the CLI down gracefully. Foreign callbacks that panic or throw
+are contained and never kill a connection, and an auth provider that panics means "denied".
+
 ## Foreign-language bindings
 
-Same pattern as `mqtt-client`:
+Same pattern as `mqtt-client` — Kotlin, Swift, Python, Go, C#, Java, Dart, Node.js and Haskell
+(see the [root README](../../README.md#generating-foreign-language-bindings) for which generators
+support which features; the criccomini Node generator can't emit the broker):
 
 ```sh
-../../scripts/generate-bindings.sh kotlin
+nu ../../scripts/generate_bindings.nu kotlin
 ```
 
 ## Examples

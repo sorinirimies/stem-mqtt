@@ -31,6 +31,10 @@ pub enum MqttError {
     #[error("not connected")]
     NotConnected,
 
+    /// A packet's declared size exceeds the configured maximum packet size.
+    #[error("packet too large: {0}")]
+    PacketTooLarge(String),
+
     /// The client is already connected.
     #[error("already connected")]
     AlreadyConnected,

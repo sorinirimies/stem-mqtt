@@ -5,7 +5,9 @@
 
 use std::time::Duration;
 
+use crate::protocol::packet::MAX_PACKET_SIZE;
 use crate::protocol::{MqttVersion, QoS};
+use crate::support::secs_or;
 
 /// Default time to wait for a broker acknowledgement (PUBACK/PUBREC/
 /// PUBCOMP/SUBACK/UNSUBACK) before returning [`crate::error::MqttError::Timeout`].
@@ -24,7 +26,7 @@ pub struct WillOptions {
 /// material is PEM-encoded bytes (not file paths) so this works
 /// identically across every language binding without assuming a
 /// filesystem layout.
-#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+#[derive(Clone, PartialEq, Eq, uniffi::Record)]
 pub struct TlsOptions {
     /// Additional PEM-encoded root CA certificate(s) to trust, on top of
     /// the bundled Mozilla root store (`webpki-roots`). Needed to connect
@@ -43,6 +45,12 @@ pub struct TlsOptions {
     /// connection trivially interceptable.
     pub insecure_skip_certificate_verification: bool,
 }
+
+// Never print the client private key (or a CA bundle's presence-only detail
+// beyond "is set") when a `TlsOptions` is `Debug`-formatted.
+crate::redacted_debug!(TlsOptions {
+    ca_cert_pem, client_cert_pem, insecure_skip_certificate_verification
+} secret { client_key_pem });
 
 impl TlsOptions {
     /// TLS with the bundled Mozilla root store and no client certificate —
@@ -65,7 +73,7 @@ impl Default for TlsOptions {
 }
 
 /// Everything needed to establish an MQTT connection.
-#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+#[derive(Clone, PartialEq, Eq, uniffi::Record)]
 pub struct ConnectOptions {
     pub host: String,
     pub port: u16,
@@ -108,7 +116,20 @@ pub struct ConnectOptions {
     /// (the default) is plain TCP, unchanged from before TLS support
     /// existed.
     pub tls: Option<TlsOptions>,
+    /// Largest packet (fixed header + body, in bytes) this client will
+    /// accept from the broker; a larger one is treated as a protocol error
+    /// and drops the connection instead of being buffered. `0` selects the
+    /// built-in default (the MQTT protocol maximum, ~256 MiB).
+    #[uniffi(default = 0)]
+    pub max_packet_size: u32,
 }
+
+// Hand-rolled `Debug` so the password never reaches a log line.
+crate::redacted_debug!(ConnectOptions {
+    host, port, client_id, version, clean_start, keep_alive_secs, username, will,
+    connect_timeout_secs, operation_timeout_secs, auto_reconnect,
+    reconnect_backoff_secs, reconnect_max_backoff_secs, tls, max_packet_size
+} secret { password });
 
 impl ConnectOptions {
     pub fn new(
@@ -133,34 +154,60 @@ impl ConnectOptions {
             reconnect_backoff_secs: 0,
             reconnect_max_backoff_secs: 0,
             tls: None,
+            max_packet_size: 0,
         }
     }
 
     pub(super) fn operation_timeout(&self) -> Duration {
-        let secs = if self.operation_timeout_secs == 0 {
-            DEFAULT_OPERATION_TIMEOUT_SECS
-        } else {
-            self.operation_timeout_secs
-        };
-        Duration::from_secs(secs as u64)
+        secs_or(self.operation_timeout_secs, DEFAULT_OPERATION_TIMEOUT_SECS)
+    }
+
+    pub(super) fn connect_timeout(&self) -> Duration {
+        // A zero connect timeout would fail instantly; treat it as "1s".
+        secs_or(self.connect_timeout_secs, 1)
     }
 
     pub(super) fn initial_reconnect_backoff(&self) -> Duration {
-        let secs = if self.reconnect_backoff_secs == 0 {
-            1
-        } else {
-            self.reconnect_backoff_secs
-        };
-        Duration::from_secs(secs as u64)
+        secs_or(self.reconnect_backoff_secs, 1)
     }
 
     pub(super) fn max_reconnect_backoff(&self) -> Duration {
-        let secs = if self.reconnect_max_backoff_secs == 0 {
-            30
-        } else {
-            self.reconnect_max_backoff_secs
-        };
-        Duration::from_secs(secs as u64)
+        secs_or(self.reconnect_max_backoff_secs, 30)
+    }
+
+    pub(super) fn max_packet_size(&self) -> usize {
+        match self.max_packet_size {
+            0 => MAX_PACKET_SIZE,
+            n => n as usize,
+        }
+    }
+
+    /// Reject configurations that can never work, before touching the
+    /// network, with a message naming the offending field.
+    pub(super) fn validate(&self) -> crate::error::MqttResult<()> {
+        use crate::error::MqttError::Protocol;
+        use crate::protocol::topic::is_valid_topic_name;
+        if self.host.is_empty() {
+            return Err(Protocol("ConnectOptions.host must not be empty".into()));
+        }
+        if self.client_id.len() > usize::from(u16::MAX) {
+            return Err(Protocol("ConnectOptions.client_id is too long".into()));
+        }
+        if self.password.is_some() && self.username.is_none() && !self.version.is_v5() {
+            // MQTT-3.1.2-22: 3.1.1 forbids a password without a username.
+            return Err(Protocol(
+                "ConnectOptions.password requires a username in MQTT 3.1.1".into(),
+            ));
+        }
+        if let Some(will) = &self.will {
+            if !is_valid_topic_name(&will.topic) {
+                return Err(Protocol(format!(
+                    "invalid will topic {:?}: must be non-empty and wildcard-free",
+                    will.topic
+                )));
+            }
+        }
+        Ok(())
     }
 }
 
@@ -181,6 +228,17 @@ pub struct MqttMessage {
     pub payload: Vec<u8>,
     pub qos: QoS,
     pub retain: bool,
+}
+
+impl From<&crate::protocol::publish::PublishPacket> for MqttMessage {
+    fn from(p: &crate::protocol::publish::PublishPacket) -> Self {
+        MqttMessage {
+            topic: p.topic.clone(),
+            payload: p.payload.to_vec(),
+            qos: p.qos,
+            retain: p.retain,
+        }
+    }
 }
 
 /// Result of a subscribe request: the reason/return code the broker

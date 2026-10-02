@@ -62,7 +62,15 @@ impl PublishPacket {
                     "truncated PUBLISH packet id".into(),
                 ));
             }
-            Some(buf.get_u16())
+            match buf.get_u16() {
+                // MQTT-2.2.1-3: a packet identifier MUST be non-zero.
+                0 => {
+                    return Err(MqttError::MalformedPacket(
+                        "PUBLISH packet id must be non-zero".into(),
+                    ))
+                }
+                id => Some(id),
+            }
         } else {
             None
         };
@@ -127,6 +135,14 @@ mod tests {
         let decoded =
             PublishPacket::decode_body(MqttVersion::V5, pkt.flags(), out.freeze()).unwrap();
         assert_eq!(decoded, pkt);
+    }
+
+    #[test]
+    fn publish_decode_rejects_zero_packet_id() {
+        // topic "a", packet id 0, no payload
+        let body = Bytes::from_static(&[0x00, 0x01, b'a', 0x00, 0x00]);
+        let flags = QoS::AtLeastOnce.as_u8() << 1;
+        assert!(PublishPacket::decode_body(MqttVersion::V311, flags, body).is_err());
     }
 
     #[test]

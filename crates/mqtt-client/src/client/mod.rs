@@ -31,7 +31,7 @@ pub use types::{
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Weak};
+use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
 use bytes::{Bytes, BytesMut};
@@ -45,11 +45,16 @@ use crate::protocol::{
     properties::Properties,
     publish::PublishPacket,
     subscribe::{SubAckReasonCode, SubscribeFilter, SubscribePacket, UnsubscribePacket},
+    topic::{is_valid_filter, is_valid_topic_name},
     QoS,
 };
+use crate::support::LockExt;
 
-use inner::{register_pending, unexpected, wait_for, Inner};
-use io::{build_connect_packet, keepalive_loop, read_loop, read_one_packet, send_packet};
+use inner::{unexpected, Inner, ListenerSlot};
+use io::{
+    build_connect_packet, exchange, exchange_with_retry, keepalive_loop, read_loop,
+    read_one_packet, send_packet,
+};
 
 /// How many times [`MqttClient::publish`] resends an unacked QoS 1/2
 /// PUBLISH (with DUP=1) — or, for QoS 2, an unacked PUBREL — before giving
@@ -62,6 +67,9 @@ const MAX_PUBLISH_RETRIES: u32 = 3;
 /// polls for a connection loss while otherwise idle.
 const RECONNECT_POLL_INTERVAL: Duration = Duration::from_millis(250);
 
+/// MQTT 5.0 reason codes at or above this value are failures (§2.4).
+const REASON_FAILURE_THRESHOLD: u8 = 0x80;
+
 /// State shared between [`MqttClient`] and its background reconnect
 /// supervisor task (when [`ConnectOptions::auto_reconnect`] is set). Split
 /// out from `MqttClient` itself so the supervisor can hold a [`Weak`]
@@ -70,28 +78,40 @@ const RECONNECT_POLL_INTERVAL: Duration = Duration::from_millis(250);
 struct ClientShared {
     options: ConnectOptions,
     inner: AsyncMutex<Option<Arc<Inner>>>,
-    /// Listener registered before `connect()` completes; moved into the
-    /// live `Inner` as soon as the connection is established.
-    pending_listener: std::sync::Mutex<Option<Arc<dyn MqttMessageListener>>>,
+    /// The registered message listener. One slot shared with every `Inner`
+    /// this client ever creates, so registering it never races with
+    /// `connect()` and it survives reconnects.
+    listener: ListenerSlot,
     /// Topic filters this client is currently subscribed to, tracked
     /// client-side (the broker doesn't tell us this) so the reconnect
     /// supervisor can replay them after re-establishing the connection.
     /// QoS is what was originally requested, not necessarily what was
     /// granted.
-    subscriptions: std::sync::Mutex<HashMap<String, QoS>>,
+    subscriptions: Mutex<HashMap<String, QoS>>,
     /// Set by `disconnect()` so the reconnect supervisor (if running)
     /// knows this loss was deliberate and should stop instead of
     /// reconnecting.
     user_disconnected: AtomicBool,
+    /// `true` while a reconnect supervisor task is alive, so repeated
+    /// `connect()` calls never stack up duplicate supervisors.
+    supervisor_running: AtomicBool,
 }
 
 impl ClientShared {
     async fn connected_inner(&self) -> MqttResult<Arc<Inner>> {
         let guard = self.inner.lock().await;
         match guard.as_ref() {
-            Some(inner) if inner.connected.load(Ordering::Relaxed) => Ok(inner.clone()),
+            Some(inner) if inner.is_connected() => Ok(inner.clone()),
             _ => Err(MqttError::NotConnected),
         }
+    }
+
+    async fn is_live(&self) -> bool {
+        self.inner
+            .lock()
+            .await
+            .as_ref()
+            .is_some_and(|i| i.is_connected())
     }
 }
 
@@ -116,9 +136,10 @@ impl MqttClient {
             shared: Arc::new(ClientShared {
                 options,
                 inner: AsyncMutex::new(None),
-                pending_listener: std::sync::Mutex::new(None),
-                subscriptions: std::sync::Mutex::new(HashMap::new()),
+                listener: Arc::new(Mutex::new(None)),
+                subscriptions: Mutex::new(HashMap::new()),
                 user_disconnected: AtomicBool::new(false),
+                supervisor_running: AtomicBool::new(false),
             }),
         }
     }
@@ -126,19 +147,7 @@ impl MqttClient {
     /// Register (or replace) the listener that receives incoming messages
     /// and disconnect notifications. Safe to call before or after connect.
     pub fn set_message_listener(&self, listener: Arc<dyn MqttMessageListener>) {
-        // Listener is stashed on `options`-adjacent state lazily created at
-        // connect time; if we're already connected, push it straight in.
-        if let Ok(guard) = self.shared.inner.try_lock() {
-            if let Some(inner) = guard.as_ref() {
-                *inner.listener.lock().unwrap() = Some(listener);
-                return;
-            }
-        }
-        self.shared
-            .pending_listener
-            .lock()
-            .unwrap()
-            .replace(listener);
+        *self.shared.listener.lock_safe() = Some(listener);
     }
 
     /// Open the TCP connection and complete the CONNECT/CONNACK handshake.
@@ -151,12 +160,13 @@ impl MqttClient {
     /// connection loss (i.e. not caused by [`Self::disconnect`]), then
     /// replays every topic this client is currently subscribed to.
     pub async fn connect(&self) -> MqttResult<ConnectResult> {
+        self.shared.options.validate()?;
         self.shared
             .user_disconnected
             .store(false, Ordering::Relaxed);
         let result = connect_once(&self.shared).await?;
         if self.shared.options.auto_reconnect {
-            spawn_reconnect_supervisor(Arc::downgrade(&self.shared));
+            spawn_reconnect_supervisor(&self.shared);
         }
         Ok(result)
     }
@@ -165,10 +175,7 @@ impl MqttClient {
     /// connection has not since been lost or closed.
     pub fn is_connected(&self) -> bool {
         match self.shared.inner.try_lock() {
-            Ok(guard) => guard
-                .as_ref()
-                .map(|i| i.connected.load(Ordering::Relaxed))
-                .unwrap_or(false),
+            Ok(guard) => guard.as_ref().is_some_and(|i| i.is_connected()),
             Err(_) => false,
         }
     }
@@ -182,6 +189,12 @@ impl MqttClient {
     /// [`MqttError::Timeout`] — the broker never resends on our behalf, so
     /// enforcing "at least once"/"exactly once" delivery is the
     /// publisher's job.
+    ///
+    /// A topic containing wildcards (`+`, `#`) or that is empty is
+    /// rejected locally with [`MqttError::Protocol`] (a broker would drop
+    /// the whole connection for it). An MQTT 5.0 broker that answers with a
+    /// failure reason code (e.g. "not authorized") surfaces as
+    /// [`MqttError::Session`] instead of being reported as success.
     pub async fn publish(
         &self,
         topic: String,
@@ -189,91 +202,58 @@ impl MqttClient {
         qos: QoS,
         retain: bool,
     ) -> MqttResult<()> {
+        if !is_valid_topic_name(&topic) {
+            return Err(MqttError::Protocol(format!(
+                "invalid topic name {topic:?}: must be non-empty and contain no wildcards"
+            )));
+        }
         let inner = self.shared.connected_inner().await?;
         let payload = Bytes::from(payload);
+        let publish = |packet_id: Option<u16>, dup: bool| {
+            Packet::Publish(PublishPacket {
+                dup,
+                qos,
+                retain,
+                topic: topic.clone(),
+                packet_id,
+                payload: payload.clone(),
+                properties: Properties::new(),
+            })
+        };
 
         match qos {
-            QoS::AtMostOnce => {
-                let pkt = Packet::Publish(PublishPacket {
-                    dup: false,
-                    qos,
-                    retain,
-                    topic,
-                    packet_id: None,
-                    payload,
-                    properties: Properties::new(),
-                });
-                send_packet(&inner, &pkt).await
-            }
+            QoS::AtMostOnce => send_packet(&inner, &publish(None, false)).await,
             QoS::AtLeastOnce => {
                 let id = inner.alloc_packet_id();
-                let mut dup = false;
-                let mut attempts: u32 = 0;
-                loop {
-                    let rx = register_pending(&inner, id);
-                    let pkt = Packet::Publish(PublishPacket {
-                        dup,
-                        qos,
-                        retain,
-                        topic: topic.clone(),
-                        packet_id: Some(id),
-                        payload: payload.clone(),
-                        properties: Properties::new(),
-                    });
-                    send_packet(&inner, &pkt).await?;
-                    match wait_for(&inner, rx).await {
-                        Ok(Packet::PubAck(_)) => return Ok(()),
-                        Ok(other) => return Err(unexpected(&other)),
-                        Err(MqttError::Timeout) if attempts < MAX_PUBLISH_RETRIES => {
-                            attempts += 1;
-                            dup = true;
-                        }
-                        Err(e) => return Err(e),
-                    }
+                let ack = exchange_with_retry(&inner, id, MAX_PUBLISH_RETRIES, |dup| {
+                    publish(Some(id), dup)
+                })
+                .await?;
+                match ack {
+                    Packet::PubAck(ack) => check_reason("PUBLISH", ack.reason_code),
+                    other => Err(unexpected(&other)),
                 }
             }
             QoS::ExactlyOnce => {
                 let id = inner.alloc_packet_id();
-                let mut dup = false;
-                let mut attempts: u32 = 0;
-                loop {
-                    let rx = register_pending(&inner, id);
-                    let pkt = Packet::Publish(PublishPacket {
-                        dup,
-                        qos,
-                        retain,
-                        topic: topic.clone(),
-                        packet_id: Some(id),
-                        payload: payload.clone(),
-                        properties: Properties::new(),
-                    });
-                    send_packet(&inner, &pkt).await?;
-                    match wait_for(&inner, rx).await {
-                        Ok(Packet::PubRec(_)) => break,
-                        Ok(other) => return Err(unexpected(&other)),
-                        Err(MqttError::Timeout) if attempts < MAX_PUBLISH_RETRIES => {
-                            attempts += 1;
-                            dup = true;
-                        }
-                        Err(e) => return Err(e),
-                    }
+                // Step 1: PUBLISH -> PUBREC.
+                let rec = exchange_with_retry(&inner, id, MAX_PUBLISH_RETRIES, |dup| {
+                    publish(Some(id), dup)
+                })
+                .await?;
+                match rec {
+                    Packet::PubRec(ack) => check_reason("PUBLISH", ack.reason_code)?,
+                    other => return Err(unexpected(&other)),
                 }
-
-                let mut attempts: u32 = 0;
-                loop {
-                    let rx2 = register_pending(&inner, id);
-                    let rel = Packet::PubRel(SimpleAck::success(id));
-                    send_packet(&inner, &rel).await?;
-                    match wait_for(&inner, rx2).await {
-                        Ok(Packet::PubComp(_)) => return Ok(()),
-                        Ok(other) => return Err(unexpected(&other)),
-                        Err(MqttError::Timeout) if attempts < MAX_PUBLISH_RETRIES => {
-                            // PUBREL has no DUP flag (MQTT-5.0 §3.6.1) — it's
-                            // just resent as-is on timeout.
-                            attempts += 1;
-                        }
-                        Err(e) => return Err(e),
-                    }
+                // Step 2: PUBREL -> PUBCOMP. PUBREL has no DUP flag
+                // (MQTT-5.0 §3.6.1) — it's resent as-is on timeout.
+                let comp = exchange_with_retry(&inner, id, MAX_PUBLISH_RETRIES, |_| {
+                    Packet::PubRel(SimpleAck::success(id))
+                })
+                .await?;
+                match comp {
+                    Packet::PubComp(ack) => check_reason("PUBREL", ack.reason_code),
+                    other => Err(unexpected(&other)),
                 }
             }
         }
@@ -288,27 +268,24 @@ impl MqttClient {
     /// subscribed to beyond what a persistent (`clean_start = false`)
     /// session already covers.
     pub async fn subscribe(&self, topic_filter: String, qos: QoS) -> MqttResult<SubscribeResult> {
+        if !is_valid_filter(&topic_filter) {
+            return Err(MqttError::Protocol(format!(
+                "invalid topic filter {topic_filter:?}"
+            )));
+        }
         let inner = self.shared.connected_inner().await?;
-        let id = inner.alloc_packet_id();
-        let rx = register_pending(&inner, id);
-        let pkt = Packet::Subscribe(SubscribePacket {
-            packet_id: id,
-            filters: vec![SubscribeFilter::new(topic_filter.clone(), qos)],
-            properties: Properties::new(),
-        });
-        send_packet(&inner, &pkt).await?;
-        match wait_for(&inner, rx).await? {
+        let response = exchange(&inner, |id| subscribe_packet(id, &topic_filter, qos)).await?;
+        match response {
             Packet::SubAck(ack) => {
                 let code = ack
                     .reason_codes
                     .first()
                     .copied()
                     .unwrap_or(SubAckReasonCode::FAILURE);
-                if code.0 < 0x80 {
+                if code.0 < REASON_FAILURE_THRESHOLD {
                     self.shared
                         .subscriptions
-                        .lock()
-                        .unwrap()
+                        .lock_safe()
                         .insert(topic_filter, qos);
                 }
                 Ok(SubscribeResult {
@@ -321,22 +298,23 @@ impl MqttClient {
 
     /// Unsubscribe from `topic_filter`.
     pub async fn unsubscribe(&self, topic_filter: String) -> MqttResult<()> {
+        if !is_valid_filter(&topic_filter) {
+            return Err(MqttError::Protocol(format!(
+                "invalid topic filter {topic_filter:?}"
+            )));
+        }
         let inner = self.shared.connected_inner().await?;
-        let id = inner.alloc_packet_id();
-        let rx = register_pending(&inner, id);
-        let pkt = Packet::Unsubscribe(UnsubscribePacket {
-            packet_id: id,
-            topic_filters: vec![topic_filter.clone()],
-            properties: Properties::new(),
-        });
-        send_packet(&inner, &pkt).await?;
-        match wait_for(&inner, rx).await? {
+        let response = exchange(&inner, |id| {
+            Packet::Unsubscribe(UnsubscribePacket {
+                packet_id: id,
+                topic_filters: vec![topic_filter.clone()],
+                properties: Properties::new(),
+            })
+        })
+        .await?;
+        match response {
             Packet::UnsubAck(_) => {
-                self.shared
-                    .subscriptions
-                    .lock()
-                    .unwrap()
-                    .remove(&topic_filter);
+                self.shared.subscriptions.lock_safe().remove(&topic_filter);
                 Ok(())
             }
             other => Err(unexpected(&other)),
@@ -350,22 +328,14 @@ impl MqttClient {
     /// recover from.
     pub async fn disconnect(&self) -> MqttResult<()> {
         self.shared.user_disconnected.store(true, Ordering::Relaxed);
-        let mut guard = self.shared.inner.lock().await;
-        let Some(inner) = guard.take() else {
+        let Some(inner) = self.shared.inner.lock().await.take() else {
             return Ok(());
         };
-        inner.connected.store(false, Ordering::Relaxed);
-        let disconnect = Packet::Disconnect(DisconnectPacket::normal());
-        let _ = send_packet(&inner, &disconnect).await;
-        if let Some(mut w) = inner.writer.lock().await.take() {
-            let _ = w.shutdown().await;
+        if inner.is_connected() {
+            let disconnect = Packet::Disconnect(DisconnectPacket::normal());
+            let _ = send_packet(&inner, &disconnect).await;
         }
-        if let Some(h) = inner.read_task.lock().await.take() {
-            h.abort();
-        }
-        if let Some(h) = inner.keepalive_task.lock().await.take() {
-            h.abort();
-        }
+        inner.shutdown().await;
         Ok(())
     }
 }
@@ -390,33 +360,29 @@ impl Drop for MqttClient {
         let Ok(mut guard) = self.shared.inner.try_lock() else {
             return;
         };
-        let Some(inner) = guard.take() else {
-            return;
-        };
-        inner.connected.store(false, Ordering::Relaxed);
-        // Dropping the write half closes that side of the socket outright.
-        if let Ok(mut writer) = inner.writer.try_lock() {
-            writer.take();
+        if let Some(inner) = guard.take() {
+            inner.shutdown_now();
         }
-        // Aborting the read/keep-alive tasks cancels them at their next
-        // await point, which drops their captured `Arc<Inner>` clone and
-        // (for the read task) the read half, closing the socket the rest
-        // of the way.
-        if let Ok(mut task) = inner.read_task.try_lock() {
-            if let Some(handle) = task.take() {
-                handle.abort();
-            }
-        };
-        if let Ok(mut task) = inner.keepalive_task.try_lock() {
-            if let Some(handle) = task.take() {
-                handle.abort();
-            }
-        };
     }
 }
 
-fn build_connect_packet_wrapper(options: &ConnectOptions) -> Packet {
-    Packet::Connect(build_connect_packet(options))
+/// `Ok` unless an MQTT 5.0 ack carries a failure reason code.
+fn check_reason(what: &str, reason_code: u8) -> MqttResult<()> {
+    if reason_code >= REASON_FAILURE_THRESHOLD {
+        Err(MqttError::Session(format!(
+            "{what} rejected by broker: reason code 0x{reason_code:02X}"
+        )))
+    } else {
+        Ok(())
+    }
+}
+
+fn subscribe_packet(packet_id: u16, topic_filter: &str, qos: QoS) -> Packet {
+    Packet::Subscribe(SubscribePacket {
+        packet_id,
+        filters: vec![SubscribeFilter::new(topic_filter.to_string(), qos)],
+        properties: Properties::new(),
+    })
 }
 
 /// The actual connect handshake, shared between [`MqttClient::connect`]
@@ -427,25 +393,21 @@ fn build_connect_packet_wrapper(options: &ConnectOptions) -> Packet {
 /// or not.
 async fn connect_once(shared: &Arc<ClientShared>) -> MqttResult<ConnectResult> {
     let mut guard = shared.inner.lock().await;
-    if guard
-        .as_ref()
-        .is_some_and(|i| i.connected.load(Ordering::Relaxed))
-    {
+    if guard.as_ref().is_some_and(|i| i.is_connected()) {
         return Err(MqttError::AlreadyConnected);
     }
 
     let options = &shared.options;
-    let connect_fut = tls::connect_transport(options);
-    let stream: Box<dyn tls::Transport> = tokio::time::timeout(
-        Duration::from_secs(options.connect_timeout_secs.max(1) as u64),
-        connect_fut,
-    )
-    .await
-    .map_err(|_| MqttError::Timeout)??;
+    let connect_timeout = options.connect_timeout();
+    let max_packet_size = options.max_packet_size();
+    let stream: Box<dyn tls::Transport> =
+        tokio::time::timeout(connect_timeout, tls::connect_transport(options))
+            .await
+            .map_err(|_| MqttError::Timeout)??;
 
     let (mut reader, mut writer) = tokio::io::split(stream);
 
-    let encoded = build_connect_packet_wrapper(options)
+    let encoded = Packet::Connect(build_connect_packet(options))
         .encode(options.version)
         .map_err(|e| MqttError::Protocol(e.to_string()))?;
     writer.write_all(&encoded).await?;
@@ -455,7 +417,8 @@ async fn connect_once(shared: &Arc<ClientShared>) -> MqttResult<ConnectResult> {
         &mut reader,
         &mut buf,
         options.version,
-        options.connect_timeout_secs,
+        connect_timeout,
+        max_packet_size,
     )
     .await?;
     let connack = match connack {
@@ -473,26 +436,20 @@ async fn connect_once(shared: &Arc<ClientShared>) -> MqttResult<ConnectResult> {
         )));
     }
 
-    // On a first-ever connect this is the listener registered before
-    // `connect()` ran; on a reconnect, grab whatever the old (now-dead)
-    // `Inner`'s listener was, since `set_message_listener` wasn't
-    // necessarily called again in the meantime.
-    let listener = {
-        let mut pending = shared.pending_listener.lock().unwrap();
-        pending.take().or_else(|| {
-            guard
-                .as_ref()
-                .and_then(|old| old.listener.lock().unwrap().clone())
-        })
-    };
+    // Release whatever the previous (dead) connection still holds — its
+    // read task keeps the old socket half alive otherwise.
+    if let Some(old) = guard.take() {
+        old.shutdown().await;
+    }
+
     let inner = Arc::new(Inner::new(
         options.version,
         writer,
-        listener,
+        shared.listener.clone(),
         options.operation_timeout(),
     ));
 
-    let read_handle = tokio::spawn(read_loop(inner.clone(), reader, buf));
+    let read_handle = tokio::spawn(read_loop(inner.clone(), reader, buf, max_packet_size));
     *inner.read_task.lock().await = Some(read_handle);
 
     if options.keep_alive_secs > 0 {
@@ -517,8 +474,7 @@ async fn connect_once(shared: &Arc<ClientShared>) -> MqttResult<ConnectResult> {
 async fn replay_subscriptions(shared: &Arc<ClientShared>) {
     let subs: Vec<(String, QoS)> = shared
         .subscriptions
-        .lock()
-        .unwrap()
+        .lock_safe()
         .iter()
         .map(|(topic, qos)| (topic.clone(), *qos))
         .collect();
@@ -526,78 +482,95 @@ async fn replay_subscriptions(shared: &Arc<ClientShared>) {
         return;
     };
     for (topic_filter, qos) in subs {
-        let id = inner.alloc_packet_id();
-        let rx = register_pending(&inner, id);
-        let pkt = Packet::Subscribe(SubscribePacket {
-            packet_id: id,
-            filters: vec![SubscribeFilter::new(topic_filter.clone(), qos)],
-            properties: Properties::new(),
-        });
-        if send_packet(&inner, &pkt).await.is_err() {
-            tracing::warn!(topic = %topic_filter, "re-subscribe failed while reconnecting");
-            return;
-        }
-        if wait_for(&inner, rx).await.is_err() {
-            tracing::warn!(topic = %topic_filter, "re-subscribe was not acked while reconnecting");
+        match exchange(&inner, |id| subscribe_packet(id, &topic_filter, qos)).await {
+            Ok(_) => {}
+            // The connection itself is gone again; the supervisor will
+            // reconnect and replay once more, so don't keep hammering it.
+            Err(MqttError::NotConnected | MqttError::Io(_) | MqttError::Session(_)) => {
+                tracing::warn!(topic = %topic_filter, "re-subscribe failed while reconnecting");
+                return;
+            }
+            Err(e) => {
+                tracing::warn!(topic = %topic_filter, error = %e, "re-subscribe was not acked while reconnecting");
+            }
         }
     }
 }
 
-/// Spawned once (from [`MqttClient::connect`]) when
+/// Spawned (at most one at a time) from [`MqttClient::connect`] when
 /// [`ConnectOptions::auto_reconnect`] is set. Holds only a [`Weak`]
 /// reference to [`ClientShared`] so it never keeps a dropped `MqttClient`
 /// (and its socket) alive — see the [`Drop`] impl's doc comment.
-fn spawn_reconnect_supervisor(shared: Weak<ClientShared>) {
+fn spawn_reconnect_supervisor(shared: &Arc<ClientShared>) {
+    if shared.supervisor_running.swap(true, Ordering::AcqRel) {
+        return; // one is already watching this client
+    }
+    let weak = Arc::downgrade(shared);
     tokio::spawn(async move {
         loop {
-            // Wait for the current connection (if any) to die.
-            loop {
-                let Some(strong) = shared.upgrade() else {
-                    return;
-                };
-                let is_connected = {
-                    let guard = strong.inner.lock().await;
-                    guard
-                        .as_ref()
-                        .map(|i| i.connected.load(Ordering::Relaxed))
-                        .unwrap_or(false)
-                };
-                drop(strong);
-                if !is_connected {
-                    break;
-                }
-                tokio::time::sleep(RECONNECT_POLL_INTERVAL).await;
+            reconnect_supervisor(&weak).await;
+            let Some(strong) = weak.upgrade() else {
+                return;
+            };
+            strong.supervisor_running.store(false, Ordering::Release);
+            // Close the exit race: if the user called `connect()` again
+            // between our last `user_disconnected` check and the flag
+            // being cleared above, that call saw `supervisor_running`
+            // still set and spawned nothing — so take over here.
+            if strong.user_disconnected.load(Ordering::Relaxed)
+                || strong.supervisor_running.swap(true, Ordering::AcqRel)
+            {
+                return;
             }
+        }
+    });
+}
 
+async fn reconnect_supervisor(shared: &Weak<ClientShared>) {
+    loop {
+        // Wait for the current connection (if any) to die.
+        loop {
             let Some(strong) = shared.upgrade() else {
                 return;
             };
             if strong.user_disconnected.load(Ordering::Relaxed) {
                 return;
             }
-            let mut backoff = strong.options.initial_reconnect_backoff();
-            let max_backoff = strong.options.max_reconnect_backoff();
+            let live = strong.is_live().await;
             drop(strong);
+            if !live {
+                break;
+            }
+            tokio::time::sleep(RECONNECT_POLL_INTERVAL).await;
+        }
 
-            loop {
-                tokio::time::sleep(backoff).await;
-                let Some(strong) = shared.upgrade() else {
-                    return;
-                };
-                if strong.user_disconnected.load(Ordering::Relaxed) {
-                    return;
+        let Some(strong) = shared.upgrade() else {
+            return;
+        };
+        let mut backoff = strong.options.initial_reconnect_backoff();
+        let max_backoff = strong.options.max_reconnect_backoff();
+        drop(strong);
+
+        loop {
+            tokio::time::sleep(backoff).await;
+            let Some(strong) = shared.upgrade() else {
+                return;
+            };
+            if strong.user_disconnected.load(Ordering::Relaxed) {
+                return;
+            }
+            match connect_once(&strong).await {
+                Ok(_) => {
+                    replay_subscriptions(&strong).await;
+                    break;
                 }
-                match connect_once(&strong).await {
-                    Ok(_) => {
-                        replay_subscriptions(&strong).await;
-                        break;
-                    }
-                    Err(e) => {
-                        tracing::debug!(error = %e, ?backoff, "reconnect attempt failed");
-                        backoff = (backoff * 2).min(max_backoff);
-                    }
+                // Someone (the user, via `connect()`) beat us to it.
+                Err(MqttError::AlreadyConnected) => break,
+                Err(e) => {
+                    tracing::debug!(error = %e, ?backoff, "reconnect attempt failed");
+                    backoff = (backoff * 2).min(max_backoff);
                 }
             }
         }
-    });
+    }
 }

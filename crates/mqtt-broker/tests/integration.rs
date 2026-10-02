@@ -873,3 +873,264 @@ async fn broker_retries_unacked_pubrel_for_qos2() {
     publisher.disconnect().await.unwrap();
     broker.stop().await.unwrap();
 }
+
+// ── Robustness regressions ─────────────────────────────────────────────
+
+/// A second CONNECT with the same client id evicts the first connection.
+/// The evicted connection's teardown must neither disturb its replacement
+/// nor publish the evicted connection's Last Will.
+#[tokio::test]
+async fn session_takeover_leaves_replacement_connected_and_publishes_no_will() {
+    let (broker, port) = start_broker(|_| {}).await;
+
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let observer = client(port, "observer");
+    observer.set_message_listener(Arc::new(ChannelListener { tx }));
+    observer.connect().await.unwrap();
+    observer
+        .subscribe("t/#".into(), QoS::AtLeastOnce)
+        .await
+        .unwrap();
+
+    let mut opts = ConnectOptions::new("127.0.0.1", port, "same-id", MqttVersion::V5);
+    opts.will = Some(mqtt_client::WillOptions {
+        topic: "t/will".into(),
+        payload: b"should-not-fire".to_vec(),
+        qos: QoS::AtLeastOnce,
+        retain: false,
+    });
+    let first = MqttClient::new(opts.clone());
+    first.connect().await.unwrap();
+
+    let second = MqttClient::new(opts);
+    second.connect().await.unwrap();
+
+    // Give the evicted connection time to tear itself down.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    assert_eq!(
+        broker.client_count(),
+        2,
+        "observer + replacement must both still be counted"
+    );
+    second
+        .publish(
+            "t/alive".into(),
+            b"still here".to_vec(),
+            QoS::AtLeastOnce,
+            false,
+        )
+        .await
+        .expect("replacement connection must remain fully usable");
+    let msg = recv_message(&mut rx).await;
+    assert_eq!(msg.topic, "t/alive", "only the live publish, never a will");
+    assert_no_message(&mut rx).await;
+
+    second.disconnect().await.unwrap();
+    observer.disconnect().await.unwrap();
+    broker.stop().await.unwrap();
+}
+
+#[tokio::test]
+async fn oversized_packet_disconnects_only_the_offender() {
+    let (broker, port) = start_broker(|c| c.max_packet_size = 1024).await;
+
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let bystander = client(port, "bystander");
+    bystander.set_message_listener(Arc::new(ChannelListener { tx }));
+    bystander.connect().await.unwrap();
+    bystander
+        .subscribe("t/ok".into(), QoS::AtMostOnce)
+        .await
+        .unwrap();
+
+    let offender = client(port, "offender");
+    offender.connect().await.unwrap();
+    // QoS 0 so there's no ack to wait on: the broker just drops us.
+    let _ = offender
+        .publish("t/big".into(), vec![0u8; 8 * 1024], QoS::AtMostOnce, false)
+        .await;
+    timeout(Duration::from_secs(5), async {
+        while offender.is_connected() {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("broker must drop a client that exceeds max_packet_size");
+
+    // Small messages from others still flow.
+    let ok = client(port, "ok");
+    ok.connect().await.unwrap();
+    ok.publish("t/ok".into(), b"small".to_vec(), QoS::AtMostOnce, false)
+        .await
+        .unwrap();
+    assert_eq!(recv_message(&mut rx).await.payload, b"small");
+
+    broker.stop().await.unwrap();
+}
+
+#[tokio::test]
+async fn stopping_the_broker_disconnects_clients() {
+    let (broker, port) = start_broker(|_| {}).await;
+    let c = client(port, "will-be-kicked");
+    c.connect().await.unwrap();
+    assert!(c.is_connected());
+
+    broker.stop().await.unwrap();
+    assert!(!broker.is_running());
+
+    timeout(Duration::from_secs(5), async {
+        while c.is_connected() {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("stop() must close live client connections");
+}
+
+#[tokio::test]
+async fn start_is_all_or_nothing_when_a_listener_cannot_bind() {
+    let blocker = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let taken = blocker.local_addr().unwrap().port();
+
+    let mut config = MqttBrokerConfig::new("127.0.0.1", 0);
+    config.ws_port = Some(taken);
+    let broker = MqttBroker::new(config);
+    assert!(broker.start().await.is_err(), "ws port is already in use");
+    assert!(
+        !broker.is_running(),
+        "a failed start must not leave a half-running broker"
+    );
+    assert_eq!(broker.bound_port(), None);
+
+    // Once the port is free, the very same broker starts fine.
+    drop(blocker);
+    broker
+        .start()
+        .await
+        .expect("restart after fixing the conflict");
+    assert!(broker.is_running());
+    broker.stop().await.unwrap();
+}
+
+#[tokio::test]
+async fn concurrent_start_calls_do_not_double_start() {
+    let broker = Arc::new(MqttBroker::new(MqttBrokerConfig::new("127.0.0.1", 0)));
+    let results = futures_util::future::join_all((0..4).map(|_| {
+        let broker = broker.clone();
+        async move { broker.start().await }
+    }))
+    .await;
+    assert_eq!(results.iter().filter(|r| r.is_ok()).count(), 1);
+    broker.stop().await.unwrap();
+}
+
+#[tokio::test]
+async fn empty_client_id_with_persistent_session_is_refused() {
+    let (broker, port) = start_broker(|_| {}).await;
+    let mut opts = ConnectOptions::new("127.0.0.1", port, "", MqttVersion::V311);
+    opts.clean_start = false;
+    let err = MqttClient::new(opts).connect().await.unwrap_err();
+    assert!(
+        matches!(err, mqtt_client::MqttError::ConnectionRefused(_)),
+        "{err:?}"
+    );
+
+    // ...while an empty id with a clean session gets one assigned.
+    let mut opts = ConnectOptions::new("127.0.0.1", port, "", MqttVersion::V311);
+    opts.clean_start = true;
+    let ok = MqttClient::new(opts);
+    ok.connect().await.expect("clean + empty id is allowed");
+    ok.disconnect().await.unwrap();
+    broker.stop().await.unwrap();
+}
+
+#[tokio::test]
+async fn client_rejects_invalid_topics_locally() {
+    let (broker, port) = start_broker(|_| {}).await;
+    let c = client(port, "validator");
+    c.connect().await.unwrap();
+
+    for bad in ["", "a/+/b", "a/#"] {
+        let err = c
+            .publish(bad.into(), vec![], QoS::AtMostOnce, false)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, mqtt_client::MqttError::Protocol(_)),
+            "{bad:?}: {err:?}"
+        );
+    }
+    assert!(c.subscribe("a/#/b".into(), QoS::AtMostOnce).await.is_err());
+    assert!(
+        c.is_connected(),
+        "local validation must not cost us the connection"
+    );
+
+    c.disconnect().await.unwrap();
+    broker.stop().await.unwrap();
+}
+
+#[tokio::test]
+async fn unsubscribe_reports_unknown_filter_on_v5() {
+    let (broker, port) = start_broker(|_| {}).await;
+    let c = client(port, "unsub");
+    c.connect().await.unwrap();
+    // Not an error: UNSUBACK (reason 0x11) still completes the exchange.
+    c.unsubscribe("never/subscribed".into()).await.unwrap();
+    c.disconnect().await.unwrap();
+    broker.stop().await.unwrap();
+}
+
+#[tokio::test]
+async fn shared_subscriptions_are_refused_not_silently_accepted() {
+    let (broker, port) = start_broker(|_| {}).await;
+    let c = client(port, "shared");
+    c.connect().await.unwrap();
+    let result = c
+        .subscribe("$share/g/some/topic".into(), QoS::AtMostOnce)
+        .await
+        .unwrap();
+    assert_eq!(result.reason_code, 0x9E);
+    c.disconnect().await.unwrap();
+    broker.stop().await.unwrap();
+}
+
+/// A panicking listener (an exception thrown by Kotlin/Swift/Python code
+/// surfaces as a Rust panic) must not kill the connection's read loop.
+#[tokio::test]
+async fn panicking_listener_does_not_kill_the_connection() {
+    struct PanicOnce(
+        std::sync::atomic::AtomicBool,
+        mpsc::UnboundedSender<MqttMessage>,
+    );
+    impl MqttMessageListener for PanicOnce {
+        fn on_message(&self, message: MqttMessage) {
+            if !self.0.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                panic!("foreign listener blew up");
+            }
+            let _ = self.1.send(message);
+        }
+        fn on_disconnected(&self, _reason: String) {}
+    }
+
+    let (broker, port) = start_broker(|_| {}).await;
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let sub = client(port, "fragile");
+    sub.set_message_listener(Arc::new(PanicOnce(false.into(), tx)));
+    sub.connect().await.unwrap();
+    sub.subscribe("t/p".into(), QoS::AtMostOnce).await.unwrap();
+
+    let publisher = client(port, "pub");
+    publisher.connect().await.unwrap();
+    for payload in [b"first".as_slice(), b"second".as_slice()] {
+        publisher
+            .publish("t/p".into(), payload.to_vec(), QoS::AtMostOnce, false)
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert_eq!(recv_message(&mut rx).await.payload, b"second");
+    assert!(sub.is_connected());
+    broker.stop().await.unwrap();
+}

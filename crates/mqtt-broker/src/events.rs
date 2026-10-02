@@ -5,12 +5,40 @@
 
 use std::sync::Mutex;
 
+use mqtt_client::support::{guard_callback, LockExt};
 use mqtt_client::QoS;
 
 use crate::config::SharedEventListener;
 
+/// Defines `EventHub` notification methods. Every one has the identical
+/// shape — snapshot the listener out of the lock (never call foreign code
+/// while holding it), convert borrowed arguments to the owned values the
+/// foreign callback takes (via `Into`), and run the callback with panics
+/// contained — so each is declared by name, arguments and callback only.
+macro_rules! hub_notifiers {
+    ($( $(#[$meta:meta])* fn $name:ident => $callback:ident ( $($arg:ident : $ty:ty),* ); )+) => {
+        $(
+            $(#[$meta])*
+            pub fn $name(&self $(, $arg: $ty)*) {
+                let listener = self.listener.lock_safe().clone();
+                if let Some(listener) = listener {
+                    guard_callback(stringify!($callback), || {
+                        // `&str -> String` for text arguments, identity for `Copy` ones.
+                        listener.$callback($( $arg.into() ),*)
+                    });
+                }
+            }
+        )+
+    };
+}
+
 /// Holds the single registered [`MqttBrokerEventListener`], if any, and
 /// fans out lifecycle notifications to it.
+///
+/// A panic inside a foreign listener is contained and logged rather than
+/// unwinding into the connection task that raised the event.
+///
+/// [`MqttBrokerEventListener`]: crate::config::MqttBrokerEventListener
 #[derive(Default)]
 pub struct EventHub {
     listener: Mutex<Option<SharedEventListener>>,
@@ -18,30 +46,16 @@ pub struct EventHub {
 
 impl EventHub {
     pub fn new() -> Self {
-        EventHub {
-            listener: Mutex::new(None),
-        }
+        EventHub::default()
     }
 
     pub fn set_listener(&self, listener: SharedEventListener) {
-        *self.listener.lock().unwrap() = Some(listener);
+        *self.listener.lock_safe() = Some(listener);
     }
 
-    pub fn notify_connected(&self, client_id: &str) {
-        if let Some(listener) = self.listener.lock().unwrap().clone() {
-            listener.on_client_connected(client_id.to_string());
-        }
-    }
-
-    pub fn notify_disconnected(&self, client_id: &str, reason: &str) {
-        if let Some(listener) = self.listener.lock().unwrap().clone() {
-            listener.on_client_disconnected(client_id.to_string(), reason.to_string());
-        }
-    }
-
-    pub fn notify_message_published(&self, client_id: &str, topic: &str, qos: QoS) {
-        if let Some(listener) = self.listener.lock().unwrap().clone() {
-            listener.on_message_published(client_id.to_string(), topic.to_string(), qos);
-        }
+    hub_notifiers! {
+        fn notify_connected => on_client_connected(client_id: &str);
+        fn notify_disconnected => on_client_disconnected(client_id: &str, reason: &str);
+        fn notify_message_published => on_message_published(client_id: &str, topic: &str, qos: QoS);
     }
 }

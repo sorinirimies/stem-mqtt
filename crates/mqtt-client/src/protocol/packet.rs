@@ -9,7 +9,7 @@ use super::macros::u8_enum;
 use super::properties::Properties;
 use super::publish::PublishPacket;
 use super::subscribe::{SubAckPacket, SubscribePacket, UnsubAckPacket, UnsubscribePacket};
-use super::varint::{decode_varint, encode_varint, MAX_VARINT};
+use super::varint::{encode_varint, peek_varint, MAX_VARINT};
 use super::MqttVersion;
 use crate::error::{MqttError, MqttResult};
 
@@ -35,6 +35,33 @@ u8_enum! {
         PingResp = 13,
         Disconnect = 14,
         Auth = 15,
+    }
+}
+
+/// Largest packet the wire format can express: 1 type byte + a 4-byte
+/// remaining-length + a [`MAX_VARINT`]-byte body.
+pub const MAX_PACKET_SIZE: usize = 1 + 4 + MAX_VARINT as usize;
+
+impl PacketType {
+    /// The fixed-header flag bits this packet type *requires*, or `None`
+    /// for PUBLISH (whose flags carry DUP/QoS/RETAIN and are validated by
+    /// its own decoder). MQTT-2.2.2-2: a receiver MUST treat any other
+    /// value as a malformed packet.
+    fn required_flags(self) -> Option<u8> {
+        match self {
+            PacketType::Publish => None,
+            PacketType::PubRel | PacketType::Subscribe | PacketType::Unsubscribe => Some(0x02),
+            _ => Some(0x00),
+        }
+    }
+
+    fn validate_flags(self, flags: u8) -> MqttResult<()> {
+        match self.required_flags() {
+            Some(required) if required != flags => Err(MqttError::MalformedPacket(format!(
+                "invalid fixed-header flags 0x{flags:X} for {self:?} (expected 0x{required:X})"
+            ))),
+            _ => Ok(()),
+        }
     }
 }
 
@@ -130,6 +157,22 @@ pub enum Packet {
 }
 
 impl Packet {
+    /// The packet id of the request this packet *answers* — set for the
+    /// acknowledgements a client-initiated exchange waits on (PUBACK,
+    /// PUBREC, PUBCOMP, SUBACK, UNSUBACK) and `None` for everything else.
+    ///
+    /// PUBREL is deliberately excluded: it answers a PUBREC *we* sent to
+    /// the peer, i.e. it belongs to the receiving side's handshake, not to
+    /// a pending request of ours.
+    pub fn response_id(&self) -> Option<u16> {
+        match self {
+            Packet::PubAck(a) | Packet::PubRec(a) | Packet::PubComp(a) => Some(a.packet_id),
+            Packet::SubAck(a) => Some(a.packet_id),
+            Packet::UnsubAck(a) => Some(a.packet_id),
+            _ => None,
+        }
+    }
+
     fn packet_type(&self) -> PacketType {
         match self {
             Packet::Connect(_) => PacketType::Connect,
@@ -205,23 +248,44 @@ impl Packet {
     /// `version` is the protocol version already negotiated for this
     /// connection (irrelevant when decoding the initial CONNECT packet,
     /// which carries its own protocol level).
+    ///
+    /// Accepts packets up to the protocol maximum; use
+    /// [`Packet::decode_with_limit`] for untrusted peers.
     pub fn decode(buf: &mut BytesMut, version: MqttVersion) -> MqttResult<Option<Packet>> {
+        Self::decode_with_limit(buf, version, MAX_PACKET_SIZE)
+    }
+
+    /// Like [`Packet::decode`], but rejects any packet whose total size
+    /// (fixed header + body) exceeds `max_packet_size` as soon as its
+    /// header has been read — **before** the body is buffered, so a peer
+    /// announcing a 256 MiB packet can't make us allocate it.
+    pub fn decode_with_limit(
+        buf: &mut BytesMut,
+        version: MqttVersion,
+        max_packet_size: usize,
+    ) -> MqttResult<Option<Packet>> {
         if buf.is_empty() {
             return Ok(None);
         }
         let type_byte = buf[0];
         let packet_type = PacketType::from_u8(type_byte >> 4)?;
         let flags = type_byte & 0x0F;
+        packet_type.validate_flags(flags)?;
 
-        // Try to parse the remaining-length varint without committing to
-        // consuming `buf` unless we know the full packet is present.
-        let mut cursor = Bytes::copy_from_slice(&buf[1..]);
-        let remaining_len = match decode_varint(&mut cursor)? {
-            Some(len) => len as usize,
+        // Parse the remaining-length varint in place (no copy of the
+        // buffer) and only commit to consuming `buf` once the whole packet
+        // is present.
+        let (remaining_len, len_bytes) = match peek_varint(&buf[1..])? {
+            Some((len, n)) => (len as usize, n),
             None => return Ok(None),
         };
-        let header_len = 1 + (buf.len() - 1 - cursor.len());
+        let header_len = 1 + len_bytes;
         let total_len = header_len + remaining_len;
+        if total_len > max_packet_size {
+            return Err(MqttError::PacketTooLarge(format!(
+                "{total_len} bytes exceeds the {max_packet_size} byte limit"
+            )));
+        }
         if buf.len() < total_len {
             return Ok(None);
         }
@@ -327,6 +391,51 @@ mod tests {
         let pkt = Packet::Disconnect(DisconnectPacket::normal());
         let encoded = pkt.encode(MqttVersion::V5).unwrap();
         assert_eq!(&encoded[..], &[0xE0, 0x00]);
+    }
+
+    #[test]
+    fn oversized_packet_rejected_from_header_alone() {
+        // PUBLISH header announcing a ~2 MiB body, with none of it received.
+        let mut buf = BytesMut::from(&[0x30u8, 0x80, 0x80, 0x80, 0x01][..]);
+        let err = Packet::decode_with_limit(&mut buf, MqttVersion::V311, 1024 * 1024)
+            .expect_err("limit must be enforced before the body arrives");
+        assert!(matches!(err, MqttError::PacketTooLarge(_)), "{err:?}");
+    }
+
+    #[test]
+    fn packet_at_the_limit_is_accepted() {
+        let encoded = Packet::PingReq.encode(MqttVersion::V311).unwrap();
+        let mut buf = BytesMut::from(&encoded[..]);
+        let limit = encoded.len();
+        assert!(
+            Packet::decode_with_limit(&mut buf, MqttVersion::V311, limit)
+                .unwrap()
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn wrong_fixed_header_flags_rejected() {
+        // PUBREL must carry flags 0b0010; 0b0000 is malformed.
+        let mut buf = BytesMut::from(&[0x60u8, 0x02, 0x00, 0x01][..]);
+        assert!(Packet::decode(&mut buf, MqttVersion::V311).is_err());
+        // SUBSCRIBE likewise.
+        let mut buf = BytesMut::from(&[0x80u8, 0x00][..]);
+        assert!(Packet::decode(&mut buf, MqttVersion::V311).is_err());
+        // PINGREQ must have all-zero flags.
+        let mut buf = BytesMut::from(&[0xC1u8, 0x00][..]);
+        assert!(Packet::decode(&mut buf, MqttVersion::V311).is_err());
+    }
+
+    #[test]
+    fn response_id_covers_exactly_the_ack_packets() {
+        use crate::protocol::ack::SimpleAck;
+        let ack = SimpleAck::success(9);
+        assert_eq!(Packet::PubAck(ack.clone()).response_id(), Some(9));
+        assert_eq!(Packet::PubRec(ack.clone()).response_id(), Some(9));
+        assert_eq!(Packet::PubComp(ack.clone()).response_id(), Some(9));
+        assert_eq!(Packet::PubRel(ack).response_id(), None);
+        assert_eq!(Packet::PingResp.response_id(), None);
     }
 
     #[test]

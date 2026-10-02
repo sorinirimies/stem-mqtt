@@ -82,6 +82,20 @@ impl MqttMessageListener for Printer {
 }
 ```
 
+## Robustness
+
+- **Never blocks forever:** every request has an operation timeout; QoS 1/2 steps are retransmitted
+  (DUP=1) up to 3 times; when the connection drops, in-flight requests fail immediately.
+- **Half-open connections** are detected: no data from the broker for 1.5× the keep-alive interval
+  declares the connection dead (reported once via `on_disconnected`).
+- **Packet-size limit:** `ConnectOptions::max_packet_size` rejects an oversized packet from its header.
+- **Input validation:** wildcard/empty topics and malformed filters are rejected locally with
+  `MqttError::Protocol` before touching the wire; MQTT 5 failure reason codes on PUBACK/PUBREC/PUBCOMP
+  surface as `MqttError::Session`.
+- **No credential leaks:** `Debug` output redacts passwords and private keys.
+- **Listener safety:** a panic/exception in your `MqttMessageListener` is contained and can't kill the
+  connection's read loop.
+
 ## Foreign-language bindings
 
 ```sh
@@ -92,7 +106,7 @@ cargo run -p stem-mqtt-client --features uniffi/cli --bin uniffi-bindgen -- \
 ```
 
 Or use the repo-level helper, which builds the right `cdylib` for your
-platform first: `../../scripts/generate-bindings.sh kotlin`.
+platform first: `nu ../../scripts/generate_bindings.nu kotlin`.
 
 ## Examples
 

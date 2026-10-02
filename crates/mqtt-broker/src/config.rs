@@ -2,8 +2,21 @@
 //! exposed across the UniFFI boundary.
 
 use std::sync::Arc;
+use std::time::Duration;
 
+use mqtt_client::support::secs_or;
 use mqtt_client::QoS;
+
+/// Default cap on a single inbound packet (fixed header + body): 1 MiB.
+/// An unauthenticated peer can announce any size up to the protocol's
+/// ~256 MiB maximum; without a cap each connection could force that much
+/// buffering.
+pub const DEFAULT_MAX_PACKET_SIZE: u32 = 1024 * 1024;
+
+/// Default number of encoded packets that may be queued for one client's
+/// socket before further deliveries to it are dropped (see
+/// [`MqttBrokerConfig::max_outbound_queue`]).
+pub const DEFAULT_MAX_OUTBOUND_QUEUE: u32 = 4096;
 
 /// Configuration for an [`crate::broker::MqttBroker`].
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
@@ -43,13 +56,28 @@ pub struct MqttBrokerConfig {
     /// optional WebSocket `ws_port`) above. `None` (the default) means no
     /// TLS listener at all, unchanged from before TLS support existed.
     pub tls: Option<BrokerTlsConfig>,
+    /// Largest packet (fixed header + body, in bytes) accepted from any
+    /// client. A client announcing a bigger one is disconnected as soon as
+    /// the packet *header* is read, before the body is buffered. `0`
+    /// selects the built-in default
+    /// ([`DEFAULT_MAX_PACKET_SIZE`], 1 MiB).
+    #[uniffi(default = 0)]
+    pub max_packet_size: u32,
+    /// Maximum encoded packets queued for one client's socket. A client
+    /// that reads slower than messages arrive would otherwise make the
+    /// broker buffer without bound; once this many are waiting, further
+    /// deliveries to *that* client are dropped (QoS 1/2 ones are retried
+    /// by the redelivery sweep). `0` selects the built-in default
+    /// ([`DEFAULT_MAX_OUTBOUND_QUEUE`], 4096).
+    #[uniffi(default = 0)]
+    pub max_outbound_queue: u32,
 }
 
 /// TLS configuration for [`MqttBrokerConfig::tls`]. All certificate/key
 /// material is PEM-encoded bytes (not file paths), matching
 /// `mqtt_client::TlsOptions` so this works identically across every
 /// language binding without assuming a filesystem layout.
-#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+#[derive(Clone, PartialEq, Eq, uniffi::Record)]
 pub struct BrokerTlsConfig {
     /// Port to accept TLS connections on.
     pub port: u16,
@@ -65,6 +93,9 @@ pub struct BrokerTlsConfig {
     pub client_ca_pem: Option<Vec<u8>>,
 }
 
+// Never print the server private key when a config is `Debug`-formatted.
+mqtt_client::redacted_debug!(BrokerTlsConfig { port, cert_pem, client_ca_pem } secret { key_pem });
+
 impl MqttBrokerConfig {
     pub fn new(bind_address: impl Into<String>, port: u16) -> Self {
         MqttBrokerConfig {
@@ -78,6 +109,29 @@ impl MqttBrokerConfig {
             max_queued_per_client: 1_000,
             redelivery_interval_secs: 0,
             tls: None,
+            max_packet_size: 0,
+            max_outbound_queue: 0,
+        }
+    }
+
+    pub(crate) fn redelivery_interval(&self) -> Duration {
+        secs_or(
+            self.redelivery_interval_secs,
+            crate::registry::DEFAULT_REDELIVERY_INTERVAL.as_secs() as u32,
+        )
+    }
+
+    pub(crate) fn max_packet_size_bytes(&self) -> usize {
+        match self.max_packet_size {
+            0 => DEFAULT_MAX_PACKET_SIZE as usize,
+            n => n as usize,
+        }
+    }
+
+    pub(crate) fn outbound_queue_capacity(&self) -> usize {
+        match self.max_outbound_queue {
+            0 => DEFAULT_MAX_OUTBOUND_QUEUE as usize,
+            n => n as usize,
         }
     }
 }

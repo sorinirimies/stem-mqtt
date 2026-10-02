@@ -12,6 +12,7 @@ pub mod packet;
 pub mod properties;
 pub mod publish;
 pub mod subscribe;
+pub mod topic;
 pub mod varint;
 
 pub use ack::*;

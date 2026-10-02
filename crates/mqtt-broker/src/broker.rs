@@ -6,11 +6,13 @@
 //! [`MqttBroker`] itself is the thin UniFFI-exported handle: bind sockets,
 //! spawn per-connection tasks, expose start/stop/status.
 
+use std::future::Future;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
-use mqtt_client::protocol::publish::PublishPacket;
+use mqtt_client::support::LockExt;
 use mqtt_client::QoS;
-use tokio::net::TcpListener;
+use tokio::net::{TcpListener, TcpStream};
 use tokio::task::JoinHandle;
 
 use crate::config::{
@@ -73,8 +75,12 @@ impl BrokerState {
     /// retaining it first if requested. Spans [`SessionRegistry`] and
     /// [`RetainStore`], so it lives here rather than on either subsystem
     /// alone.
-    pub fn detach_session(&self, client_id: &str, graceful: bool) {
-        let Some(will) = self.sessions.detach(client_id, graceful) else {
+    ///
+    /// `conn_id` identifies the *connection* being torn down: if a newer
+    /// connection has since taken the client id over, this is a no-op (see
+    /// [`SessionRegistry::detach`]).
+    pub fn detach_session(&self, client_id: &str, conn_id: u64, graceful: bool) {
+        let Some(will) = self.sessions.detach(client_id, conn_id, graceful) else {
             return;
         };
 
@@ -85,33 +91,51 @@ impl BrokerState {
             retain: will.retain,
         };
         if message.retain {
-            self.retained.update(&PublishPacket {
-                dup: false,
-                qos: message.qos,
-                retain: true,
-                topic: message.topic.clone(),
-                packet_id: None,
-                payload: message.payload.clone(),
-                properties: mqtt_client::protocol::properties::Properties::new(),
-            });
+            self.retained.update(&message.to_publish(None, false));
         }
         self.sessions.fan_out(client_id, &message);
+    }
+}
+
+/// How long a peer gets to finish a TLS / WebSocket handshake before it's
+/// dropped. Without a bound, a client that opens a socket and goes silent
+/// would hold a task and a file descriptor forever.
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// How long an accept loop backs off after an `accept()` error before
+/// trying again.
+const ACCEPT_ERROR_BACKOFF: Duration = Duration::from_millis(100);
+
+/// What a started broker owns; present exactly while it's running.
+struct Running {
+    tasks: Vec<JoinHandle<()>>,
+    port: u16,
+    ws_port: Option<u16>,
+    tls_port: Option<u16>,
+}
+
+impl Running {
+    fn abort_tasks(&self) {
+        for task in &self.tasks {
+            task.abort();
+        }
     }
 }
 
 /// A running (or not-yet-started) MQTT broker instance, speaking both MQTT
 /// 3.1.1 and MQTT 5.0 — the protocol version is negotiated independently
 /// per connection from each client's CONNECT packet.
+///
+/// Dropping a broker stops it (listeners are closed and live connections
+/// told to shut down); there is no way to reach a broker that has no
+/// remaining handle, so leaving it running would just leak its ports.
 #[derive(uniffi::Object)]
 pub struct MqttBroker {
     state: Arc<BrokerState>,
-    accept_task: Mutex<Option<JoinHandle<()>>>,
-    ws_accept_task: Mutex<Option<JoinHandle<()>>>,
-    tls_accept_task: Mutex<Option<JoinHandle<()>>>,
-    redelivery_task: Mutex<Option<JoinHandle<()>>>,
-    bound_port: Mutex<Option<u16>>,
-    bound_ws_port: Mutex<Option<u16>>,
-    bound_tls_port: Mutex<Option<u16>>,
+    /// Serialises `start`/`stop` so two concurrent calls can't both pass the
+    /// "already running?" check. Held across `.await`, hence tokio's mutex.
+    lifecycle: tokio::sync::Mutex<()>,
+    running: Mutex<Option<Running>>,
 }
 
 #[uniffi::export(async_runtime = "tokio")]
@@ -120,13 +144,8 @@ impl MqttBroker {
     pub fn new(config: MqttBrokerConfig) -> Self {
         MqttBroker {
             state: Arc::new(BrokerState::new(config)),
-            accept_task: Mutex::new(None),
-            ws_accept_task: Mutex::new(None),
-            tls_accept_task: Mutex::new(None),
-            redelivery_task: Mutex::new(None),
-            bound_port: Mutex::new(None),
-            bound_ws_port: Mutex::new(None),
-            bound_tls_port: Mutex::new(None),
+            lifecycle: tokio::sync::Mutex::new(()),
+            running: Mutex::new(None),
         }
     }
 
@@ -134,7 +153,7 @@ impl MqttBroker {
     /// [`start`](Self::start) to affect connections made right away, but
     /// may be replaced at any time.
     pub fn set_auth_provider(&self, provider: Arc<dyn MqttAuthProvider>) {
-        *self.state.auth_provider.lock().unwrap() = Some(provider);
+        *self.state.auth_provider.lock_safe() = Some(provider);
     }
 
     /// Register a listener for connect/disconnect/publish events.
@@ -143,150 +162,98 @@ impl MqttBroker {
     }
 
     /// Bind the listening socket(s) and start accepting connections. Also
-    /// binds a second, MQTT-over-WebSocket listener on
-    /// `config.ws_port` if it's non-zero (see
-    /// [`MqttBrokerConfig::ws_port`]).
+    /// binds a second, MQTT-over-WebSocket listener on `config.ws_port` and
+    /// a TLS listener on `config.tls` when those are configured.
+    ///
+    /// All-or-nothing: every socket is bound (and the TLS configuration
+    /// validated) *before* anything starts accepting, so a failure — say
+    /// the WebSocket port is taken — leaves the broker cleanly stopped
+    /// instead of half-running with some listeners already live.
     pub async fn start(&self) -> MqttBrokerResult<()> {
-        if self.accept_task.lock().unwrap().is_some() {
+        let _lifecycle = self.lifecycle.lock().await;
+        if self.running.lock_safe().is_some() {
             return Err(MqttBrokerError::AlreadyRunning);
         }
-        let addr = format!(
-            "{}:{}",
-            self.state.config.bind_address, self.state.config.port
-        );
-        let listener = TcpListener::bind(&addr).await?;
-        let local_port = listener
-            .local_addr()
-            .map(|a| a.port())
-            .unwrap_or(self.state.config.port);
-        *self.bound_port.lock().unwrap() = Some(local_port);
+        let config = &self.state.config;
+
+        // ── Bind everything first ────────────────────────────────────────
+        let tls = match &config.tls {
+            Some(tls_config) => {
+                let acceptor =
+                    crate::tls::build_acceptor(tls_config).map_err(MqttBrokerError::Tls)?;
+                Some((acceptor, bind(&config.bind_address, tls_config.port).await?))
+            }
+            None => None,
+        };
+        let tcp = bind(&config.bind_address, config.port).await?;
+        let ws = match config.ws_port {
+            Some(port) => Some(bind(&config.bind_address, port).await?),
+            None => None,
+        };
+
+        let mut running = Running {
+            tasks: Vec::new(),
+            port: local_port(&tcp, config.port),
+            ws_port: ws.as_ref().map(|l| local_port(l, 0)),
+            tls_port: tls.as_ref().map(|(_, l)| local_port(l, 0)),
+        };
+
+        // ── Then start accepting ─────────────────────────────────────────
+        let state = self.state.clone();
+        running
+            .tasks
+            .push(spawn_accept_loop(tcp, "tcp", move |stream, peer| {
+                handle_connection(state.clone(), stream, peer)
+            }));
+
+        if let Some(listener) = ws {
+            let state = self.state.clone();
+            running
+                .tasks
+                .push(spawn_accept_loop(listener, "ws", move |stream, peer| {
+                    accept_ws_connection(state.clone(), stream, peer)
+                }));
+        }
+
+        if let Some((acceptor, listener)) = tls {
+            let state = self.state.clone();
+            running
+                .tasks
+                .push(spawn_accept_loop(listener, "tls", move |stream, peer| {
+                    accept_tls_connection(state.clone(), acceptor.clone(), stream, peer)
+                }));
+        }
 
         let state = self.state.clone();
-        let handle = tokio::spawn(async move {
-            loop {
-                match listener.accept().await {
-                    Ok((stream, peer)) => {
-                        stream.set_nodelay(true).ok();
-                        let state = state.clone();
-                        tokio::spawn(handle_connection(state, stream, peer.to_string()));
-                    }
-                    Err(e) => {
-                        tracing::warn!(error = %e, "accept() failed");
-                        break;
-                    }
-                }
-            }
-        });
-        *self.accept_task.lock().unwrap() = Some(handle);
-
-        if let Some(ws_port) = self.state.config.ws_port {
-            let ws_addr = format!("{}:{}", self.state.config.bind_address, ws_port);
-            let ws_listener = TcpListener::bind(&ws_addr).await?;
-            let local_ws_port = ws_listener
-                .local_addr()
-                .map(|a| a.port())
-                .unwrap_or(ws_port);
-            *self.bound_ws_port.lock().unwrap() = Some(local_ws_port);
-
-            let ws_state = self.state.clone();
-            let ws_handle = tokio::spawn(async move {
-                loop {
-                    match ws_listener.accept().await {
-                        Ok((stream, peer)) => {
-                            stream.set_nodelay(true).ok();
-                            let state = ws_state.clone();
-                            tokio::spawn(accept_ws_connection(state, stream, peer.to_string()));
-                        }
-                        Err(e) => {
-                            tracing::warn!(error = %e, "ws accept() failed");
-                            break;
-                        }
-                    }
-                }
-            });
-            *self.ws_accept_task.lock().unwrap() = Some(ws_handle);
-        }
-
-        if let Some(tls_config) = self.state.config.tls.clone() {
-            let acceptor = crate::tls::build_acceptor(&tls_config).map_err(MqttBrokerError::Tls)?;
-            let tls_addr = format!("{}:{}", self.state.config.bind_address, tls_config.port);
-            let tls_listener = TcpListener::bind(&tls_addr).await?;
-            let local_tls_port = tls_listener
-                .local_addr()
-                .map(|a| a.port())
-                .unwrap_or(tls_config.port);
-            *self.bound_tls_port.lock().unwrap() = Some(local_tls_port);
-
-            let tls_state = self.state.clone();
-            let tls_handle = tokio::spawn(async move {
-                loop {
-                    match tls_listener.accept().await {
-                        Ok((stream, peer)) => {
-                            stream.set_nodelay(true).ok();
-                            let state = tls_state.clone();
-                            let acceptor = acceptor.clone();
-                            tokio::spawn(accept_tls_connection(
-                                state,
-                                acceptor,
-                                stream,
-                                peer.to_string(),
-                            ));
-                        }
-                        Err(e) => {
-                            tracing::warn!(error = %e, "tls accept() failed");
-                            break;
-                        }
-                    }
-                }
-            });
-            *self.tls_accept_task.lock().unwrap() = Some(tls_handle);
-        }
-
-        let redelivery_state = self.state.clone();
-        let redelivery_interval = if self.state.config.redelivery_interval_secs == 0 {
-            crate::registry::DEFAULT_REDELIVERY_INTERVAL
-        } else {
-            std::time::Duration::from_secs(self.state.config.redelivery_interval_secs as u64)
-        };
-        let redelivery_handle = tokio::spawn(async move {
-            let mut interval = tokio::time::interval(redelivery_interval);
+        let interval = config.redelivery_interval();
+        running.tasks.push(tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(interval);
             // The first tick fires immediately; skip it so we don't sweep
             // an empty registry the instant the broker starts.
-            interval.tick().await;
+            ticker.tick().await;
             loop {
-                interval.tick().await;
-                redelivery_state.sessions.retry_pending(redelivery_interval);
+                ticker.tick().await;
+                state.sessions.retry_pending(interval);
             }
-        });
-        *self.redelivery_task.lock().unwrap() = Some(redelivery_handle);
+        }));
 
+        *self.running.lock_safe() = Some(running);
         Ok(())
     }
 
-    /// Stop accepting new connections and abort the accept loop(s).
-    /// Existing client connections are left running until they naturally
-    /// close.
+    /// Stop the broker: close the listening sockets and ask every
+    /// connected client's connection to shut down. Sessions that persist
+    /// across disconnects (`clean_start = false`) are kept in memory, so a
+    /// later [`start`](Self::start) resumes them. Calling `stop()` on a
+    /// broker that isn't running is a no-op.
     pub async fn stop(&self) -> MqttBrokerResult<()> {
-        if let Some(handle) = self.accept_task.lock().unwrap().take() {
-            handle.abort();
-        }
-        if let Some(handle) = self.ws_accept_task.lock().unwrap().take() {
-            handle.abort();
-        }
-        if let Some(handle) = self.tls_accept_task.lock().unwrap().take() {
-            handle.abort();
-        }
-        if let Some(handle) = self.redelivery_task.lock().unwrap().take() {
-            handle.abort();
-        }
-        *self.bound_port.lock().unwrap() = None;
-        *self.bound_ws_port.lock().unwrap() = None;
-        *self.bound_tls_port.lock().unwrap() = None;
+        let _lifecycle = self.lifecycle.lock().await;
+        self.shutdown();
         Ok(())
     }
 
     pub fn is_running(&self) -> bool {
-        self.accept_task.lock().unwrap().is_some()
+        self.running.lock_safe().is_some()
     }
 
     /// Number of currently connected clients.
@@ -297,18 +264,78 @@ impl MqttBroker {
     /// The TCP port actually bound (useful when `config.port == 0` was used
     /// to request an ephemeral port, e.g. in tests).
     pub fn bound_port(&self) -> Option<u16> {
-        *self.bound_port.lock().unwrap()
+        self.running.lock_safe().as_ref().map(|r| r.port)
     }
 
-    /// The WebSocket port actually bound, if `config.ws_port != 0`.
+    /// The WebSocket port actually bound, if `config.ws_port` is set.
     pub fn bound_ws_port(&self) -> Option<u16> {
-        *self.bound_ws_port.lock().unwrap()
+        self.running.lock_safe().as_ref().and_then(|r| r.ws_port)
     }
 
     /// The TLS port actually bound, if `config.tls` is set.
     pub fn bound_tls_port(&self) -> Option<u16> {
-        *self.bound_tls_port.lock().unwrap()
+        self.running.lock_safe().as_ref().and_then(|r| r.tls_port)
     }
+}
+
+impl MqttBroker {
+    /// Synchronous core of `stop()`, shared with `Drop`.
+    fn shutdown(&self) {
+        if let Some(running) = self.running.lock_safe().take() {
+            running.abort_tasks();
+            self.state.sessions.shutdown_all();
+        }
+    }
+}
+
+impl Drop for MqttBroker {
+    fn drop(&mut self) {
+        self.shutdown();
+    }
+}
+
+async fn bind(address: &str, port: u16) -> MqttBrokerResult<TcpListener> {
+    Ok(TcpListener::bind((address, port)).await?)
+}
+
+/// The port `listener` is actually bound to (differs from the requested one
+/// when `0` asked for an ephemeral port).
+fn local_port(listener: &TcpListener, fallback: u16) -> u16 {
+    listener.local_addr().map(|a| a.port()).unwrap_or(fallback)
+}
+
+/// Accept connections on `listener` forever, spawning `on_connection` for
+/// each. One implementation for every transport (raw TCP, WebSocket, TLS):
+/// they differ only in what they do with the accepted socket.
+///
+/// An `accept()` error (typically `EMFILE` under file-descriptor pressure,
+/// or a connection reset between SYN and accept) is logged and retried
+/// after a short pause instead of ending the loop — otherwise one
+/// transient error would silently and permanently stop a listener while
+/// [`MqttBroker::is_running`] kept reporting `true`.
+fn spawn_accept_loop<F, Fut>(
+    listener: TcpListener,
+    transport: &'static str,
+    mut on_connection: F,
+) -> JoinHandle<()>
+where
+    F: FnMut(TcpStream, String) -> Fut + Send + 'static,
+    Fut: Future<Output = ()> + Send + 'static,
+{
+    tokio::spawn(async move {
+        loop {
+            match listener.accept().await {
+                Ok((stream, peer)) => {
+                    stream.set_nodelay(true).ok();
+                    tokio::spawn(on_connection(stream, peer.to_string()));
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, transport, "accept() failed; retrying");
+                    tokio::time::sleep(ACCEPT_ERROR_BACKOFF).await;
+                }
+            }
+        }
+    })
 }
 
 /// Complete the TLS handshake, then hand off to the same
@@ -318,28 +345,35 @@ impl MqttBroker {
 async fn accept_tls_connection(
     state: Arc<BrokerState>,
     acceptor: tokio_rustls::TlsAcceptor,
-    stream: tokio::net::TcpStream,
+    stream: TcpStream,
     peer: String,
 ) {
-    match acceptor.accept(stream).await {
-        Ok(tls_stream) => handle_connection(state, tls_stream, peer).await,
-        Err(e) => tracing::debug!(%peer, error = %e, "TLS handshake failed"),
+    match tokio::time::timeout(HANDSHAKE_TIMEOUT, acceptor.accept(stream)).await {
+        Ok(Ok(tls_stream)) => handle_connection(state, tls_stream, peer).await,
+        Ok(Err(e)) => tracing::debug!(%peer, error = %e, "TLS handshake failed"),
+        Err(_) => tracing::debug!(%peer, "TLS handshake timed out"),
     }
 }
 
 /// Complete the WebSocket upgrade handshake (negotiating the `mqtt`
 /// subprotocol per MQTT-5.0 §6.4.1), then hand off to the same
 /// [`handle_connection`] every raw-TCP connection goes through.
-async fn accept_ws_connection(
-    state: Arc<BrokerState>,
-    stream: tokio::net::TcpStream,
-    peer: String,
-) {
+async fn accept_ws_connection(state: Arc<BrokerState>, stream: TcpStream, peer: String) {
+    // Cap a single WebSocket message/frame at the MQTT packet limit (plus
+    // slack for framing), so the transport can't be used to buffer more than
+    // the packet decoder itself would ever accept.
+    let limit = state.config.max_packet_size_bytes().saturating_add(1024);
+    let ws_config = tokio_tungstenite::tungstenite::protocol::WebSocketConfig {
+        max_message_size: Some(limit),
+        max_frame_size: Some(limit),
+        ..Default::default()
+    };
+
     // The `Err` side of `accept_hdr_async`'s callback contract is
     // tungstenite's own `ErrorResponse` type (an HTTP response) — its size
     // isn't ours to shrink, so this lint doesn't apply here.
     #[allow(clippy::result_large_err)]
-    let ws_stream = match tokio_tungstenite::accept_hdr_async(
+    let handshake = tokio_tungstenite::accept_hdr_async_with_config(
         stream,
         |req: &tokio_tungstenite::tungstenite::handshake::server::Request,
          mut response: tokio_tungstenite::tungstenite::handshake::server::Response| {
@@ -365,12 +399,16 @@ async fn accept_ws_connection(
                 .insert("sec-websocket-protocol", HeaderValue::from_static("mqtt"));
             Ok(response)
         },
-    )
-    .await
-    {
-        Ok(ws) => ws,
-        Err(e) => {
+        Some(ws_config),
+    );
+    let ws_stream = match tokio::time::timeout(HANDSHAKE_TIMEOUT, handshake).await {
+        Ok(Ok(ws)) => ws,
+        Ok(Err(e)) => {
             tracing::debug!(%peer, error = %e, "WebSocket handshake failed");
+            return;
+        }
+        Err(_) => {
+            tracing::debug!(%peer, "WebSocket handshake timed out");
             return;
         }
     };

@@ -1,25 +1,34 @@
 //! Per-connection task: CONNECT handshake, the read loop, and packet
 //! dispatch into shared broker state.
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use bytes::{Bytes, BytesMut};
 use mqtt_client::protocol::ack::SimpleAck;
-use mqtt_client::protocol::connect::{ConnAckPacket, ConnectReasonCode};
+use mqtt_client::protocol::connect::{ConnAckPacket, ConnectPacket, ConnectReasonCode};
 use mqtt_client::protocol::packet::Packet;
 use mqtt_client::protocol::properties::Properties;
 use mqtt_client::protocol::publish::PublishPacket;
-use mqtt_client::protocol::subscribe::{SubAckPacket, SubAckReasonCode, UnsubAckPacket};
-use mqtt_client::{MqttVersion, QoS};
+use mqtt_client::protocol::subscribe::{
+    RetainHandling, SubAckPacket, SubAckReasonCode, SubscribePacket, UnsubAckPacket,
+    UnsubscribePacket,
+};
+use mqtt_client::support::{guard_callback, LockExt};
+use mqtt_client::{MqttError, MqttVersion, QoS};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::broker::BrokerState;
-use crate::session::{QueuedMessage, Subscription};
+use crate::registry::{AttachError, AttachRequest};
+use crate::session::{QueuedMessage, ShutdownReason, Subscription};
 use crate::topic::{is_valid_filter, is_valid_topic_name};
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// MQTT 5.0 UNSUBACK reason code: "No subscription existed".
+const UNSUB_NO_SUBSCRIPTION: u8 = 0x11;
 
 /// Handle one accepted connection end-to-end — CONNECT handshake, session
 /// (re)attachment, message loop, and teardown — generic over the byte
@@ -30,10 +39,11 @@ pub(crate) async fn handle_connection<S>(state: Arc<BrokerState>, stream: S, pee
 where
     S: AsyncRead + AsyncWrite + Send + Unpin + 'static,
 {
-    let (mut reader, writer) = tokio::io::split(stream);
+    let (mut reader, mut writer) = tokio::io::split(stream);
     let mut buf = BytesMut::with_capacity(1024);
+    let max_packet_size = state.config.max_packet_size_bytes();
 
-    let connect = match read_connect(&mut reader, &mut buf).await {
+    let connect = match read_connect(&mut reader, &mut buf, max_packet_size).await {
         Ok(c) => c,
         Err(e) => {
             tracing::debug!(%peer, error = %e, "connection closed before valid CONNECT");
@@ -42,71 +52,56 @@ where
     };
 
     let version = connect.version;
+
+    // MQTT-3.1.3-8: a zero-length client id is only acceptable together
+    // with a clean session; otherwise the broker must refuse it.
+    if connect.client_id.is_empty() && !connect.clean_start {
+        reject(
+            &mut writer,
+            version,
+            ConnectReasonCode::CLIENT_IDENTIFIER_NOT_VALID,
+        )
+        .await;
+        return;
+    }
     let client_id = if connect.client_id.is_empty() {
-        format!("anon-{}", uuid_like())
+        generate_client_id()
     } else {
         connect.client_id.clone()
     };
 
-    // ── Authentication ───────────────────────────────────────────────────
-    let authorized = {
-        let provider = state.auth_provider.lock().unwrap().clone();
-        match provider {
-            Some(p) => p.authenticate(
-                client_id.clone(),
-                connect.username.clone(),
-                connect.password.as_ref().map(|b| b.to_vec()),
-            ),
-            None => state.config.allow_anonymous || connect.username.is_some(),
-        }
-    };
-    if !authorized {
-        let mut writer = writer;
-        let ack = Packet::ConnAck(ConnAckPacket {
-            session_present: false,
-            reason_code: ConnectReasonCode::BAD_USERNAME_OR_PASSWORD,
-            properties: Properties::new(),
-        });
-        if let Ok(bytes) = ack.encode(version) {
-            let _ = writer.write_all(&bytes).await;
-        }
-        return;
-    }
-
-    // ── Client-id capacity check ─────────────────────────────────────────
-    if state.config.max_clients > 0 && state.client_count() >= state.config.max_clients {
-        let ack = Packet::ConnAck(ConnAckPacket {
-            session_present: false,
-            reason_code: ConnectReasonCode(0x97), // Quota exceeded
-            properties: Properties::new(),
-        });
-        let mut writer = writer;
-        if let Ok(bytes) = ack.encode(version) {
-            let _ = writer.write_all(&bytes).await;
-        }
+    if !authenticate(&state, &client_id, &connect).await {
+        reject(
+            &mut writer,
+            version,
+            ConnectReasonCode::BAD_USERNAME_OR_PASSWORD,
+        )
+        .await;
         return;
     }
 
     // ── Take over / create the session ───────────────────────────────────
-    let (session_present, shutdown_prev) = state.sessions.attach(
-        &client_id,
+    let (tx, mut rx) = mpsc::channel::<Bytes>(state.config.outbound_queue_capacity());
+    let (shutdown_tx, mut shutdown_rx) = oneshot::channel::<ShutdownReason>();
+    let attached = match state.sessions.attach(AttachRequest {
+        client_id: client_id.clone(),
         version,
-        connect.clean_start,
-        connect.will.clone(),
-        state.config.max_queued_per_client as usize,
-    );
-    if let Some(prev_shutdown) = shutdown_prev {
-        let _ = prev_shutdown.send(());
-    }
-
-    let (tx, mut rx) = mpsc::unbounded_channel::<Bytes>();
-    state.sessions.set_sender(&client_id, tx);
-
-    let (shutdown_tx, mut shutdown_rx) = oneshot::channel::<()>();
-    state.sessions.set_shutdown_handle(&client_id, shutdown_tx);
+        clean_start: connect.clean_start,
+        will: connect.will.clone(),
+        max_queued: state.config.max_queued_per_client as usize,
+        max_clients: state.config.max_clients,
+        sender: tx,
+        shutdown: shutdown_tx,
+    }) {
+        Ok(attached) => attached,
+        Err(AttachError::QuotaExceeded) => {
+            reject(&mut writer, version, ConnectReasonCode::QUOTA_EXCEEDED).await;
+            return;
+        }
+    };
+    let conn_id = attached.conn_id;
 
     // Writer task: drains the channel to the socket.
-    let mut writer = writer;
     let writer_task = tokio::spawn(async move {
         while let Some(bytes) = rx.recv().await {
             if writer.write_all(&bytes).await.is_err() {
@@ -117,12 +112,13 @@ where
     });
 
     let connack = Packet::ConnAck(ConnAckPacket {
-        session_present,
+        session_present: attached.session_present,
         reason_code: ConnectReasonCode::SUCCESS,
         properties: Properties::new(),
     });
     if !state.sessions.send_to(&client_id, &connack) {
         writer_task.abort();
+        state.detach_session(&client_id, conn_id, true);
         return;
     }
 
@@ -131,14 +127,24 @@ where
     tracing::info!(%client_id, %peer, ?version, "client connected");
 
     let keep_alive = connect.keep_alive;
-    let disconnect_reason;
+    let disconnect_reason: String;
     let mut graceful = false;
 
     loop {
-        let read_fut = read_next_packet(&mut reader, &mut buf, version, keep_alive);
+        let read_fut =
+            read_next_packet(&mut reader, &mut buf, version, keep_alive, max_packet_size);
         tokio::select! {
-            _ = &mut shutdown_rx => {
-                disconnect_reason = "replaced by a new connection with the same client id".into();
+            reason = &mut shutdown_rx => {
+                match reason {
+                    Ok(ShutdownReason::TakenOver) => {
+                        disconnect_reason = "replaced by a new connection with the same client id".into();
+                    }
+                    Ok(ShutdownReason::BrokerStopped) | Err(_) => {
+                        // A stopping broker isn't the client's fault: no will.
+                        graceful = true;
+                        disconnect_reason = "broker stopped".into();
+                    }
+                }
                 break;
             }
             result = read_fut => {
@@ -147,10 +153,10 @@ where
                         if matches!(packet, Packet::Disconnect(_)) {
                             graceful = true;
                             disconnect_reason = "client disconnected".into();
-                            handle_packet(&state, &client_id, version, packet).await;
+                            handle_packet(&state, &client_id, packet).await;
                             break;
                         }
-                        if !handle_packet(&state, &client_id, version, packet).await {
+                        if !handle_packet(&state, &client_id, packet).await {
                             disconnect_reason = "protocol error".into();
                             break;
                         }
@@ -165,38 +171,82 @@ where
     }
 
     writer_task.abort();
-    state.detach_session(&client_id, graceful);
+    state.detach_session(&client_id, conn_id, graceful);
     state
         .events
         .notify_disconnected(&client_id, &disconnect_reason);
     tracing::info!(%client_id, reason = %disconnect_reason, "client disconnected");
 }
 
+/// Decide whether `connect` may proceed: the registered
+/// [`MqttAuthProvider`](crate::config::MqttAuthProvider) has the final say;
+/// without one, anonymous access is governed by `allow_anonymous`.
+///
+/// The provider is foreign code that may block (a database or network
+/// lookup is typical), so it runs on the blocking pool rather than
+/// stalling an async worker thread — and a panicking provider means
+/// "denied", never "allowed".
+async fn authenticate(state: &Arc<BrokerState>, client_id: &str, connect: &ConnectPacket) -> bool {
+    let provider = state.auth_provider.lock_safe().clone();
+    let Some(provider) = provider else {
+        return state.config.allow_anonymous || connect.username.is_some();
+    };
+    let client_id = client_id.to_string();
+    let username = connect.username.clone();
+    let password = connect.password.as_ref().map(|b| b.to_vec());
+    tokio::task::spawn_blocking(move || {
+        guard_callback("authenticate", || {
+            provider.authenticate(client_id, username, password)
+        })
+        .unwrap_or(false)
+    })
+    .await
+    .unwrap_or(false)
+}
+
+/// Refuse a connection: send a CONNACK carrying `reason`, then close.
+async fn reject<W: AsyncWrite + Unpin>(
+    writer: &mut W,
+    version: MqttVersion,
+    reason: ConnectReasonCode,
+) {
+    let ack = Packet::ConnAck(ConnAckPacket {
+        session_present: false,
+        reason_code: reason,
+        properties: Properties::new(),
+    });
+    if let Ok(bytes) = ack.encode(version) {
+        let _ = writer.write_all(&bytes).await;
+    }
+    let _ = writer.shutdown().await;
+}
+
 async fn read_connect<R: AsyncRead + Unpin>(
     reader: &mut R,
     buf: &mut BytesMut,
-) -> mqtt_client::error::MqttResult<mqtt_client::protocol::connect::ConnectPacket> {
+    max_packet_size: usize,
+) -> mqtt_client::error::MqttResult<ConnectPacket> {
     // The version passed here is irrelevant: CONNECT decodes its own
     // protocol level from the packet body.
     let packet = tokio::time::timeout(CONNECT_TIMEOUT, async {
         loop {
-            if let Some(packet) = Packet::decode(buf, MqttVersion::V311)? {
+            if let Some(packet) =
+                Packet::decode_with_limit(buf, MqttVersion::V311, max_packet_size)?
+            {
                 return Ok(packet);
             }
             let n = reader.read_buf(buf).await?;
             if n == 0 {
-                return Err(mqtt_client::MqttError::Io(
-                    "connection closed before CONNECT".into(),
-                ));
+                return Err(MqttError::Io("connection closed before CONNECT".into()));
             }
         }
     })
     .await
-    .map_err(|_| mqtt_client::MqttError::Timeout)??;
+    .map_err(|_| MqttError::Timeout)??;
 
     match packet {
         Packet::Connect(c) => Ok(c),
-        other => Err(mqtt_client::MqttError::MalformedPacket(format!(
+        other => Err(MqttError::MalformedPacket(format!(
             "expected CONNECT, got {other:?}"
         ))),
     }
@@ -207,15 +257,16 @@ async fn read_next_packet<R: AsyncRead + Unpin>(
     buf: &mut BytesMut,
     version: MqttVersion,
     keep_alive_secs: u16,
+    max_packet_size: usize,
 ) -> mqtt_client::error::MqttResult<Packet> {
     let body = async {
         loop {
-            if let Some(packet) = Packet::decode(buf, version)? {
+            if let Some(packet) = Packet::decode_with_limit(buf, version, max_packet_size)? {
                 return Ok(packet);
             }
             let n = reader.read_buf(buf).await?;
             if n == 0 {
-                return Err(mqtt_client::MqttError::Io("connection closed".into()));
+                return Err(MqttError::Io("connection closed".into()));
             }
         }
     };
@@ -224,25 +275,21 @@ async fn read_next_packet<R: AsyncRead + Unpin>(
     }
     // MQTT-3.1.2-24 / MQTT-5.0: a server MAY disconnect a client that fails
     // to send any control packet within 1.5x the keep-alive interval.
-    let timeout = Duration::from_secs((keep_alive_secs as u64 * 3) / 2).max(Duration::from_secs(1));
+    let timeout =
+        Duration::from_secs((u64::from(keep_alive_secs) * 3) / 2).max(Duration::from_secs(1));
     tokio::time::timeout(timeout, body)
         .await
-        .map_err(|_| mqtt_client::MqttError::Timeout)?
+        .map_err(|_| MqttError::Timeout)?
 }
 
 /// Process one packet received from `client_id`. Returns `false` if the
 /// connection should be torn down (protocol violation).
-async fn handle_packet(
-    state: &Arc<BrokerState>,
-    client_id: &str,
-    version: MqttVersion,
-    packet: Packet,
-) -> bool {
+async fn handle_packet(state: &Arc<BrokerState>, client_id: &str, packet: Packet) -> bool {
     match packet {
-        Packet::Publish(p) => handle_publish(state, client_id, version, p).await,
+        Packet::Publish(p) => handle_publish(state, client_id, p),
         Packet::PubRel(ack) => {
             if let Some(message) = state.sessions.take_incoming_qos2(client_id, ack.packet_id) {
-                dispatch_publish(state, client_id, &message).await;
+                dispatch_publish(state, client_id, &message);
             }
             state.sessions.send_to(
                 client_id,
@@ -250,7 +297,8 @@ async fn handle_packet(
             );
             true
         }
-        Packet::PubAck(ack) => {
+        // A subscriber acking (QoS 1) or completing (QoS 2) a PUBLISH *we* sent.
+        Packet::PubAck(ack) | Packet::PubComp(ack) => {
             state
                 .sessions
                 .clear_pending_redelivery(client_id, ack.packet_id);
@@ -271,18 +319,12 @@ async fn handle_packet(
             }
             true
         }
-        Packet::PubComp(ack) => {
-            state
-                .sessions
-                .clear_pending_redelivery(client_id, ack.packet_id);
-            true
-        }
         Packet::Subscribe(p) => {
-            handle_subscribe(state, client_id, version, p).await;
+            handle_subscribe(state, client_id, p);
             true
         }
         Packet::Unsubscribe(p) => {
-            handle_unsubscribe(state, client_id, version, p).await;
+            handle_unsubscribe(state, client_id, p);
             true
         }
         Packet::PingReq => {
@@ -297,12 +339,7 @@ async fn handle_packet(
     }
 }
 
-async fn handle_publish(
-    state: &Arc<BrokerState>,
-    client_id: &str,
-    version: MqttVersion,
-    p: PublishPacket,
-) -> bool {
+fn handle_publish(state: &Arc<BrokerState>, client_id: &str, p: PublishPacket) -> bool {
     if !is_valid_topic_name(&p.topic) {
         return false;
     }
@@ -311,59 +348,52 @@ async fn handle_publish(
         state.retained.update(&p);
     }
 
-    match p.qos {
-        QoS::AtMostOnce => {
-            dispatch_publish(state, client_id, &to_queued(&p)).await;
-        }
-        QoS::AtLeastOnce => {
-            dispatch_publish(state, client_id, &to_queued(&p)).await;
-            if let Some(id) = p.packet_id {
+    match (p.qos, p.packet_id) {
+        (QoS::AtMostOnce, _) => dispatch_publish(state, client_id, &QueuedMessage::from(&p)),
+        (QoS::AtLeastOnce, id) => {
+            dispatch_publish(state, client_id, &QueuedMessage::from(&p));
+            if let Some(id) = id {
                 state
                     .sessions
                     .send_to(client_id, &Packet::PubAck(SimpleAck::success(id)));
             }
         }
-        QoS::ExactlyOnce => {
-            if let Some(id) = p.packet_id {
-                state.sessions.store_incoming_qos2(client_id, id, p);
-                state
-                    .sessions
-                    .send_to(client_id, &Packet::PubRec(SimpleAck::success(id)));
-            }
+        (QoS::ExactlyOnce, Some(id)) => {
+            state.sessions.store_incoming_qos2(client_id, id, p);
+            state
+                .sessions
+                .send_to(client_id, &Packet::PubRec(SimpleAck::success(id)));
         }
+        (QoS::ExactlyOnce, None) => {}
     }
-    let _ = version;
     true
-}
-
-fn to_queued(p: &PublishPacket) -> QueuedMessage {
-    QueuedMessage {
-        topic: p.topic.clone(),
-        payload: p.payload.clone(),
-        qos: p.qos,
-        retain: p.retain,
-    }
 }
 
 /// Fan a message out to every matching subscriber (excluding `no_local`
 /// subscribers publishing to their own topic), queueing it for offline
 /// sessions.
-async fn dispatch_publish(state: &Arc<BrokerState>, publisher_id: &str, message: &QueuedMessage) {
+fn dispatch_publish(state: &Arc<BrokerState>, publisher_id: &str, message: &QueuedMessage) {
     state
         .events
         .notify_message_published(publisher_id, &message.topic, message.qos);
     state.sessions.fan_out(publisher_id, message);
 }
 
-async fn handle_subscribe(
-    state: &Arc<BrokerState>,
-    client_id: &str,
-    version: MqttVersion,
-    p: mqtt_client::protocol::subscribe::SubscribePacket,
-) {
+/// MQTT 5.0 shared subscriptions (`$share/<group>/<filter>`) aren't
+/// implemented; refuse them explicitly rather than silently registering a
+/// filter that can never match.
+fn is_shared_subscription(filter: &str) -> bool {
+    filter.starts_with("$share/")
+}
+
+fn handle_subscribe(state: &Arc<BrokerState>, client_id: &str, p: SubscribePacket) {
     let mut reason_codes = Vec::with_capacity(p.filters.len());
     let mut newly_subscribed = Vec::new();
     for filter in &p.filters {
+        if is_shared_subscription(&filter.topic_filter) {
+            reason_codes.push(SubAckReasonCode::SHARED_SUBSCRIPTIONS_NOT_SUPPORTED);
+            continue;
+        }
         if !is_valid_filter(&filter.topic_filter) {
             reason_codes.push(SubAckReasonCode::FAILURE);
             continue;
@@ -398,43 +428,67 @@ async fn handle_subscribe(
 
     for (filter, qos, retain_handling, is_new) in newly_subscribed {
         let should_send = match retain_handling {
-            mqtt_client::protocol::subscribe::RetainHandling::SendAtSubscribe => true,
-            mqtt_client::protocol::subscribe::RetainHandling::SendIfNewSubscription => is_new,
-            mqtt_client::protocol::subscribe::RetainHandling::DoNotSend => false,
+            RetainHandling::SendAtSubscribe => true,
+            RetainHandling::SendIfNewSubscription => is_new,
+            RetainHandling::DoNotSend => false,
         };
         if should_send {
             state.send_matching_retained(client_id, &filter, qos);
         }
     }
-    let _ = version;
 }
 
-async fn handle_unsubscribe(
-    state: &Arc<BrokerState>,
-    client_id: &str,
-    _version: MqttVersion,
-    p: mqtt_client::protocol::subscribe::UnsubscribePacket,
-) {
-    for filter in &p.topic_filters {
-        state.sessions.remove_subscription(client_id, filter);
-    }
+fn handle_unsubscribe(state: &Arc<BrokerState>, client_id: &str, p: UnsubscribePacket) {
+    let reason_codes = p
+        .topic_filters
+        .iter()
+        .map(|filter| {
+            if state.sessions.remove_subscription(client_id, filter) {
+                0x00
+            } else {
+                UNSUB_NO_SUBSCRIPTION
+            }
+        })
+        .collect();
     state.sessions.send_to(
         client_id,
         &Packet::UnsubAck(UnsubAckPacket {
             packet_id: p.packet_id,
-            reason_codes: p.topic_filters.iter().map(|_| 0u8).collect(),
+            reason_codes,
             properties: Properties::new(),
         }),
     );
 }
 
-// Best-effort unique suffix for anonymous client ids, without pulling in a
-// UUID dependency.
-fn uuid_like() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
+/// A broker-assigned client id for a client that connected with an empty
+/// one. A process-wide counter guarantees uniqueness within this process;
+/// the timestamp keeps ids from colliding across broker restarts (relevant
+/// to persistent sessions) without pulling in a UUID dependency.
+fn generate_client_id() -> String {
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_nanos())
         .unwrap_or(0);
-    format!("{nanos:x}")
+    format!(
+        "anon-{nanos:x}-{:x}",
+        COUNTER.fetch_add(1, Ordering::Relaxed)
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generated_client_ids_are_unique() {
+        let ids: std::collections::HashSet<_> = (0..1000).map(|_| generate_client_id()).collect();
+        assert_eq!(ids.len(), 1000);
+    }
+
+    #[test]
+    fn shared_subscription_filters_detected() {
+        assert!(is_shared_subscription("$share/group/a/b"));
+        assert!(!is_shared_subscription("a/$share/b"));
+    }
 }
