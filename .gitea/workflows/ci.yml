@@ -162,14 +162,24 @@ jobs:
     timeout-minutes: 45
     strategy:
       fail-fast: false
+      max-parallel: 4
       matrix:
         language: [python, go, csharp, java, dart, node, node-livekit, haskell]
     steps:
       - uses: actions/checkout@v4
 
+      # Retried: static.rust-lang.org is intermittently unreachable from the runner,
+      # and the binding jobs all start at once. `minimal` skips rustfmt/clippy/docs
+      # (these jobs only compile), which also means far fewer downloads to fail.
       - name: Install Rust stable
         run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+          export PATH="$HOME/.cargo/bin:$PATH"
+          for attempt in 1 2 3 4 5; do
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+              | sh -s -- -y --default-toolchain stable --profile minimal && break
+            echo "rustup install failed (attempt $attempt); retrying in 20s"; sleep 20
+          done
+          command -v cargo >/dev/null || { echo "rustup could not be installed"; exit 1; }
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
       - uses: Swatinem/rust-cache@v2
@@ -218,9 +228,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Retried: static.rust-lang.org is intermittently unreachable from the runner,
+      # and the binding jobs all start at once. `minimal` skips rustfmt/clippy/docs
+      # (these jobs only compile), which also means far fewer downloads to fail.
       - name: Install Rust stable
         run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+          export PATH="$HOME/.cargo/bin:$PATH"
+          for attempt in 1 2 3 4 5; do
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+              | sh -s -- -y --default-toolchain stable --profile minimal && break
+            echo "rustup install failed (attempt $attempt); retrying in 20s"; sleep 20
+          done
+          command -v cargo >/dev/null || { echo "rustup could not be installed"; exit 1; }
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
       - uses: Swatinem/rust-cache@v2
@@ -252,14 +271,24 @@ jobs:
     timeout-minutes: 45
     strategy:
       fail-fast: false
+      max-parallel: 4
       matrix:
         language: [java, csharp, node, go, dart, haskell]
     steps:
       - uses: actions/checkout@v4
 
+      # Retried: static.rust-lang.org is intermittently unreachable from the runner,
+      # and the binding jobs all start at once. `minimal` skips rustfmt/clippy/docs
+      # (these jobs only compile), which also means far fewer downloads to fail.
       - name: Install Rust stable
         run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+          export PATH="$HOME/.cargo/bin:$PATH"
+          for attempt in 1 2 3 4 5; do
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+              | sh -s -- -y --default-toolchain stable --profile minimal && break
+            echo "rustup install failed (attempt $attempt); retrying in 20s"; sleep 20
+          done
+          command -v cargo >/dev/null || { echo "rustup could not be installed"; exit 1; }
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
       - uses: Swatinem/rust-cache@v2
