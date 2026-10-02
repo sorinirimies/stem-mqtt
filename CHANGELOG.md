@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.1] - 2026-10-02
+### 🐛 Bug Fixes
+- retry rustup and cap parallelism for binding jobs; install aarch64 libc headers for the cross build
+- install Gradle directly on Gitea (setup-gradle action cannot be resolved there)
+**Full Changelog**: https://github.com/sorinirimies/stem-mqtt/compare/v0.3.0...v0.3.1
 ## [0.3.0] - 2026-10-02
 ### ✨ Features
 - harden client and broker — session takeover race, packet limits, bounded queues, half-open detection; uniffi 0.31 **[BREAKING]**
