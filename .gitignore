@@ -12,10 +12,6 @@ packaging/swift/dist/
 packaging/ruby/.build/
 gitea-data/
 node_modules/
-crates/mqtt-client-node/index.js
-crates/mqtt-client-node/index.d.ts
-crates/mqtt-client-node/*.node
-crates/mqtt-client-node/npm/
 *.log
 .DS_Store
 dist/

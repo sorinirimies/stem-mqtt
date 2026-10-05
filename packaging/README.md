@@ -17,8 +17,7 @@ The release workflow builds:
 UniFFI itself generates Kotlin, Swift and Python. Go, C#, Java, Dart, Node.js
 and Haskell come from community generators pinned in
 [`scripts/bindings/spec.nu`](../scripts/bindings/spec.nu). Both crates export
-bindings for all of them (except the broker for the `node` generator — see the
-root README).
+bindings for all of them.
 
 ```sh
 nu scripts/install_bindgens.nu                      # once
@@ -66,9 +65,9 @@ Not supported: UniFFI 0.29 has no official production Ruby backend. See
 
 ## Node.js / TypeScript
 
-Node is not a UniFFI target. `crates/mqtt-client-node` is a hand-written napi-rs
-client addon built for Linux x86_64/aarch64, macOS x86_64/arm64, and Windows
-x86_64. See [`node/README.md`](node/README.md).
+Node is a UniFFI target like the others (`uniffi-bindgen-node-js`): one npm package,
+`@<owner>/stem-mqtt-node`, with two entry points — `/client` and `/broker` — each a generated
+ESM package next to its native library. (It replaces the hand-written napi-rs client addon.)
 
 ## Docker
 

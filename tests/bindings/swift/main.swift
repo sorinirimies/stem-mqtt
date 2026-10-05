@@ -3,6 +3,7 @@
 // Scenario is identical in every language's smoke test (see tests/bindings/python/smoke.py).
 import Foundation
 import MqttBroker
+import enum MqttBroker.QoS // both components define a QoS; this picks the broker's for the listener
 import MqttClient
 
 func must(_ cond: Bool, _ what: String) {

@@ -102,7 +102,7 @@ async def main():
         ws_port=None,
         allow_anonymous=True,
         max_clients=0,
-        max_qos=mqtt_client.QoS.EXACTLY_ONCE,
+        max_qos=mqtt_broker.QoS.EXACTLY_ONCE,
         max_retained_messages=100,
         max_queued_per_client=100,
         redelivery_interval_secs=0,

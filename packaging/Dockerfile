@@ -16,9 +16,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends pkg-config \
 COPY Cargo.toml Cargo.lock ./
 COPY crates/mqtt-client ./crates/mqtt-client
 COPY crates/mqtt-broker ./crates/mqtt-broker
-COPY crates/mqtt-client-node/Cargo.toml ./crates/mqtt-client-node/Cargo.toml
-COPY crates/mqtt-client-node/build.rs ./crates/mqtt-client-node/build.rs
-COPY crates/mqtt-client-node/src ./crates/mqtt-client-node/src
+# The workspace also lists the demo dashboard; its manifest must exist to resolve the graph.
+COPY demo/dashboard ./demo/dashboard
 
 RUN cargo build --release -p stem-mqtt-broker --bin mqtt-broker
 

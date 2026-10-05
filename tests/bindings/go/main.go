@@ -40,7 +40,7 @@ func (e *events) OnClientConnected(id string) {
 	e.mu.Unlock()
 }
 func (e *events) OnClientDisconnected(id, reason string)                           {}
-func (e *events) OnMessagePublished(id, topic string, qos mqtt_client.QoS) {}
+func (e *events) OnMessagePublished(id, topic string, qos mqtt_broker.QoS) {}
 
 func options(port uint16, id string, user *string) mqtt_client.ConnectOptions {
 	return mqtt_client.ConnectOptions{
@@ -67,7 +67,7 @@ func must(cond bool, what string) {
 func main() {
 	broker := mqtt_broker.NewMqttBroker(mqtt_broker.MqttBrokerConfig{
 		BindAddress: "127.0.0.1", Port: 0, AllowAnonymous: true,
-		MaxQos: mqtt_client.QoSExactlyOnce, MaxRetainedMessages: 100, MaxQueuedPerClient: 100,
+		MaxQos: mqtt_broker.QoSExactlyOnce, MaxRetainedMessages: 100, MaxQueuedPerClient: 100,
 	})
 	ev := &events{connected: map[string]bool{}}
 	broker.SetAuthProvider(auth{})

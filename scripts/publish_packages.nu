@@ -10,7 +10,7 @@
 #   java            → Maven   (maven.pkg.github.com)
 #   csharp          → NuGet   (nuget.pkg.github.com)
 #   node            → npm     (npm.pkg.github.com)
-#   go, dart, haskell, node-livekit, swift, python → OCI (ghcr.io)
+#   go, dart, haskell, swift, python → OCI (ghcr.io)
 #   kotlin          → published by the existing Gradle flow (packaging/kotlin)
 #
 # Two steps, so CI can build native libraries on every OS and publish once:
@@ -38,19 +38,30 @@ def default-stage [language: string]: nothing -> string {
     $"dist/(canonical-language $language)"
 }
 
-# Generate both crates and merge them into <stage>/sources (the broker's
-# output repeats the client's generated files verbatim; identical names simply
-# overwrite each other).
+# Generate both crates into <stage>/sources.
+#
+# Most generators emit the broker's output as a superset of the client's (the
+# broker library embeds the client component), so the two trees are merged and
+# identical names simply overwrite each other. Node is the exception: each
+# component is its own self-contained npm package (`index.js`, `runtime/`,
+# `package.json`, loading its own native library), so they stay side by side as
+# `sources/client` and `sources/broker`.
 def stage-sources [language: string, stage: string] {
     let sources = ($stage | path join "sources")
     rm -rf $sources
     mkdir $sources
-    let blocked = (unsupported-crates $language | columns)
-    for crate in ($CRATES | columns | where { |c| $c not-in $blocked }) {
+    let per_component = ($language == "node")
+    for crate in ($CRATES | columns) {
         let dir = (default-out-dir $language $crate)
         rm -rf $dir
         nu scripts/generate_bindings.nu $language $crate $dir
-        cp -r ...(glob ($dir | path join "*")) $sources
+        if $per_component {
+            let dest = ($sources | path join ($crate | str replace "mqtt-" ""))
+            mkdir $dest
+            cp -r ...(glob ($dir | path join "*")) $dest
+        } else {
+            cp -r ...(glob ($dir | path join "*")) $sources
+        }
     }
 }
 
@@ -60,8 +71,7 @@ def stage-native [language: string, stage: string] {
     let root = if $spec.uniffi == "workspace" { $env.PWD } else { $env.PWD | path join "target" $"uniffi-($spec.uniffi)" }
     let dest = ($stage | path join "native" (platform-id))
     mkdir $dest
-    let blocked = (unsupported-crates $language | columns)
-    for crate in ($CRATES | columns | where { |c| $c not-in $blocked }) {
+    for crate in ($CRATES | columns) {
         let lib = ($CRATES | get $crate).lib
         cp ($root | path join "target" "release" (native-lib-name $lib)) $dest
         # Haskell links the static library (the cdylib is only read for metadata).
@@ -75,16 +85,24 @@ def write-descriptor [language: string, stage: string] {
     let spec = (spec-for $language)
     match $spec.registry {
         "npm" => {
-            # The generator already emits a package.json; retarget it at GitHub Packages.
-            # npm packages are rooted at the stage dir, so hoist the sources.
-            cp -r ...(glob ($stage | path join "sources" "*")) $stage
+            # One package, two entry points: `<pkg>/client` and `<pkg>/broker`, each
+            # a generated ESM package sitting next to its native library.
+            let koffi = (open ($stage | path join "sources" "client" "package.json") | get dependencies.koffi)
+            {
+                name: "@OWNER/stem-mqtt-node"
+                version: "0.0.0"
+                description: "MQTT 3.1.1 / 5.0 client and broker (Rust core, UniFFI Node bindings)"
+                type: "module"
+                engines: { node: ">=16" }
+                dependencies: { koffi: $koffi }
+                exports: { "./client": "./client/index.js", "./broker": "./broker/index.js" }
+                files: ["client" "broker"]
+                publishConfig: { registry: "https://npm.pkg.github.com" }
+            } | save --force ($stage | path join "package.json")
+            for part in [client broker] {
+                cp -r ($stage | path join "sources" $part) ($stage | path join $part)
+            }
             rm -rf ($stage | path join "sources")
-            let pkg_path = ($stage | path join "package.json")
-            open $pkg_path
-            | upsert name "@OWNER/stem-mqtt-node"
-            | upsert publishConfig { registry: "https://npm.pkg.github.com" }
-            | upsert files ["*.js" "*.d.ts" "runtime" "native"]
-            | save --force $pkg_path
         }
         "nuget" => {
             r#'<Project Sdk="Microsoft.NET.Sdk">
@@ -139,6 +157,12 @@ def prepare-package [language: string, version: string, stage: string, owner: st
         open ($stage | path join "package.json")
         | upsert name $"@($owner)/($name)" | upsert version $version
         | save --force ($stage | path join "package.json")
+        # Each generated package loads `lib<crate>.<ext>` from its own directory.
+        for platform in (ls ($stage | path join "native") | get name) {
+            for pair in [{ part: "client", lib: "mqtt_client" } { part: "broker", lib: "mqtt_broker" }] {
+                cp ...(glob ($platform | path join $"*($pair.lib)*")) ($stage | path join $pair.part)
+            }
+        }
     }
     if $spec.registry == "nuget" {
         let proj = ($stage | path join "StemMqtt.csproj")
@@ -166,10 +190,6 @@ def "main stage" [language: string, --out: string] {
     let language = (canonical-language $language)
     if $language == "kotlin" {
         error make { msg: "Kotlin is published by packaging/kotlin (Gradle) — see packaging/kotlin/README.md" }
-    }
-    let broken = (known-broken $language)
-    if $broken != "" {
-        error make { msg: $"refusing to stage ($language): ($broken)" }
     }
     let stage = ($out | default (default-stage $language))
     mkdir $stage
@@ -220,8 +240,6 @@ def "main publish" [
 # Stages first if needed. Used by CI on every push.
 def "main verify" [language: string, --version: string = "0.0.0-ci", --out: string] {
     let language = (canonical-language $language)
-    let broken = (known-broken $language)
-    if $broken != "" { error make { msg: $"refusing to verify ($language): ($broken)" } }
     let stage = ($out | default (default-stage $language) | path expand)
     if not ($stage | path exists) { main stage $language --out $stage }
     prepare-package $language $version $stage "local"

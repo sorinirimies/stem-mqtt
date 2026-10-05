@@ -35,7 +35,7 @@ main :: IO ()
 main = do
   broker <-
     newMqttBroker
-      (MqttBrokerConfig "127.0.0.1" 0 Nothing False 0 C.QoSExactlyOnce 100 100 0 Nothing 0 0 0)
+      (MqttBrokerConfig "127.0.0.1" 0 Nothing False 0 QoSExactlyOnce 100 100 0 Nothing 0 0 0)
   mqttBrokerEnableEventQueue broker 16
   ok "broker start" =<< mqttBrokerStart broker
   running <- mqttBrokerIsRunning broker

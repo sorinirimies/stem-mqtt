@@ -5,7 +5,7 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import uniffi.mqtt_broker.MqttBroker
 import uniffi.mqtt_broker.MqttBrokerConfig
-import uniffi.mqtt_client.QoS
+import uniffi.mqtt_broker.QoS
 
 class PackagingSmokeTest {
     @Test

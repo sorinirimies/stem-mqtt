@@ -3,6 +3,9 @@
 // Scenario is identical in every language's smoke test (see tests/bindings/python/smoke.py).
 using uniffi.mqtt_broker;
 using uniffi.mqtt_client;
+// Both components define a QoS (the broker owns its own), so name them explicitly.
+using BrokerQoS = uniffi.mqtt_broker.QoS;
+using ClientQoS = uniffi.mqtt_client.QoS;
 
 static void Must(bool cond, string what)
 {
@@ -20,7 +23,7 @@ var events = new Events();
 
 var broker = new MqttBroker(new MqttBrokerConfig(
     BindAddress: "127.0.0.1", Port: 0, WsPort: null, AllowAnonymous: true, MaxClients: 0,
-    MaxQos: QoS.ExactlyOnce, MaxRetainedMessages: 100, MaxQueuedPerClient: 100,
+    MaxQos: BrokerQoS.ExactlyOnce, MaxRetainedMessages: 100, MaxQueuedPerClient: 100,
     RedeliveryIntervalSecs: 0, Tls: null));
 broker.SetAuthProvider(new Auth());
 broker.SetEventListener(events);
@@ -32,12 +35,12 @@ Must(port != 0, "bound port");
 var sub = new MqttClient(Options(port, "cs-sub"));
 sub.SetMessageListener(inbox);
 await sub.Connect();
-var granted = await sub.Subscribe("smoke/#", QoS.AtLeastOnce);
+var granted = await sub.Subscribe("smoke/#", ClientQoS.AtLeastOnce);
 Must(granted.ReasonCode < 0x80, "subscribe granted");
 
 var pub = new MqttClient(Options(port, "cs-pub"));
 await pub.Connect();
-await pub.Publish("smoke/cs", System.Text.Encoding.UTF8.GetBytes("hello-csharp"), QoS.AtLeastOnce, false);
+await pub.Publish("smoke/cs", System.Text.Encoding.UTF8.GetBytes("hello-csharp"), ClientQoS.AtLeastOnce, false);
 
 Must(inbox.Received.Wait(TimeSpan.FromSeconds(5)), "message delivered");
 Must(inbox.Message!.Topic == "smoke/cs" &&
@@ -74,5 +77,5 @@ class Events : MqttBrokerEventListener
     public readonly System.Collections.Concurrent.ConcurrentBag<string> Connected = new();
     public void OnClientConnected(string clientId) => Connected.Add(clientId);
     public void OnClientDisconnected(string clientId, string reason) { }
-    public void OnMessagePublished(string clientId, string topic, QoS qos) { }
+    public void OnMessagePublished(string clientId, string topic, BrokerQoS qos) { }
 }

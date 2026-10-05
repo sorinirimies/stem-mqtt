@@ -47,8 +47,7 @@ export def workspace-uniffi []: nothing -> string {
 #   patch      repo-relative patch applied to the generator's source before installing
 #              (empty = install straight from the pinned tag/rev)
 #   crate_path crate inside the patched checkout to `cargo install --path`
-#   maturity   stable | experimental | broken (generates, but the output does not
-#              work — see `known-broken`; excluded from publishing)
+#   maturity   stable | experimental
 export def specs []: nothing -> table {
     (_raw-specs) | each { |row| { patch: "", crate_path: "" } | merge $row }
 }
@@ -85,11 +84,6 @@ def _raw-specs []: nothing -> list<record> {
             registry: npm, maturity: experimental
         }
         {
-            language: node-livekit, kind: external, uniffi: "0.30.0", tool: "uniffi-bindgen-node"
-            install: [uniffi-bindgen-node --git "https://github.com/livekit/uniffi-bindgen-node" --tag "uniffi-bindgen-node@0.1.5"]
-            registry: oci, maturity: broken
-        }
-        {
             language: haskell, kind: external, uniffi: "0.32.0", tool: "uniffi-bindgen-haskell"
             install: [uniffi-bindgen-haskell --git "https://github.com/mercury/uniffi-bindgen-haskell" --rev "836df3601b0bf4a7970457bb53d295c538cf5fb9"]
             registry: oci, maturity: experimental
@@ -100,23 +94,11 @@ def _raw-specs []: nothing -> list<record> {
     ]
 }
 
-# Crates a generator cannot handle, with the reason — `generate_bindings.nu`
-# refuses these up front instead of failing deep inside the generator.
-export def unsupported-crates [language: string]: nothing -> record {
-    match (canonical-language $language) {
-        "node" => {
-            mqtt-broker: "uniffi-bindgen-node-js rejects UniFFI external types, and the broker imports `QoS` from mqtt-client. Use `node-livekit` for the broker."
-        }
-        _ => ({})
-    }
-}
-
 # Accept friendly aliases (`cs`, `c#`, `js`, …) and return the canonical name.
 export def canonical-language [name: string]: nothing -> string {
     match ($name | str downcase) {
         "cs" | "c#" | "dotnet" => "csharp"
         "js" | "node-js" | "nodejs" => "node"
-        "node-experimental" | "livekit" => "node-livekit"
         "hs" => "haskell"
         "kt" => "kotlin"
         "py" => "python"
@@ -178,7 +160,6 @@ export def generator-args [language: string, lib: string, out: string, lib_name:
         "java" => ["generate" $lib "--out-dir" $out]
         "dart" => ["--library" $lib "--out-dir" $out]
         "node" => ["generate" $lib "--crate-name" $lib_name "--out-dir" $out]
-        "node-livekit" => ["generate" $lib "--crate-name" $lib_name "--out-dir" $out]
         "haskell" => [
             "--library" $lib "--out-dir" $out
             # A ready-to-build Cabal package; consumers add `extra-lib-dirs` for the static library.
@@ -290,31 +271,19 @@ export def publish-plan [
     }
 }
 
-# ── Known upstream breakage ──────────────────────────────────────────────────
+# ── Per-language capabilities ────────────────────────────────────────────────
 
-# Why a language's generated bindings can't currently be used at runtime, or
-# "" when they work. `test_bindings.nu` runs these anyway and reports a failure
-# as XFAIL (expected) — and an unexpected pass as XPASS so the entry gets
-# removed. Such languages are also kept out of the release publish matrix.
-export def known-broken [language: string]: nothing -> string {
-    match (canonical-language $language) {
-        "node-livekit" => "uniffi-bindgen-node emits TypeScript that fails at runtime: `FfiConverterBytes is not defined` (byte arrays unsupported), so ConnectOptions cannot even be constructed."
-        _ => ""
-    }
-}
-
-# Capabilities that differ between generators, so each smoke test knows what
-# it may exercise. `callbacks` = foreign code can implement Rust callback
-# interfaces (message listener, auth provider, event listener).
-export def capabilities [language: string]: nothing -> record<callbacks: bool, broker: bool> {
+# Whether foreign code can implement Rust callback interfaces (message listener,
+# auth provider, event listener, enhanced-auth callbacks). Where it can't, the
+# pull-style API (`enable_message_queue`/`next_message`, `enable_event_queue`/
+# `next_event`) is the way to receive messages and events.
+export def supports-callbacks [language: string]: nothing -> bool {
     match (canonical-language $language) {
         # uniffi-dart aborts the VM when Rust calls a callback from its own thread.
-        "dart" => { callbacks: false, broker: true }
+        "dart" => false
         # Generated Haskell exposes callback interfaces only as opaque handles.
-        "haskell" => { callbacks: false, broker: true }
-        "node-livekit" => { callbacks: false, broker: false }
-        "node" => { callbacks: true, broker: false }
-        _ => { callbacks: true, broker: true }
+        "haskell" => false
+        _ => true
     }
 }
 

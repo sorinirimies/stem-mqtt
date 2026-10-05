@@ -448,7 +448,7 @@ jobs:
   # ── 7. GitHub Release ──────────────────────────────────────────────────────────
   release:
     name: Create GitHub Release
-    needs: [validate, build-broker, build-client, bindings, build-python, test-python, build-kotlin, build-swift, build-node]
+    needs: [validate, build-broker, build-client, bindings, build-python, test-python, build-kotlin, build-swift]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -597,8 +597,7 @@ jobs:
 
   # ── 10b. Third-party language packages → GitHub Packages ──────────────────────
   # GitHub Packages hosts Maven, npm, NuGet and containers; Go, Dart, Haskell
-  # (and Node-livekit once its generator works — see known-broken in
-  # scripts/bindings/spec.nu) travel as OCI artifacts on ghcr.io. All driven by
+  # travel as OCI artifacts on ghcr.io. All driven by
   # scripts/publish_packages.nu (registry table: scripts/bindings/spec.nu).
   # `stage` runs per OS so each native library is built on its own platform;
   # `publish-github-packages` merges every platform and publishes once.
@@ -729,142 +728,3 @@ jobs:
           name: stem-mqtt-swift
           path: packaging/swift/dist/StemMqttSwift-*.zip
           if-no-files-found: error
-
-  # ── 12. Node.js native addon (napi-rs; client only) ────────────────────────────
-  build-node:
-    name: Build Node addon — ${{ matrix.target }}
-    needs: [validate, test]
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            cross: false
-          - runner: ubuntu-latest
-            target: aarch64-unknown-linux-gnu
-            cross: true
-          - runner: macos-latest
-            target: x86_64-apple-darwin
-            cross: false
-          - runner: macos-latest
-            target: aarch64-apple-darwin
-            cross: false
-          - runner: windows-latest
-            target: x86_64-pc-windows-msvc
-            cross: false
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.validate.outputs.tag }}
-
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: node-${{ matrix.target }}
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "24.12"
-
-      - name: npm ci
-        working-directory: crates/mqtt-client-node
-        run: npm ci
-
-      - name: Build native addon (release)
-        if: ${{ !matrix.cross }}
-        working-directory: crates/mqtt-client-node
-        run: npx napi build --platform --release --target ${{ matrix.target }} --js index.js --dts index.d.ts
-
-      # `--use-napi-cross` downloads a prebuilt glibc cross-toolchain from
-      # `@napi-rs/cross-toolchain` (x64 host -> arm64 glibc target) instead of
-      # needing Docker/`cross`-rs or a local `zig` install — napi-rs's own
-      # blessed path for cross-compiling a native addon to another Linux
-      # glibc arch. N-API's headers are vendored in `napi-sys` (no libnode/
-      # Node headers needed at compile time), so this is just a normal cdylib
-      # cross-compile under the hood, same idea as `build-broker`'s
-      # `cross`-based aarch64 job, just via napi-rs's own toolchain fetcher.
-      - name: Build native addon (release, cross-compiled)
-        if: matrix.cross
-        working-directory: crates/mqtt-client-node
-        env:
-          # napi-rs cross-toolchain GCC needs this for ring's AArch64 asm.
-          CFLAGS_aarch64_unknown_linux_gnu: -D__ARM_ARCH=8
-        run: npx napi build --platform --release --target ${{ matrix.target }} --use-napi-cross --js index.js --dts index.d.ts
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: node-addon-${{ matrix.target }}
-          path: |
-            crates/mqtt-client-node/*.node
-            crates/mqtt-client-node/index.js
-            crates/mqtt-client-node/index.d.ts
-          if-no-files-found: error
-          retention-days: 1
-
-  publish-node:
-    name: Publish npm package
-    needs: [validate, build-node, release]
-    runs-on: ubuntu-latest
-    env:
-      HAS_TOKEN: ${{ secrets.NPM_TOKEN != '' }}
-    steps:
-      - name: Skip (no token)
-        if: env.HAS_TOKEN != 'true'
-        run: echo "⏭️  NPM_TOKEN not set — skipping. See packaging/node/README.md."
-
-      - uses: actions/checkout@v4
-        if: env.HAS_TOKEN == 'true'
-        with:
-          ref: ${{ needs.validate.outputs.tag }}
-
-      - uses: actions/setup-node@v4
-        if: env.HAS_TOKEN == 'true'
-        with:
-          node-version: "24.12"
-          registry-url: "https://registry.npmjs.org"
-
-      - name: npm ci
-        if: env.HAS_TOKEN == 'true'
-        working-directory: crates/mqtt-client-node
-        run: npm ci
-
-      - uses: actions/download-artifact@v4
-        if: env.HAS_TOKEN == 'true'
-        with:
-          pattern: node-addon-*
-          path: crates/mqtt-client-node/artifacts
-          merge-multiple: true
-
-      - name: Stage and validate package files
-        if: env.HAS_TOKEN == 'true'
-        working-directory: crates/mqtt-client-node
-        run: |
-          cp artifacts/*.node artifacts/index.js artifacts/index.d.ts .
-          test -s index.js
-          test -s index.d.ts
-          for binary in \
-            mqtt-client.linux-x64-gnu.node \
-            mqtt-client.linux-arm64-gnu.node \
-            mqtt-client.darwin-x64.node \
-            mqtt-client.darwin-arm64.node \
-            mqtt-client.win32-x64-msvc.node; do
-            test -s "$binary" || { echo "error: missing $binary" >&2; exit 1; }
-          done
-          npm pack --dry-run
-
-      - name: Set package version
-        if: env.HAS_TOKEN == 'true'
-        working-directory: crates/mqtt-client-node
-        run: npm version ${{ needs.validate.outputs.version }} --no-git-tag-version --allow-same-version
-
-      - name: Publish to npm
-        if: env.HAS_TOKEN == 'true'
-        working-directory: crates/mqtt-client-node
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --access public

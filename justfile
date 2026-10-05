@@ -148,7 +148,7 @@ check-release: check-all build-release
 # ── UniFFI bindings ───────────────────────────────────────────────────────────
 
 # Generate bindings for one language, one crate.
-# language: kotlin swift python go csharp java dart node node-livekit haskell
+# language: kotlin swift python go csharp java dart node haskell
 bindings language crate="mqtt-client":
     nu scripts/generate_bindings.nu {{ language }} {{ crate }}
 
@@ -174,9 +174,8 @@ bindings-all: bindings-kotlin bindings-swift bindings-python
 install-bindgens *languages:
     nu scripts/install_bindgens.nu {{ languages }}
 
-# Generate Go, C#, Java, Dart, Haskell + experimental Node bindings (see scripts/bindings/spec.nu for the Node broker caveat)
-bindings-third-party: (bindings-lang "go") (bindings-lang "csharp") (bindings-lang "java") (bindings-lang "dart") (bindings-lang "haskell") (bindings-lang "node-livekit")
-    nu scripts/generate_bindings.nu node mqtt-client
+# Generate Go, C#, Java, Dart, Node and Haskell bindings (client + broker)
+bindings-third-party: (bindings-lang "go") (bindings-lang "csharp") (bindings-lang "java") (bindings-lang "dart") (bindings-lang "node") (bindings-lang "haskell")
     @echo "✅ Go, C#, Java, Dart, Node, Haskell bindings generated under bindings/"
 
 # Runtime-test the generated bindings (real broker + clients through each language). `just test-bindings go java`
@@ -230,24 +229,6 @@ package-stage language:
 # Show what publishing a staged language to GitHub Packages would run
 publish-dry-run language version:
     nu scripts/publish_packages.nu publish {{ language }} {{ version }} --dry-run
-
-# ── Node.js / TypeScript (napi-rs, not a UniFFI target) ────────────────
-
-# Install npm deps for the Node addon
-node-install:
-    cd crates/mqtt-client-node && npm ci
-
-# Build the Node addon (fast, dev profile, current platform only)
-build-node: node-install
-    cd crates/mqtt-client-node && npm run build:debug
-
-# Build the Node addon (release profile, current platform)
-build-node-release: node-install
-    cd crates/mqtt-client-node && npm run build
-
-# Run the Node smoke test against a broker already listening on :18830
-test-node: build-node
-    cd crates/mqtt-client-node && node scripts/smoke_test.mjs
 
 # ── Packaging (cross-compiled mqtt-broker binaries) ──────────────────────────
 
@@ -591,7 +572,7 @@ release-preflight:
     [ "$(git branch --show-current)" = "main" ] || { echo "❌ Releases must run from main."; exit 1; }
     [ -z "$(git status --porcelain)" ] || { echo "❌ Working tree is dirty."; exit 1; }
     command -v gh >/dev/null 2>&1 || { echo "❌ gh CLI not found."; exit 1; }
-    for secret in CRATES_IO_TOKEN NPM_TOKEN PYPI_API_TOKEN; do
+    for secret in CRATES_IO_TOKEN PYPI_API_TOKEN; do
         gh secret list --json name --jq '.[].name' | rg -qx "$secret" || {
             echo "❌ Required GitHub secret missing: $secret"; exit 1;
         }

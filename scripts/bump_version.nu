@@ -71,20 +71,6 @@ def update_readme_badge [version: string] {
     }
 }
 
-# Update Node package metadata and lockfile together.
-def update_node_package_version [version: string] {
-    let path = "crates/mqtt-client-node/package.json"
-    if not ($path | path exists) {
-        print $"(ansi yellow)⚠(ansi reset) ($path) not found — skipping."
-        return
-    }
-    let pkg = (open $path --raw)
-    let updated = ($pkg | str replace --regex '"version":\s*"[^"]+"' $'"version": "($version)"')
-    $updated | save --force $path
-    run-external "npm" "install" "--package-lock-only" "--ignore-scripts" "--no-audit" "--no-fund" "--prefix" "crates/mqtt-client-node"
-    print $"(ansi green)✓(ansi reset) Updated Node package + lockfile → ($version)"
-}
-
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main [
@@ -119,7 +105,6 @@ def main [
     update_workspace_version $new_version
     update_internal_dep_version $new_version
     update_readme_badge $new_version
-    update_node_package_version $new_version
 
     print ""
     print $"(ansi cyan)── cargo fmt ───────────────────────────────────────────────(ansi reset)"

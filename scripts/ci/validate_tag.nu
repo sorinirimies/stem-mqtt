@@ -50,7 +50,7 @@ export def validate [tag: string]: nothing -> record<tag: string, version: strin
 
 def main [
     tag: string,
-    --check-workspace, # Require Cargo.toml and Node package versions to match the tag.
+    --check-workspace, # Require the Cargo.toml workspace version to match the tag.
 ] {
     let result = try {
         validate $tag
@@ -63,12 +63,6 @@ def main [
         let workspace_version = (open Cargo.toml | get workspace.package.version)
         if $workspace_version != $result.version {
             print --stderr $"(ansi red)❌ Tag version ($result.version) does not match workspace version ($workspace_version).(ansi reset)"
-            exit 1
-        }
-
-        let node_version = (open crates/mqtt-client-node/package.json | get version)
-        if $node_version != $result.version {
-            print --stderr $"(ansi red)❌ Node package version ($node_version) does not match tag version ($result.version).(ansi reset)"
             exit 1
         }
     }

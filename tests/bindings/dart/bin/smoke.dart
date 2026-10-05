@@ -11,8 +11,9 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:uniffi/mqtt_broker.dart';
+import 'package:uniffi/mqtt_broker.dart' as broker_api;
 import 'package:uniffi/mqtt_client.dart';
+// Each component owns its QoS, so the broker's is reached through the prefix.
 
 void must(bool cond, String what) {
   if (!cond) {
@@ -37,13 +38,13 @@ ConnectOptions options(int port, String id, [String? user]) => ConnectOptions(
     );
 
 Future<void> main() async {
-  final broker = MqttBroker(
-      config: MqttBrokerConfig(
+  final broker = broker_api.MqttBroker(
+      config: broker_api.MqttBrokerConfig(
     bindAddress: '127.0.0.1',
     port: 0,
     allowAnonymous: false,
     maxClients: 0,
-    maxQos: QoS.exactlyOnce,
+    maxQos: broker_api.QoS.exactlyOnce,
     maxRetainedMessages: 100,
     maxQueuedPerClient: 100,
     redeliveryIntervalSecs: 0,
@@ -89,10 +90,10 @@ Future<void> main() async {
 
   // The broker's events are pulled the same way.
   final seen = <String>{};
-  for (BrokerEvent? e = await broker.nextEvent(timeoutMs: 300);
+  for (broker_api.BrokerEvent? e = await broker.nextEvent(timeoutMs: 300);
       e != null;
       e = await broker.nextEvent(timeoutMs: 300)) {
-    if (e is ClientConnectedBrokerEvent) seen.add(e.clientId);
+    if (e is broker_api.ClientConnectedBrokerEvent) seen.add(e.clientId);
   }
   must(seen.containsAll(['dart-sub', 'dart-pub']), 'broker event queue saw the connections');
 

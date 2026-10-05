@@ -9,7 +9,7 @@
 # it through a foreign callback, refuse a bad client through a foreign auth
 # callback, observe connections through a foreign event listener, stop.
 # Languages whose generators can't do callbacks run a reduced scenario (see
-# `capabilities` in scripts/bindings/spec.nu and the header of each test).
+# `supports-callbacks` in scripts/bindings/spec.nu and the header of each test).
 #
 # Usage:
 #   nu scripts/test_bindings.nu                 # every language
@@ -17,15 +17,14 @@
 #   nu scripts/test_bindings.nu --strict        # a missing toolchain is a failure, not a skip
 #   nu scripts/test_bindings.nu --no-generate   # reuse bindings from the last run
 #
-# Result per language: PASS · FAIL · SKIP (toolchain missing) ·
-#   XFAIL (known upstream breakage still broken) · XPASS (known-broken now passes → update spec.nu)
-# Exit status is non-zero on any FAIL (or SKIP with --strict, or XPASS).
+# Result per language: PASS · FAIL · SKIP (toolchain missing).
+# Exit status is non-zero on any FAIL (or SKIP with --strict).
 # ──────────────────────────────────────────────────────────────────────────────
 
 use bindings/spec.nu *
 use bindings/source.nu *
 
-const TESTED = [python swift go csharp java dart node node-livekit haskell]
+const TESTED = [python swift go csharp java dart node haskell]
 
 def repo []: nothing -> string { $env.FILE_PWD | path dirname }
 
@@ -48,10 +47,9 @@ def native-lib [spec: record, crate: string]: nothing -> string {
     build-root $spec | path join "target" "release" (native-lib-name (crate-for $crate).lib)
 }
 
-# Generate both crates for `language` under <work>/gen/<crate>; skip blocked ones.
+# Generate both crates for `language` under <work>/gen/<crate>.
 def generate [language: string, work: string] {
-    let blocked = (unsupported-crates $language | columns)
-    for crate in ($CRATES | columns | where { |c| $c not-in $blocked }) {
+    for crate in ($CRATES | columns) {
         nu scripts/generate_bindings.nu $language $crate ($work | path join "gen" $crate)
     }
 }
@@ -180,24 +178,17 @@ def run-node [spec: record, work: string] {
     if (which npm | is-empty) { return { skip: "node/npm not found" } }
     let stage = ($work | path join "stage")
     rm -rf $stage
-    cp -r ($work | path join "gen" "mqtt-client") $stage
-    stage-libs $spec $stage [mqtt-client]
+    mkdir $stage
+    # Two generated packages (one per component), each next to its own native library.
+    for component in [{ crate: "mqtt-client", dir: "client" } { crate: "mqtt-broker", dir: "broker" }] {
+        let pkg = ($stage | path join $component.dir)
+        cp -r ($work | path join "gen" $component.crate) $pkg
+        stage-libs $spec $pkg [$component.crate]
+        let install = (do { cd $pkg; ^npm install --silent --no-audit --no-fund } | complete)
+        if $install.exit_code != 0 { return $install }
+    }
     cp (smoke-src node | path join "smoke.mjs") $stage
-    let install = (do { cd $stage; ^npm install --silent --no-audit --no-fund } | complete)
-    if $install.exit_code != 0 { return $install }
-    with-env { STEM_MQTT_BROKER_BIN: (broker-bin) } { do { cd $stage; ^node smoke.mjs } | complete }
-}
-
-def run-node-livekit [spec: record, work: string] {
-    if (which npm | is-empty) { return { skip: "node/npm not found" } }
-    let stage = ($work | path join "stage")
-    rm -rf $stage
-    cp -r ($work | path join "gen" "mqtt-client") $stage
-    stage-libs $spec $stage [mqtt-client]
-    cp (smoke-src node-livekit | path join "smoke.ts") $stage
-    let install = (do { cd $stage; ^npm install --silent --no-audit --no-fund typescript tsx @types/node ffi-rs uniffi-bindgen-react-native } | complete)
-    if $install.exit_code != 0 { return $install }
-    with-env { STEM_MQTT_BROKER_BIN: (broker-bin) } { do { cd $stage; ^npx tsx smoke.ts } | complete }
+    do { cd $stage; ^node smoke.mjs } | complete
 }
 
 def run-haskell [spec: record, work: string] {
@@ -265,21 +256,17 @@ def run-language [spec: record, work: string] {
         "java" => (run-java $spec $work)
         "dart" => (run-dart $spec $work)
         "node" => (run-node $spec $work)
-        "node-livekit" => (run-node-livekit $spec $work)
         "haskell" => (run-haskell $spec $work)
         $other => { error make { msg: $"no smoke test for '($other)'" } }
     }
 }
 
-# Classify one run into PASS / FAIL / SKIP / XFAIL / XPASS.
-export def classify [result: record, broken: string, strict: bool]: nothing -> string {
+# Classify one run into PASS / FAIL / SKIP (a skipped toolchain is a FAIL when `strict`).
+export def classify [result: record, strict: bool]: nothing -> string {
     if ($result | get skip? | is-not-empty) {
         return (if $strict { "FAIL" } else { "SKIP" })
     }
-    let passed = ($result.exit_code == 0 and ($result.stdout | str contains "SMOKE OK"))
-    if $broken != "" {
-        if $passed { "XPASS" } else { "XFAIL" }
-    } else if $passed { "PASS" } else { "FAIL" }
+    if $result.exit_code == 0 and ($result.stdout | str contains "SMOKE OK") { "PASS" } else { "FAIL" }
 }
 
 def main [
@@ -291,7 +278,6 @@ def main [
     mut rows = []
     for language in $wanted {
         let spec = (spec-for $language)
-        let broken = (known-broken $language)
         let work = (work-dir $language)
         mkdir $work
         print $"\n══ ($language) ══════════════════════════════════════"
@@ -300,19 +286,19 @@ def main [
             if not $no_generate { generate $language $work }
             run-language $spec $work
         } catch { |e| { exit_code: 1, stdout: "", stderr: $e.msg } })
-        let verdict = (classify $result $broken $strict)
-        if $verdict in [FAIL XFAIL XPASS] {
+        let verdict = (classify $result $strict)
+        if $verdict == "FAIL" {
             print ($result | get stdout? | default "" | lines | last 15 | str join (char nl))
             print ($result | get stderr? | default "" | lines | last 15 | str join (char nl))
         }
         if ($result | get skip? | is-not-empty) { print $"skipped: ($result.skip)" }
-        print $"($language): ($verdict)(if $broken != '' { $' — known broken: ($broken)' } else { '' })"
+        print $"($language): ($verdict)"
         $rows = ($rows | append { language: $language, result: $verdict })
     }
 
     print "\n── Summary ──"
     print $rows
-    let bad = ($rows | where result in [FAIL XPASS])
+    let bad = ($rows | where result == FAIL)
     if ($bad | is-not-empty) {
         error make { msg: $"binding tests failed: ($bad | get language | str join ', ')" }
     }

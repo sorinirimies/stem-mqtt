@@ -9,13 +9,13 @@
 #   nu scripts/generate_bindings.nu <language> [crate] [out-dir]
 #
 #   language  kotlin | swift | python | go | csharp | java | dart | node |
-#             node-livekit | haskell        (see scripts/bindings/spec.nu)
+#             haskell        (see scripts/bindings/spec.nu)
 #   crate     mqtt-client (default) | mqtt-broker
 #   out-dir   bindings/<language>/<crate> by default
 #
 # Third-party generators must be installed first: `nu scripts/install_bindgens.nu`.
-# Generators that need a different UniFFI release than the workspace (Haskell,
-# livekit Node) are fed a library built in a scratch workspace pinned to that
+# Generators that need a different UniFFI release than the workspace (Haskell)
+# are fed a library built in a scratch workspace pinned to that
 # release — the workspace itself is never modified.
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -64,10 +64,6 @@ def main [
 ] {
     let spec = (spec-for $language)
     let target = (crate-for $crate)
-    let blocked = (unsupported-crates $spec.language)
-    if $crate in ($blocked | columns) {
-        error make { msg: $"($spec.language) cannot generate ($crate): ($blocked | get $crate)" }
-    }
     let out = ($out_dir | default (default-out-dir $spec.language $crate))
     let out_abs = ($out | path expand)
     let repo = $env.PWD

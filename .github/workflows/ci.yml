@@ -9,8 +9,8 @@ on:
       - develop
   workflow_dispatch:
   # Weekly: the third-party generators are community projects pinned in
-  # scripts/bindings/spec.nu — a scheduled run surfaces upstream drift (and
-  # XPASS, when a known-broken generator gets fixed) without waiting for a push.
+  # scripts/bindings/spec.nu — a scheduled run surfaces upstream drift without
+  # waiting for a push.
   schedule:
     - cron: "0 5 * * 1"
 
@@ -148,56 +148,6 @@ jobs:
       - name: Run Nu script tests
         run: nu scripts/tests/run_all.nu
 
-  # ── 7. Node.js bindings (napi-rs) ─────────────────────────────────────────────
-  test-node:
-    name: test-node
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
-
-      - uses: Swatinem/rust-cache@v2
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "24.12"
-
-      - name: npm ci
-        working-directory: crates/mqtt-client-node
-        run: npm ci
-
-      - name: Build and inspect native addon package
-        working-directory: crates/mqtt-client-node
-        run: |
-          npm run build:debug
-          test -s index.js
-          test -s index.d.ts
-          npm pack --dry-run
-
-      - name: Build broker
-        run: cargo build -p stem-mqtt-broker --bin mqtt-broker
-
-      - name: Start a broker and run the Node smoke test
-        working-directory: crates/mqtt-client-node
-        run: |
-          set -euo pipefail
-          ../../target/debug/mqtt-broker --port 18830 >broker.log 2>&1 &
-          broker_pid=$!
-          trap 'kill "$broker_pid" 2>/dev/null || true' EXIT
-          for _ in $(seq 1 30); do
-            if (echo > /dev/tcp/127.0.0.1/18830) 2>/dev/null; then
-              break
-            fi
-            sleep 0.5
-          done
-          (echo > /dev/tcp/127.0.0.1/18830) 2>/dev/null || {
-            cat broker.log
-            exit 1
-          }
-          node scripts/smoke_test.mjs
-
   # ── 8. Linux UniFFI metadata + generated bindings ────────────────────────────
   test-bindings-linux:
     name: test-bindings-linux
@@ -222,8 +172,7 @@ jobs:
   # ── 8c. Runtime tests: do the generated bindings actually WORK? ───────────────
   # Generates every language's bindings, stages a scratch project with the
   # smoke test in tests/bindings/<language>/, and runs a real broker + clients
-  # through them (see scripts/test_bindings.nu). Languages with known upstream
-  # generator bugs run as XFAIL and turn red (XPASS) when upstream fixes them.
+  # through them (see scripts/test_bindings.nu).
   test-bindings-runtime:
     name: runtime-${{ matrix.language }} (${{ matrix.runner }})
     runs-on: ${{ matrix.runner }}
@@ -232,7 +181,7 @@ jobs:
       fail-fast: false
       matrix:
         runner: [ubuntu-latest]
-        language: [python, swift, go, csharp, java, dart, node, node-livekit, haskell]
+        language: [python, swift, go, csharp, java, dart, node, haskell]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -259,7 +208,7 @@ jobs:
       - uses: dart-lang/setup-dart@v1
         if: matrix.language == 'dart'
       - uses: actions/setup-node@v4
-        if: matrix.language == 'node' || matrix.language == 'node-livekit'
+        if: matrix.language == 'node'
         with:
           node-version: "22"
       - uses: haskell-actions/setup@v2
@@ -376,31 +325,6 @@ jobs:
           python -m pip install --no-index --find-links target/wheels \
             "stem-mqtt-client==$version" "stem-mqtt-broker==$version"
           python packaging/python/smoke_test.py
-
-  # ── 10. Linux aarch64 Node cross-build ───────────────────────────────────────
-  build-node-linux-arm64:
-    name: build-node-linux-arm64
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-unknown-linux-gnu
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "24.12"
-      - name: Install Node dependencies, including optional cross-toolchain
-        working-directory: crates/mqtt-client-node
-        run: npm ci --include=optional
-      - name: Build Linux aarch64 addon
-        working-directory: crates/mqtt-client-node
-        env:
-          # napi-rs cross-toolchain GCC does not predefine this for ring's
-          # pre-generated AArch64 assembly, unlike distro cross-GCC.
-          CFLAGS_aarch64_unknown_linux_gnu: -D__ARM_ARCH=8
-        run: npx napi build --platform --release --target aarch64-unknown-linux-gnu --use-napi-cross --js index.js --dts index.d.ts
-      - name: Verify artifact
-        run: test -s crates/mqtt-client-node/mqtt-client.linux-arm64-gnu.node
 
   # ── 10. Generator drift (weekly / manual only) ───────────────────────────────
   # Third-party generators are pinned in scripts/bindings/spec.nu; this reports

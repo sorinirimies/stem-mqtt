@@ -26,12 +26,12 @@ public class Smoke {
         Set<String> connected = ConcurrentHashMap.newKeySet();
 
         MqttBroker broker = new MqttBroker(new MqttBrokerConfig("127.0.0.1", (short) 0, null, true, 0,
-                QoS.EXACTLY_ONCE, 100, 100, 0, null, 0, 0, 0));
+                uniffi.mqtt_broker.QoS.EXACTLY_ONCE, 100, 100, 0, null, 0, 0, 0));
         broker.setAuthProvider((clientId, username, password) -> !"bad".equals(username));
         broker.setEventListener(new MqttBrokerEventListener() {
             public void onClientConnected(String clientId) { connected.add(clientId); }
             public void onClientDisconnected(String clientId, String reason) { }
-            public void onMessagePublished(String clientId, String topic, QoS qos) { }
+            public void onMessagePublished(String clientId, String topic, uniffi.mqtt_broker.QoS qos) { }
         });
         broker.start().get(10, TimeUnit.SECONDS);
         must(broker.isRunning(), "broker running");
@@ -45,12 +45,12 @@ public class Smoke {
             public void onDisconnected(String reason) { }
         });
         sub.connect().get(10, TimeUnit.SECONDS);
-        SubscribeResult granted = sub.subscribe("smoke/#", QoS.AT_LEAST_ONCE).get(10, TimeUnit.SECONDS);
+        SubscribeResult granted = sub.subscribe("smoke/#", uniffi.mqtt_client.QoS.AT_LEAST_ONCE).get(10, TimeUnit.SECONDS);
         must(granted.reasonCode() >= 0 && granted.reasonCode() < 0x80, "subscribe granted");
 
         MqttClient pub = new MqttClient(options(port, "java-pub", null));
         pub.connect().get(10, TimeUnit.SECONDS);
-        pub.publish("smoke/java", "hello-java".getBytes(StandardCharsets.UTF_8), QoS.AT_LEAST_ONCE, false)
+        pub.publish("smoke/java", "hello-java".getBytes(StandardCharsets.UTF_8), uniffi.mqtt_client.QoS.AT_LEAST_ONCE, false)
                 .get(10, TimeUnit.SECONDS);
 
         MqttMessage message = inbox.poll(5, TimeUnit.SECONDS);

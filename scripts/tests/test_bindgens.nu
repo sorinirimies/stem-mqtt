@@ -11,7 +11,7 @@ use ../bindings/updates.nu *
 
 def "test bindgens: every requested language is supported" [] {
     let have = (specs | get language)
-    for lang in [go csharp dart java node node-livekit haskell kotlin swift python] {
+    for lang in [go csharp dart java node haskell kotlin swift python] {
         assert ($lang in $have) $"missing language ($lang)"
     }
 }
@@ -53,7 +53,6 @@ def "test bindgens: pin-workspace-toml pins uniffi and trims members" [] {
     let pinned = (pin-workspace-toml $toml "0.32.0")
     assert ($pinned | str contains 'version = "=0.32.0"')
     assert ($pinned | str contains 'members = ["crates/mqtt-client", "crates/mqtt-broker"]')
-    assert (not ($pinned | str contains "mqtt-client-node"))
     assert (not ($pinned | str contains "demo/dashboard"))
 }
 
@@ -86,12 +85,6 @@ def "test bindgens: the haskell patch applies to the pinned revision" [] {
     assert equal $applied.exit_code 0 $"patch no longer applies: ($applied.stderr)"
 }
 
-def "test bindgens: node generator refuses the broker with a reason" [] {
-    let blocked = (unsupported-crates node)
-    assert ("mqtt-broker" in ($blocked | columns))
-    assert ((unsupported-crates go | columns | is-empty))
-}
-
 def "test bindgens: every registry produces a publish plan" [] {
     for lang in [java csharp node go dart haskell] {
         let plan = (publish-plan $lang "1.2.3" "dist/x" "acme")
@@ -121,38 +114,47 @@ def "test bindgens: dotnet RIDs map every shipped platform" [] {
     assert equal (dotnet-rid "windows-x86_64") "win-x64"
 }
 
-def "test bindgens: known-broken languages carry a reason and the broken maturity" [] {
-    assert ((known-broken node-livekit) != "")
-    assert equal (spec-for node-livekit | get maturity) "broken"
-    # Haskell works through our patched generator.
-    assert equal (known-broken haskell) ""
-    assert equal (known-broken go) ""
+def "test bindgens: exactly one solution per language" [] {
+    let languages = (specs | get language)
+    assert equal ($languages | length) ($languages | uniq | length) "a language is listed twice"
+    # The retired alternatives must stay gone: a second Node generator, the napi addon.
+    assert (not ("node-livekit" in $languages))
+    assert (not ("crates/mqtt-client-node" | path exists)) "the hand-written napi addon was retired"
+}
+
+def "test bindgens: every generator handles both the client and the broker" [] {
+    # No per-language crate exclusions exist any more.
+    for lang in (specs | get language) {
+        for crate in ($CRATES | columns) {
+            assert ($crate in [mqtt-client mqtt-broker]) $"unexpected crate ($crate) for ($lang)"
+        }
+    }
+    assert ((specs | where kind == external | where language == node | length) == 1)
 }
 
 def "test bindgens: every runtime-tested language has a smoke test on disk" [] {
-    for lang in [python go csharp java dart node node-livekit haskell] {
+    for lang in [python swift go csharp java dart node haskell] {
         assert ((glob $"tests/bindings/($lang)/*" | length) > 0) $"no smoke test for ($lang)"
     }
 }
 
 def "test bindgens: callback-less generators are declared" [] {
-    assert (not (capabilities dart | get callbacks))
-    assert (not (capabilities haskell | get callbacks))
-    assert (capabilities go | get callbacks)
-    assert (not (capabilities node | get broker))
+    assert (not (supports-callbacks dart))
+    assert (not (supports-callbacks haskell))
+    for lang in [python swift go csharp java node kotlin] {
+        assert (supports-callbacks $lang) $"($lang) should support callbacks"
+    }
 }
 
 def "test bindgens: classify maps results to verdicts" [] {
     let ok = { exit_code: 0, stdout: "SMOKE OK\n", stderr: "" }
     let bad = { exit_code: 1, stdout: "", stderr: "boom" }
     let silent = { exit_code: 0, stdout: "no marker", stderr: "" }
-    assert equal (classify $ok "" false) "PASS"
-    assert equal (classify $bad "" false) "FAIL"
-    assert equal (classify $silent "" false) "FAIL"
-    assert equal (classify $bad "upstream bug" false) "XFAIL"
-    assert equal (classify $ok "upstream bug" false) "XPASS"
-    assert equal (classify { skip: "no go" } "" false) "SKIP"
-    assert equal (classify { skip: "no go" } "" true) "FAIL"
+    assert equal (classify $ok false) "PASS"
+    assert equal (classify $bad false) "FAIL"
+    assert equal (classify $silent false) "FAIL"
+    assert equal (classify { skip: "no go" } false) "SKIP"
+    assert equal (classify { skip: "no go" } true) "FAIL"
 }
 
 def "test bindgens: build-plan covers every registry without uploading" [] {
