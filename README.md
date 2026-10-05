@@ -74,16 +74,47 @@ Full crate docs: [`crates/mqtt-client`](crates/mqtt-client/README.md),
 
 ## Preview
 
-| | |
-| --- | --- |
-| ![Pub/Sub](examples/vhs/generated/pub-sub-demo.gif) | ![MQTT versions](examples/vhs/generated/mqtt-versions-demo.gif) |
-| **Publish / subscribe** — the `mqtt-broker` CLI, then the `pub_sub` example against it. | **3.1.1 and 5.0 side by side** — the protocol version is negotiated per connection, not per broker. |
-| ![Topics](examples/vhs/generated/topics-demo.gif) | ![Shared subscriptions](examples/vhs/generated/shared-subscriptions-demo.gif) |
-| **Topics & wildcards** — exact, `+` and `#` filters on one topic tree. | **Shared subscriptions** — three workers split nine jobs round-robin; a plain subscriber still sees all nine. |
-| ![Retained and will](examples/vhs/generated/will-and-retain-demo.gif) | ![Authentication](examples/vhs/generated/auth-demo.gif) |
-| **Retained messages & Last Will** — a late subscriber gets the retained message; the broker publishes a vanished client's will. | **Authentication** — a pluggable auth provider rejects one login, accepts another, and logs connection events. |
-| ![Long-lived connection](examples/vhs/generated/long-lived-connection-demo.gif) | |
-| **Long-lived connection** — a heartbeat across keep-alive intervals, like a background service or IoT device. | |
+**Publish / subscribe**
+
+![Publish / subscribe](examples/vhs/generated/pub-sub-demo.gif)
+
+The `mqtt-broker` CLI, then the `pub_sub` example against it: a full publish/subscribe round trip.
+
+**MQTT 3.1.1 and 5.0 side by side**
+
+![MQTT 3.1.1 and 5.0 side by side](examples/vhs/generated/mqtt-versions-demo.gif)
+
+Two clients on different protocol versions share one broker, each publishing and both receiving both messages — the version is negotiated per connection, not per broker.
+
+**Topics and wildcards**
+
+![Topics and wildcards](examples/vhs/generated/topics-demo.gif)
+
+An exact topic, a `+` single-level and a `#` multi-level filter watch the same topic tree; four publishes show which filter catches which message.
+
+**Shared subscriptions**
+
+![Shared subscriptions](examples/vhs/generated/shared-subscriptions-demo.gif)
+
+Three workers join `$share/workers/jobs/#` and split nine jobs round-robin, three each, while an ordinary subscriber on the same topics still sees all nine.
+
+**Retained messages and Last Will**
+
+![Retained messages and Last Will](examples/vhs/generated/will-and-retain-demo.gif)
+
+A subscriber that arrives after a retained publish still receives it; when a client vanishes without DISCONNECT, the broker publishes its will.
+
+**Authentication**
+
+![Authentication](examples/vhs/generated/auth-demo.gif)
+
+A pluggable auth provider rejects one login and accepts another, and the broker's event listener logs each connection.
+
+**Long-lived connection**
+
+![Long-lived connection](examples/vhs/generated/long-lived-connection-demo.gif)
+
+One connection held open across several keep-alive intervals with a heartbeat every two seconds — the shape of a background service or IoT device.
 
 Recorded with [VHS](https://github.com/charmbracelet/vhs): `just vhs-tape <name>` or `just vhs-all`
 (tapes in [`examples/vhs`](examples/vhs); each tape runs the example of the same name).
