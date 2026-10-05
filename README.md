@@ -348,13 +348,22 @@ nu scripts/publish_packages.nu publish <language> <version> --dry-run
 GitHub Packages hosts Maven, npm, NuGet and containers only, so each language
 goes where it fits and the rest ship as OCI artifacts on `ghcr.io`:
 
-| Language | Package |
-| --- | --- |
-| Kotlin | Maven (existing Gradle flow, `packaging/kotlin`) |
-| Java | Maven — `com.github.sorinirimies.stemmqtt:stem-mqtt-java` |
-| C# | NuGet — `StemMqtt` |
-| Node.js | npm — `@sorinirimies/stem-mqtt-node` |
-| Go, Dart, Haskell | `ghcr.io/sorinirimies/stem-mqtt-<language>:<version>` (`oras pull`) |
+| Language | Package | GitHub release | Gitea release |
+| --- | --- | :-: | :-: |
+| Rust | `stem-mqtt-client`, `stem-mqtt-broker` on crates.io | ✅ | ✅ |
+| Kotlin | Maven — `com.github.sorinirimies.stemmqtt:stem-mqtt-kotlin` (JVM) / `stem-mqtt-android` (AAR) | ✅ JVM + AAR | ✅ JVM ¹ |
+| Java | Maven — `com.github.sorinirimies.stemmqtt:stem-mqtt-java` | ✅ | ✅ |
+| C# | NuGet — `StemMqtt` | ✅ | ✅ |
+| Node.js | npm — `@sorinirimies/stem-mqtt-node` | ✅ | ✅ |
+| Python | PyPI (`stem-mqtt-client`, `stem-mqtt-broker`) / Gitea PyPI registry | ✅ PyPI | ✅ |
+| Go, Dart, Haskell | `<registry>/<owner>/stem-mqtt-<language>:<version>` (OCI bundle, `oras pull`) | ✅ ghcr.io | ✅ |
+| Swift | `StemMqttSwift-<version>.zip` release asset (XCFrameworks) | ✅ asset | ❌ ² |
+
+¹ The Android AAR needs the NDK + Android SDK, so it stays on the GitHub workflow.
+² The XCFrameworks need macOS; there is no Linux runner path for Swift packaging.
+
+Registry publishing needs a secret per target (`CRATES_IO_TOKEN`, `PYPI_API_TOKEN` for GitHub; `PACKAGES_TOKEN`,
+a Gitea token with `write:package`, for Gitea) and skips quietly without it.
 
 The GitHub release workflow stages each package on Linux, runtime-tests it, and publishes.
 A manual workflow (`.github/workflows/publish-packages.yml`) publishes — or dry-runs — a throw-away

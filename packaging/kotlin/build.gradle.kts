@@ -38,11 +38,13 @@ tasks.test {
 publishing {
     repositories {
         maven {
-            name = "GitHubPackages"
-            url = uri("https://maven.pkg.github.com/sorinirimies/stem-mqtt")
+            // GitHub Packages by default; `-PmavenUrl=<base>/api/packages/<owner>/maven`
+            // points the same publication at a Gitea instance's Maven registry.
+            name = "Packages"
+            url = uri((findProperty("mavenUrl") as String?) ?: "https://maven.pkg.github.com/sorinirimies/stem-mqtt")
             credentials {
-                username = System.getenv("GITHUB_ACTOR") ?: "sorinirimies"
-                password = System.getenv("GITHUB_TOKEN")
+                username = System.getenv("PACKAGES_USER") ?: System.getenv("GITHUB_ACTOR") ?: "sorinirimies"
+                password = System.getenv("PACKAGES_TOKEN") ?: System.getenv("GITHUB_TOKEN")
             }
         }
     }
