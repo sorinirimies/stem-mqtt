@@ -190,27 +190,66 @@ jobs:
         if: matrix.language == 'python'
         with:
           python-version: "3.12"
+      # (retried once: the runner's network to the toolchain CDNs is flaky)
       - uses: actions/setup-go@v5
+        id: setup_try_1
+        continue-on-error: true
         if: matrix.language == 'go'
         with:
           go-version: stable
+      - uses: actions/setup-go@v5
+        if: steps.setup_try_1.outcome == 'failure'
+        with:
+          go-version: stable
+      # (retried once: the runner's network to the toolchain CDNs is flaky)
       - uses: actions/setup-dotnet@v4
+        id: setup_try_2
+        continue-on-error: true
         if: matrix.language == 'csharp'
         with:
           dotnet-version: "8.0.x"
+      - uses: actions/setup-dotnet@v4
+        if: steps.setup_try_2.outcome == 'failure'
+        with:
+          dotnet-version: "8.0.x"
+      # (retried once: the runner's network to the toolchain CDNs is flaky)
       - uses: actions/setup-java@v4
+        id: setup_try_3
+        continue-on-error: true
         if: matrix.language == 'java'
         with:
           distribution: temurin
           java-version: "22"
+      - uses: actions/setup-java@v4
+        if: steps.setup_try_3.outcome == 'failure'
+        with:
+          distribution: temurin
+          java-version: "22"
+      # (retried once: the runner's network to the toolchain CDNs is flaky)
       - uses: dart-lang/setup-dart@v1
+        id: setup_try_4
+        continue-on-error: true
         if: matrix.language == 'dart'
+      - uses: dart-lang/setup-dart@v1
+        if: steps.setup_try_4.outcome == 'failure'
+      # (retried once: the runner's network to the toolchain CDNs is flaky)
       - uses: actions/setup-node@v4
+        id: setup_try_5
+        continue-on-error: true
         if: matrix.language == 'node'
         with:
           node-version: "22"
+      - uses: actions/setup-node@v4
+        if: steps.setup_try_5.outcome == 'failure'
+        with:
+          node-version: "22"
+      # (retried once: the runner's network to the toolchain CDNs is flaky)
       - uses: haskell-actions/setup@v2
+        id: setup_try_6
+        continue-on-error: true
         if: matrix.language == 'haskell'
+      - uses: haskell-actions/setup@v2
+        if: steps.setup_try_6.outcome == 'failure'
       - uses: swift-actions/setup-swift@v2
         if: matrix.language == 'swift'
 
@@ -258,7 +297,15 @@ jobs:
       - name: Install Nushell
         run: cargo install nu --locked
 
+      # (retried once: the runner's network to the toolchain CDNs is flaky)
       - uses: actions/setup-java@v4
+        id: setup_try_7
+        continue-on-error: true
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: actions/setup-java@v4
+        if: steps.setup_try_7.outcome == 'failure'
         with:
           distribution: temurin
           java-version: "17"
@@ -315,12 +362,27 @@ jobs:
       - name: Install Nushell
         run: cargo install nu --locked
 
+      # (retried once: the runner's network to the toolchain CDNs is flaky)
       - uses: actions/setup-dotnet@v4
+        id: setup_try_8
+        continue-on-error: true
         if: matrix.language == 'csharp'
         with:
           dotnet-version: "8.0.x"
+      - uses: actions/setup-dotnet@v4
+        if: steps.setup_try_8.outcome == 'failure'
+        with:
+          dotnet-version: "8.0.x"
+      # (retried once: the runner's network to the toolchain CDNs is flaky)
       - uses: actions/setup-java@v4
+        id: setup_try_9
+        continue-on-error: true
         if: matrix.language == 'java'
+        with:
+          distribution: temurin
+          java-version: "22"
+      - uses: actions/setup-java@v4
+        if: steps.setup_try_9.outcome == 'failure'
         with:
           distribution: temurin
           java-version: "22"
@@ -334,12 +396,24 @@ jobs:
           curl -fsSL --retry 5 --retry-delay 10 -o /tmp/gradle.zip https://services.gradle.org/distributions/gradle-8.14.3-bin.zip
           mkdir -p "$HOME/gradle" && unzip -q -o /tmp/gradle.zip -d "$HOME/gradle"
           echo "$HOME/gradle/gradle-8.14.3/bin" >> $GITHUB_PATH
+      # (retried once: the runner's network to the toolchain CDNs is flaky)
       - uses: actions/setup-node@v4
+        id: setup_try_10
+        continue-on-error: true
         if: matrix.language == 'node'
         with:
           node-version: "22"
+      - uses: actions/setup-node@v4
+        if: steps.setup_try_10.outcome == 'failure'
+        with:
+          node-version: "22"
+      # (retried once: the runner's network to the toolchain CDNs is flaky)
       - uses: dart-lang/setup-dart@v1
+        id: setup_try_11
+        continue-on-error: true
         if: matrix.language == 'dart'
+      - uses: dart-lang/setup-dart@v1
+        if: steps.setup_try_11.outcome == 'failure'
 
       # The generators are `cargo install`ed from git; cache them (keyed by their pins).
       - name: Restore generator cache
