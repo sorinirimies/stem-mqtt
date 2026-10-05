@@ -164,7 +164,7 @@ jobs:
       fail-fast: false
       max-parallel: 4
       matrix:
-        language: [python, go, csharp, java, dart, node, node-livekit, haskell]
+        language: [python, swift, go, csharp, java, dart, node, node-livekit, haskell]
     steps:
       - uses: actions/checkout@v4
 
@@ -212,10 +212,22 @@ jobs:
           node-version: "22"
       - uses: haskell-actions/setup@v2
         if: matrix.language == 'haskell'
+      - uses: swift-actions/setup-swift@v2
+        if: matrix.language == 'swift'
 
+      # The generators are `cargo install`ed from git; cache them (keyed by their pins).
+      - name: Restore generator cache
+        if: matrix.language != 'python'
+        uses: actions/cache@v4
+        with:
+          path: ~/.bindgens
+          key: bindgens-${{ matrix.language }}-${{ hashFiles('scripts/bindings/spec.nu', 'packaging/haskell/uniffi-bindgen-haskell.patch') }}
       - name: Install the generator
         if: matrix.language != 'python'
-        run: nu scripts/install_bindgens.nu ${{ matrix.language }}
+        run: |
+          export PATH="$HOME/.bindgens/bin:$PATH"
+          echo "$HOME/.bindgens/bin" >> $GITHUB_PATH
+          nu scripts/install_bindgens.nu ${{ matrix.language }} --root "$HOME/.bindgens"
 
       - name: Runtime-test ${{ matrix.language }}
         run: nu scripts/test_bindings.nu ${{ matrix.language }} --strict
@@ -330,8 +342,70 @@ jobs:
       - uses: dart-lang/setup-dart@v1
         if: matrix.language == 'dart'
 
+      # The generators are `cargo install`ed from git; cache them (keyed by their pins).
+      - name: Restore generator cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.bindgens
+          key: bindgens-${{ matrix.language }}-${{ hashFiles('scripts/bindings/spec.nu', 'packaging/haskell/uniffi-bindgen-haskell.patch') }}
       - name: Install the generator
-        run: nu scripts/install_bindgens.nu ${{ matrix.language }}
+        run: |
+          export PATH="$HOME/.bindgens/bin:$PATH"
+          echo "$HOME/.bindgens/bin" >> $GITHUB_PATH
+          nu scripts/install_bindgens.nu ${{ matrix.language }} --root "$HOME/.bindgens"
 
       - name: Stage and build the ${{ matrix.language }} package
         run: nu scripts/publish_packages.nu verify ${{ matrix.language }}
+
+  # ── 10. Generator drift (weekly / manual only) ───────────────────────────────
+  # Third-party generators are pinned in scripts/bindings/spec.nu; this reports
+  # which have newer upstream releases (and, for tag-pinned ones, the UniFFI
+  # release they target) so bumps are deliberate instead of a surprise breakage.
+  bindgen-updates:
+    name: bindgen-updates
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        run: |
+          export PATH="$HOME/.cargo/bin:$PATH"
+          for attempt in 1 2 3 4 5; do
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+              | sh -s -- -y --default-toolchain stable --profile minimal && break
+            echo "rustup install failed (attempt $attempt); retrying in 20s"; sleep 20
+          done
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Install Nushell
+        run: cargo install nu --locked
+
+      - name: Compare pins with upstream
+        run: nu scripts/check_bindgen_updates.nu
+
+  # ── 11. Dependency advisories (weekly / manual only) ─────────────────────────
+  # A newly published RustSec advisory shouldn't fail unrelated pushes, so this
+  # only runs on the schedule (and by hand): `cargo audit` over Cargo.lock.
+  audit:
+    name: audit
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        run: |
+          export PATH="$HOME/.cargo/bin:$PATH"
+          for attempt in 1 2 3 4 5; do
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+              | sh -s -- -y --default-toolchain stable --profile minimal && break
+            echo "rustup install failed (attempt $attempt); retrying in 20s"; sleep 20
+          done
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      - name: Audit Cargo.lock
+        run: cargo audit

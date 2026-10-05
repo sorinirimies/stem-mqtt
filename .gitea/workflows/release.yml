@@ -279,3 +279,119 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
         run: nu scripts/ci/publish_crate.nu stem-mqtt-broker ${{ needs.validate.outputs.version }} --readme-dir crates/mqtt-broker --wait 0
+
+  # ── Per-language packages → this Gitea's own package registries ──────────────
+  # Maven (Java), NuGet (C#), npm (Node) and the container registry (Go, Dart,
+  # Haskell as OCI bundles) are all built into Gitea. Needs a repository secret
+  # PACKAGES_TOKEN: a Gitea access token with the `write:package` scope.
+  # (GitHub Packages publishing for the same packages lives in the GitHub
+  # release workflow; both use scripts/publish_packages.nu.)
+  publish-packages:
+    name: Publish ${{ matrix.language }} package
+    needs: [validate, release]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        language: [java, csharp, node, go, dart, haskell]
+    env:
+      HAS_TOKEN: ${{ secrets.PACKAGES_TOKEN != '' }}
+    steps:
+      - name: Skip (no token)
+        if: env.HAS_TOKEN != 'true'
+        run: echo "⏭️  PACKAGES_TOKEN not set — skipping ${{ matrix.language }} package."
+
+      - uses: actions/checkout@v4
+        if: env.HAS_TOKEN == 'true'
+        with:
+          ref: ${{ needs.validate.outputs.tag }}
+
+      - name: Install Rust stable
+        if: env.HAS_TOKEN == 'true'
+        run: |
+          export PATH="$HOME/.cargo/bin:$PATH"
+          for attempt in 1 2 3 4 5; do
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+              | sh -s -- -y --default-toolchain stable --profile minimal && break
+            echo "rustup install failed (attempt $attempt); retrying in 20s"; sleep 20
+          done
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+      - uses: Swatinem/rust-cache@v2
+        if: env.HAS_TOKEN == 'true'
+      - name: Install Nushell
+        if: env.HAS_TOKEN == 'true'
+        run: cargo install nu --locked
+
+      - uses: actions/setup-dotnet@v4
+        if: env.HAS_TOKEN == 'true' && matrix.language == 'csharp'
+        with:
+          dotnet-version: "8.0.x"
+      - uses: actions/setup-java@v4
+        if: env.HAS_TOKEN == 'true' && matrix.language == 'java'
+        with:
+          distribution: temurin
+          java-version: "22"
+      - uses: actions/setup-node@v4
+        if: env.HAS_TOKEN == 'true' && matrix.language == 'node'
+        with:
+          node-version: "22"
+          # writes the .npmrc auth line (from NODE_AUTH_TOKEN) for Gitea's npm registry
+          registry-url: ${{ github.server_url }}/api/packages/${{ github.repository_owner }}/npm/
+          scope: "@${{ github.repository_owner }}"
+      - uses: dart-lang/setup-dart@v1
+        if: env.HAS_TOKEN == 'true' && matrix.language == 'dart'
+      - uses: haskell-actions/setup@v2
+        if: env.HAS_TOKEN == 'true' && matrix.language == 'haskell'
+      - name: Install Gradle
+        if: env.HAS_TOKEN == 'true' && matrix.language == 'java'
+        run: |
+          (command -v unzip >/dev/null || sudo apt-get install -y -qq unzip)
+          curl -fsSL --retry 5 --retry-delay 10 -o /tmp/gradle.zip https://services.gradle.org/distributions/gradle-8.14.3-bin.zip
+          mkdir -p "$HOME/gradle" && unzip -q -o /tmp/gradle.zip -d "$HOME/gradle"
+          echo "$HOME/gradle/gradle-8.14.3/bin" >> $GITHUB_PATH
+      - name: Install oras
+        if: env.HAS_TOKEN == 'true' && (matrix.language == 'go' || matrix.language == 'dart' || matrix.language == 'haskell')
+        run: |
+          curl -fsSL --retry 5 https://github.com/oras-project/oras/releases/download/v1.2.2/oras_1.2.2_linux_amd64.tar.gz | tar xz -C /tmp oras
+          sudo install -m755 /tmp/oras /usr/local/bin/oras
+
+      - name: Restore generator cache
+        if: env.HAS_TOKEN == 'true'
+        uses: actions/cache@v4
+        with:
+          path: ~/.bindgens
+          key: bindgens-${{ matrix.language }}-${{ hashFiles('scripts/bindings/spec.nu', 'packaging/haskell/uniffi-bindgen-haskell.patch') }}
+      - name: Install the generator
+        if: env.HAS_TOKEN == 'true'
+        run: |
+          export PATH="$HOME/.bindgens/bin:$PATH"
+          echo "$HOME/.bindgens/bin" >> $GITHUB_PATH
+          nu scripts/install_bindgens.nu ${{ matrix.language }} --root "$HOME/.bindgens"
+
+      - name: Runtime-test the bindings before publishing them
+        if: env.HAS_TOKEN == 'true'
+        run: nu scripts/test_bindings.nu ${{ matrix.language }} --strict
+      - name: Stage ${{ matrix.language }}
+        if: env.HAS_TOKEN == 'true'
+        run: nu scripts/publish_packages.nu stage ${{ matrix.language }}
+
+      - name: Log in to the container registry
+        if: env.HAS_TOKEN == 'true' && (matrix.language == 'go' || matrix.language == 'dart' || matrix.language == 'haskell')
+        run: |
+          host="$(echo '${{ github.server_url }}' | sed -E 's#^https?://##')"
+          echo "${{ secrets.PACKAGES_TOKEN }}" | oras login "$host" -u "${{ github.repository_owner }}" --password-stdin --plain-http
+
+      - name: Publish ${{ matrix.language }} to Gitea packages
+        if: env.HAS_TOKEN == 'true'
+        env:
+          PACKAGES_TOKEN: ${{ secrets.PACKAGES_TOKEN }}
+          PACKAGES_USER: ${{ github.repository_owner }}
+          NODE_AUTH_TOKEN: ${{ secrets.PACKAGES_TOKEN }}
+        run: >
+          nu scripts/publish_packages.nu publish ${{ matrix.language }}
+          ${{ needs.validate.outputs.version }}
+          --target gitea
+          --base-url ${{ github.server_url }}
+          --owner ${{ github.repository_owner }}
