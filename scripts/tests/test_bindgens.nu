@@ -7,6 +7,7 @@ use std/assert
 use runner.nu *
 use ../bindings/spec.nu *
 use ../test_bindings.nu classify
+use ../bindings/updates.nu *
 
 def "test bindgens: every requested language is supported" [] {
     let have = (specs | get language)
@@ -111,7 +112,7 @@ def "test bindgens: nuget and maven plans use the GitHub Packages endpoints" [] 
     assert ($nuget.args | any { |a| $a == "https://nuget.pkg.github.com/acme/index.json" })
     let maven = (publish-plan java "1.0.0" "d" "acme" | first)
     assert equal $maven.cmd "gradle"
-    assert ($maven.args | any { |a| $a == "-PghOwner=acme" })
+    assert ($maven.args | any { |a| $a == "-PmavenUrl=https://maven.pkg.github.com/acme/stem-mqtt" })
 }
 
 def "test bindgens: dotnet RIDs map every shipped platform" [] {
@@ -175,6 +176,67 @@ def "test bindgens: build-plan uses the native build tool of each registry" [] {
 def "test bindgens: package names are per language and prefixed" [] {
     assert equal (package-name go) "stem-mqtt-go"
     assert equal (package-name cs) "stem-mqtt-csharp"
+}
+
+def "test bindgens: pins are classified as tag, rev or crates.io version" [] {
+    assert equal (pin-of (spec-for go) | get kind) "tag"
+    assert equal (pin-of (spec-for haskell) | get kind) "rev"
+    assert equal (pin-of (spec-for java) | get kind) "version"
+    assert equal (pin-of (spec-for java) | get source) "uniffi-bindgen-java"
+    assert equal (pin-of (spec-for go) | get value) "v0.7.1+v0.31.0"
+}
+
+def "test bindgens: uniffi target is read from the tag suffix" [] {
+    assert equal (uniffi-target "v0.11.0+v0.31.0") "0.31.0"
+    assert equal (uniffi-target "v0.10.0+v0.29.4") "0.29.4"
+    assert equal (uniffi-target "uniffi-bindgen-node@0.1.5") ""
+}
+
+def "test bindgens: newest tag ignores the uniffi suffix and sorts numerically" [] {
+    let tags = ["v0.5.0+v0.29.5" "v0.7.1+v0.31.0" "v0.10.0+v0.29.4" "v0.7.0+v0.31.0"]
+    assert equal (newest $tags) "v0.10.0+v0.29.4"   # 0.10 > 0.7, not lexical
+    assert equal (newest []) ""
+}
+
+def "test bindgens: is-newer compares versions, not strings" [] {
+    assert (is-newer "v0.9.0+v0.28.3" "v0.10.0+v0.31.0")
+    assert (not (is-newer "v0.7.1+v0.31.0" "v0.7.1+v0.31.0"))
+    assert (not (is-newer "v0.7.1+v0.31.0" "v0.6.0+v0.30.0"))
+    assert (not (is-newer "0.4.2" ""))
+}
+
+def "test bindgens: ls-remote output is reduced to plain tag names" [] {
+    let out = "abc\trefs/tags/v1.0.0\ndef\trefs/tags/v1.0.0^{}\n123\trefs/tags/v1.1.0\n"
+    assert equal (tags-from-ls-remote $out) ["v1.0.0" "v1.1.0"]
+}
+
+def "test bindgens: the gitea target points every registry at the instance" [] {
+    let base = "http://192.168.1.44:3000/"
+    let npm = (publish-plan node "1.0.0" "d" "sorin" "stem-mqtt" "gitea" $base | first)
+    assert ($npm.args | any { |a| $a == "http://192.168.1.44:3000/api/packages/sorin/npm/" })
+    assert (not ($npm.args | any { |a| $a == "--access" })) "gitea npm has no --access flag"
+    let nuget = (publish-plan csharp "1.0.0" "d" "sorin" "stem-mqtt" "gitea" $base | last)
+    assert ($nuget.args | any { |a| $a == "http://192.168.1.44:3000/api/packages/sorin/nuget/index.json" })
+    let maven = (publish-plan java "1.0.0" "d" "sorin" "stem-mqtt" "gitea" $base | first)
+    assert ($maven.args | any { |a| $a == "-PmavenUrl=http://192.168.1.44:3000/api/packages/sorin/maven" })
+    let oci = (publish-plan go "1.0.0" "d" "sorin" "stem-mqtt" "gitea" $base | first)
+    assert ($oci.args | any { |a| $a == "192.168.1.44:3000/sorin/stem-mqtt-go:1.0.0" })
+    assert ("--plain-http" in $oci.args) "an http:// registry needs --plain-http"
+    let https = (publish-plan go "1.0.0" "d" "sorin" "stem-mqtt" "gitea" "https://git.example.com" | first)
+    assert (not ("--plain-http" in $https.args))
+}
+
+def "test bindgens: the gitea target requires a base url and unknown targets are refused" [] {
+    let missing = (try { publish-plan go "1" "d" "o" "r" "gitea" ""; "" } catch { |e| $e.msg })
+    assert ($missing | str contains "--base-url")
+    let unknown = (try { publish-plan go "1" "d" "o" "r" "gitlab" ""; "" } catch { |e| $e.msg })
+    assert ($unknown | str contains "unknown publish target")
+}
+
+def "test bindgens: the default target is unchanged GitHub Packages" [] {
+    let oci = (publish-plan go "1.0.0" "d" "acme" | first)
+    assert ($oci.args | any { |a| $a == "ghcr.io/acme/stem-mqtt-go:1.0.0" })
+    assert (not ("--plain-http" in $oci.args))
 }
 
 def main [] { run-tests }

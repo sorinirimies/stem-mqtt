@@ -22,10 +22,14 @@
 #
 #   nu scripts/publish_packages.nu publish <language> <version> [--from DIR]
 #                                          [--owner O] [--repo R] [--dry-run]
+#                                          [--target github|gitea --base-url URL]
 #       Run the registry's publish commands. `--dry-run` prints the plan only.
 #
-# Credentials come from the environment (GITHUB_TOKEN / NODE_AUTH_TOKEN /
-# GITHUB_ACTOR / ORG_GRADLE_PROJECT_*), never from arguments.
+# `--target gitea --base-url http://host:3000` publishes to a Gitea instance's own
+# package registries (Maven, npm, NuGet, container) instead of GitHub Packages.
+#
+# Credentials come from the environment (PACKAGES_TOKEN / PACKAGES_USER, falling back
+# to GITHUB_TOKEN / GITHUB_ACTOR; NODE_AUTH_TOKEN for npm), never from arguments.
 # ──────────────────────────────────────────────────────────────────────────────
 
 use bindings/spec.nu *
@@ -110,8 +114,13 @@ group = "com.github.sorinirimies.stemmqtt"
 publishing {
     publications { create<MavenPublication>("java") { artifactId = "stem-mqtt-java"; from(components["java"]) } }
     repositories { maven {
-        url = uri("https://maven.pkg.github.com/${project.property("ghOwner")}/${project.property("ghRepo")}")
-        credentials { username = System.getenv("GITHUB_ACTOR"); password = System.getenv("GITHUB_TOKEN") }
+        // -PmavenUrl is passed by `publish_packages.nu publish` (GitHub Packages or a Gitea
+        // instance); a plain `gradle build` never touches it.
+        url = uri((project.findProperty("mavenUrl") as String?) ?: "https://invalid.example/unset")
+        credentials {
+            username = System.getenv("PACKAGES_USER") ?: System.getenv("GITHUB_ACTOR")
+            password = System.getenv("PACKAGES_TOKEN") ?: System.getenv("GITHUB_TOKEN")
+        }
     } }
 }
 '# | save --force ($stage | path join "build.gradle.kts")
@@ -177,6 +186,8 @@ def "main publish" [
     --from: string
     --owner: string = "sorinirimies"
     --repo: string = "stem-mqtt"
+    --target: string = "github"   # github | gitea
+    --base-url: string = ""       # Gitea instance, e.g. http://192.168.1.44:3000
     --dry-run
 ] {
     let language = (canonical-language $language)
@@ -189,14 +200,15 @@ def "main publish" [
 
     prepare-package $language $version $stage $owner
 
-    let plan = (publish-plan $language $version $stage $owner $repo)
+    let plan = (publish-plan $language $version $stage $owner $repo $target $base_url)
     for step in $plan {
         print $"==> ($step.note): ($step.cmd) ($step.args | str join ' ')"
         if not $dry_run {
             # NuGet wants the token as an argument; read it from the environment
             # here (not in the pure plan) so it never lands in a printed plan.
+            let token = ($env.PACKAGES_TOKEN? | default ($env.GITHUB_TOKEN? | default ""))
             let args = if $step.cmd == "dotnet" and ("push" in $step.args) {
-                $step.args | append ["--api-key" ($env.GITHUB_TOKEN? | default "")]
+                $step.args | append ["--api-key" $token]
             } else { $step.args }
             cd $step.cwd
             run-external $step.cmd ...$args

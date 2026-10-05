@@ -25,7 +25,7 @@
 use bindings/spec.nu *
 use bindings/source.nu *
 
-const TESTED = [python go csharp java dart node node-livekit haskell]
+const TESTED = [python swift go csharp java dart node node-livekit haskell]
 
 def repo []: nothing -> string { $env.FILE_PWD | path dirname }
 
@@ -219,9 +219,47 @@ def run-haskell [spec: record, work: string] {
     do { cd $stage; ^cabal run smoke } | complete
 }
 
+def run-swift [spec: record, work: string] {
+    if (which swift | is-empty) { return { skip: "swift not found" } }
+    let stage = ($work | path join "stage")
+    rm -rf $stage
+    let native = ($stage | path join "native")
+    stage-libs $spec $native [mqtt-client mqtt-broker]
+    # One SwiftPM package: a C target per FFI header (SwiftPM synthesises its
+    # module map) plus one Swift target per component. The two components can't
+    # share a module (UniFFI emits crate-local helpers that would collide), so the
+    # broker module imports the client module for the shared types.
+    for component in [
+        { crate: "mqtt-client", module: "MqttClient", lib: "mqtt_client" }
+        { crate: "mqtt-broker", module: "MqttBroker", lib: "mqtt_broker" }
+    ] {
+        let gen = ($work | path join "gen" $component.crate)
+        let ffi_dir = ($stage | path join "Sources" $"($component.lib)FFI")
+        mkdir ($ffi_dir | path join "include")
+        cp ($gen | path join $"($component.lib)FFI.h") ($ffi_dir | path join "include")
+        "// SwiftPM needs one source file in a C target.\n" | save --force ($ffi_dir | path join "shim.c")
+        let swift_dir = ($stage | path join "Sources" $component.module)
+        mkdir $swift_dir
+        let source = (open --raw ($gen | path join $"($component.lib).swift"))
+        let source = if $component.module == "MqttBroker" {
+            $source | str replace "import Foundation\n" "import Foundation\nimport MqttClient\n"
+        } else { $source }
+        $source | save --force ($swift_dir | path join $"($component.lib).swift")
+    }
+    mkdir ($stage | path join "Sources" "smoke")
+    cp (smoke-src swift | path join "main.swift") ($stage | path join "Sources" "smoke")
+    open --raw (smoke-src swift | path join "Package.swift.in")
+    | str replace --all "@NATIVE@" $native
+    | save --force ($stage | path join "Package.swift")
+    let built = (do { cd $stage; ^swift build } | complete)
+    if $built.exit_code != 0 { return $built }
+    do { cd $stage; ^swift run smoke } | complete
+}
+
 def run-language [spec: record, work: string] {
     match $spec.language {
         "python" => (run-python $spec $work)
+        "swift" => (run-swift $spec $work)
         "go" => (run-go $spec $work)
         "csharp" => (run-csharp $spec $work)
         "java" => (run-java $spec $work)

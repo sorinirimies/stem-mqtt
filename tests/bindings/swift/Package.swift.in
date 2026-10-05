@@ -1,0 +1,21 @@
+// swift-tools-version:5.9
+// Template: scripts/test_bindings.nu substitutes @NATIVE@ with the directory
+// holding libmqtt_client / libmqtt_broker. One C target per FFI header (SwiftPM
+// synthesises its module map) and one Swift target per component; the broker
+// module imports the client module for the shared types.
+import PackageDescription
+
+func link(_ lib: String) -> [LinkerSetting] {
+    [.unsafeFlags(["-L", "@NATIVE@", "-l\(lib)", "-Xlinker", "-rpath", "-Xlinker", "@NATIVE@"])]
+}
+
+let package = Package(
+    name: "smoke",
+    targets: [
+        .target(name: "mqtt_clientFFI"),
+        .target(name: "mqtt_brokerFFI"),
+        .target(name: "MqttClient", dependencies: ["mqtt_clientFFI"], linkerSettings: link("mqtt_client")),
+        .target(name: "MqttBroker", dependencies: ["mqtt_brokerFFI", "MqttClient"], linkerSettings: link("mqtt_broker")),
+        .executableTarget(name: "smoke", dependencies: ["MqttClient", "MqttBroker"]),
+    ]
+)

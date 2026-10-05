@@ -216,6 +216,37 @@ export def package-name [language: string]: nothing -> string {
     $"stem-mqtt-(canonical-language $language)"
 }
 
+# Where a package registry lives for a target host.
+#   github → GitHub Packages (maven/npm/nuget/ghcr.io under github.com)
+#   gitea  → a Gitea instance's built-in package registries (`base_url` required,
+#            e.g. http://192.168.1.44:3000): maven, npm, nuget and container
+#            (OCI) registries are all served from `<base>/api/packages/<owner>/…`.
+export def registry-endpoints [target: string, owner: string, base_url: string, repo: string]: nothing -> record {
+    match $target {
+        "github" => {
+            npm: "https://npm.pkg.github.com"
+            nuget: $"https://nuget.pkg.github.com/($owner)/index.json"
+            maven: $"https://maven.pkg.github.com/($owner)/($repo)"
+            oci_host: "ghcr.io"
+            plain_http: false
+            source_url: $"https://github.com/($owner)/($repo)"
+        }
+        "gitea" => {
+            if $base_url == "" { error make { msg: "--base-url is required for --target gitea (e.g. http://192.168.1.44:3000)" } }
+            let base = ($base_url | str trim --right --char "/")
+            {
+                npm: $"($base)/api/packages/($owner)/npm/"
+                nuget: $"($base)/api/packages/($owner)/nuget/index.json"
+                maven: $"($base)/api/packages/($owner)/maven"
+                oci_host: ($base | str replace --regex '^https?://' "")
+                plain_http: ($base | str starts-with "http://")
+                source_url: $"($base)/($owner)/($repo)"
+            }
+        }
+        $other => { error make { msg: $"unknown publish target '($other)': expected github or gitea" } }
+    }
+}
+
 # The publish plan for one staged language: a list of
 # `{ cwd, cmd, args, note }` steps. Pure so `--dry-run` and tests can inspect
 # exactly what would run. `stage` is the staged directory.
@@ -225,31 +256,35 @@ export def publish-plan [
     stage: string
     owner: string
     repo: string = "stem-mqtt"
+    target: string = "github"
+    base_url: string = ""
 ]: nothing -> list<record> {
     let spec = (spec-for $language)
     let name = (package-name $spec.language)
+    let ep = (registry-endpoints $target $owner $base_url $repo)
     match $spec.registry {
         "npm" => [
-            { cwd: $stage, cmd: "npm", note: "publish to npm.pkg.github.com"
-              args: [publish "--registry" "https://npm.pkg.github.com" "--access" "restricted"] }
+            { cwd: $stage, cmd: "npm", note: $"publish to ($ep.npm)"
+              args: ([publish "--registry" $ep.npm] | append (if $target == "github" { ["--access" "restricted"] } else { [] })) }
         ]
         "nuget" => [
             { cwd: $stage, cmd: "dotnet", note: "pack the NuGet package"
               args: [pack "StemMqtt.csproj" "-c" Release $"-p:Version=($version)" $"-p:PackageId=StemMqtt" "-o" "nupkg"] }
-            { cwd: $stage, cmd: "dotnet", note: "push to nuget.pkg.github.com"
-              args: [nuget push "nupkg/*.nupkg" "--source" $"https://nuget.pkg.github.com/($owner)/index.json" "--skip-duplicate"] }
+            { cwd: $stage, cmd: "dotnet", note: $"push to ($ep.nuget)"
+              args: [nuget push "nupkg/*.nupkg" "--source" $ep.nuget "--skip-duplicate"] }
         ]
         "maven" => [
-            { cwd: $stage, cmd: "gradle", note: "publish to maven.pkg.github.com"
-              args: [publish $"-Pversion=($version)" $"-PghOwner=($owner)" $"-PghRepo=($repo)"] }
+            { cwd: $stage, cmd: "gradle", note: $"publish to ($ep.maven)"
+              args: [publish $"-Pversion=($version)" $"-PmavenUrl=($ep.maven)"] }
         ]
         "oci" => [
-            { cwd: $stage, cmd: "oras", note: "push bundle to ghcr.io (GitHub Packages container registry)"
-              args: [push $"ghcr.io/($owner)/($name):($version)"
+            { cwd: $stage, cmd: "oras", note: $"push bundle to ($ep.oci_host) \(OCI container registry\)"
+              args: ([push $"($ep.oci_host)/($owner)/($name):($version)"
                      $"($name)-($version).tar.gz:application/vnd.stem-mqtt.bindings.v1.tar+gzip"
-                     "--annotation" $"org.opencontainers.image.source=https://github.com/($owner)/($repo)"
+                     "--annotation" $"org.opencontainers.image.source=($ep.source_url)"
                      "--annotation" $"org.opencontainers.image.version=($version)"
-                     "--annotation" $"org.opencontainers.image.description=stem-mqtt ($spec.language) bindings \(client + broker\)"] }
+                     "--annotation" $"org.opencontainers.image.description=stem-mqtt ($spec.language) bindings \(client + broker\)"]
+                     | append (if $ep.plain_http { ["--plain-http"] } else { [] })) }
         ]
         $other => { error make { msg: $"unknown registry '($other)' for ($language)" } }
     }
@@ -294,7 +329,7 @@ export def build-plan [language: string, version: string, stage: string]: nothin
         "nuget" => [{ cwd: $stage, cmd: "dotnet", note: "compile + pack the NuGet package"
                       args: [pack "StemMqtt.csproj" "-c" Release $"-p:Version=($version)" "-o" "nupkg"] }]
         "maven" => [{ cwd: $stage, cmd: "gradle", note: "compile + assemble the jar"
-                      args: [build $"-Pversion=($version)" "-PghOwner=local" "-PghRepo=local"] }]
+                      args: [build $"-Pversion=($version)"] }]
         "oci" => [{ cwd: $stage, cmd: "tar", note: "assemble the OCI bundle"
                     args: ["-czf" $"($name)-($version).tar.gz" sources native] }]
         $other => { error make { msg: $"unknown registry '($other)' for ($language)" } }

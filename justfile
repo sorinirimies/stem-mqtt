@@ -207,6 +207,14 @@ clean-bindings:
     rm -rf packaging/kotlin/staged packaging/kotlin/android/staged-jniLibs packaging/swift/.build packaging/swift/dist
     @echo "🧹 generated binding artifacts removed"
 
+# Check Cargo.lock against the RustSec advisory database (needs cargo-audit)
+audit:
+    cargo audit
+
+# Compare the pinned binding generators with their newest upstream releases
+check-bindgen-updates:
+    nu scripts/check_bindgen_updates.nu
+
 # Build the CI image with every toolchain + generator pre-installed (see packaging/ci/Dockerfile)
 ci-image tag="192.168.1.44:3000/sorin/stem-mqtt-ci:latest":
     docker build -f packaging/ci/Dockerfile -t {{ tag }} .
