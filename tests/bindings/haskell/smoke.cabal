@@ -9,6 +9,6 @@ executable smoke
       base >=4.15 && <5
     , bytestring
     , text
-    , stem-mqtt-bindings
+    , stem-mqtt
   default-language: GHC2021
   ghc-options: -Wall -threaded

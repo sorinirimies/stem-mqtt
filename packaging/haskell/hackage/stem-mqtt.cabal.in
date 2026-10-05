@@ -1,0 +1,61 @@
+cabal-version:      3.4
+name:               stem-mqtt
+version:            @VERSION@
+synopsis:           MQTT 3.1.1 / 5.0 client and broker (Rust core, UniFFI bindings)
+description:
+  An MQTT 3.1.1 / MQTT 5.0 client and broker written in Rust and exposed to Haskell
+  through generated UniFFI bindings: QoS 0/1/2, TLS, WebSocket, shared subscriptions,
+  MQTT 5 enhanced authentication, retained messages, Last Will, auto-reconnect.
+  .
+  The package bundles the Rust sources and builds them with @cargo@ at install time,
+  so a Rust toolchain (<https://rustup.rs>) is required. Callback interfaces cannot
+  be implemented from Haskell; use the pull-style API ('UniFFI.MqttClient.mqttClientNextMessage',
+  'UniFFI.MqttBroker.mqttBrokerNextEvent') to receive messages and events.
+homepage:           https://github.com/sorinirimies/stem-mqtt
+bug-reports:        https://github.com/sorinirimies/stem-mqtt/issues
+license:            MIT AND Apache-2.0
+license-files:      LICENSE, LICENSE.uniffi-runtime
+author:             Sorin Irimies
+maintainer:         Sorin Irimies <sorinirimies@gmail.com>
+category:           Network, MQTT, FFI
+build-type:         Custom
+extra-doc-files:    README.md
+extra-source-files:
+  cbits/*.h
+  rust/Cargo.toml
+  rust/Cargo.lock
+  rust/crates/**/*.rs
+  rust/crates/**/*.toml
+  rust/crates/**/*.md
+
+source-repository head
+  type:     git
+  location: https://github.com/sorinirimies/stem-mqtt
+
+custom-setup
+  setup-depends:
+      base      >=4.15 && <5
+    , Cabal     >=3.4  && <3.20
+    , directory >=1.3  && <1.5
+    , filepath  >=1.4  && <1.7
+    , process   >=1.6  && <1.8
+
+library
+  exposed-modules:
+@EXPOSED@
+  other-modules:
+@OTHER@
+  hs-source-dirs:     haskell
+  build-depends:
+      base        >=4.15 && <5
+    , bytestring  >=0.10 && <0.13
+    , containers  >=0.6  && <0.9
+    , text        >=1.2  && <2.2
+  include-dirs:       cbits
+  c-sources:
+@CSOURCES@
+  cc-options:         -std=c11
+  extra-libraries:    c m
+  if os(linux)
+    extra-libraries:  dl pthread
+  default-language:   GHC2021

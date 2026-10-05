@@ -33,6 +33,9 @@
 # ──────────────────────────────────────────────────────────────────────────────
 
 use bindings/spec.nu *
+use bindings/source.nu *
+use bindings/hackage.nu *
+use bindings/dart_package.nu *
 
 def default-stage [language: string]: nothing -> string {
     $"dist/(canonical-language $language)"
@@ -123,23 +126,55 @@ def write-descriptor [language: string, stage: string] {
 '# | save --force ($stage | path join "StemMqtt.csproj")
         }
         "maven" => {
-            r#'plugins { `java-library`; `maven-publish` }
+            r#'plugins { `java-library`; `maven-publish`; signing }
 // The generated bindings use the Foreign Function & Memory API (JDK 22+): build
 // with any JDK >= 22 targeting release 22 (no toolchain download needed).
 tasks.withType<JavaCompile> { options.release.set(22) }
+java { withSourcesJar(); withJavadocJar() }   // Maven Central requires both
+// Generated doc comments (copied from the Rust docs) aren't valid HTML; don't let doclint fail the jar.
+tasks.withType<Javadoc> { (options as StandardJavadocDocletOptions).addStringOption("Xdoclint:none", "-quiet") }
 sourceSets { main { java.srcDir("sources"); resources.srcDir("native-resources") } }
-group = "com.github.sorinirimies.stemmqtt"
+// GitHub Packages / Gitea: com.github.sorinirimies.stemmqtt. Maven Central needs a verified
+// namespace (io.github.<user>.…), passed as -PgroupId by scripts/publish_maven_central.nu.
+group = (findProperty("groupId") as String?) ?: "com.github.sorinirimies.stemmqtt"
 publishing {
-    publications { create<MavenPublication>("java") { artifactId = "stem-mqtt-java"; from(components["java"]) } }
-    repositories { maven {
-        // -PmavenUrl is passed by `publish_packages.nu publish` (GitHub Packages or a Gitea
-        // instance); a plain `gradle build` never touches it.
-        url = uri((project.findProperty("mavenUrl") as String?) ?: "https://invalid.example/unset")
-        credentials {
-            username = System.getenv("PACKAGES_USER") ?: System.getenv("GITHUB_ACTOR")
-            password = System.getenv("PACKAGES_TOKEN") ?: System.getenv("GITHUB_TOKEN")
+    publications {
+        create<MavenPublication>("java") {
+            artifactId = "stem-mqtt-java"
+            from(components["java"])
+            pom {
+                name.set("stem-mqtt Java bindings")
+                description.set("UniFFI-generated Java (FFM) bindings for the stem-mqtt MQTT client and broker; native libs bundled.")
+                url.set("https://github.com/OWNER/stem-mqtt")
+                licenses { license { name.set("MIT"); url.set("https://opensource.org/licenses/MIT") } }
+                developers { developer { id.set("OWNER"); name.set("Sorin Irimies") } }
+                scm {
+                    url.set("https://github.com/OWNER/stem-mqtt")
+                    connection.set("scm:git:https://github.com/OWNER/stem-mqtt.git")
+                }
+            }
         }
-    } }
+    }
+    repositories {
+        // Zipped and uploaded to Maven Central by scripts/publish_maven_central.nu.
+        maven { name = "staging"; url = uri(layout.buildDirectory.dir("staging-repo")) }
+        maven {
+            // -PmavenUrl is passed by `publish_packages.nu publish` (GitHub Packages or a Gitea
+            // instance); a plain `gradle build` never touches it.
+            url = uri((project.findProperty("mavenUrl") as String?) ?: "https://invalid.example/unset")
+            credentials {
+                username = System.getenv("PACKAGES_USER") ?: System.getenv("GITHUB_ACTOR")
+                password = System.getenv("PACKAGES_TOKEN") ?: System.getenv("GITHUB_TOKEN")
+            }
+        }
+    }
+}
+// Signing only when a key is provided (Maven Central); registries and local builds are unaffected.
+System.getenv("SIGNING_KEY")?.let { key ->
+    signing {
+        useInMemoryPgpKeys(key, System.getenv("SIGNING_PASSWORD"))
+        sign(publishing.publications["java"])
+    }
 }
 '# | save --force ($stage | path join "build.gradle.kts")
             "rootProject.name = \"stem-mqtt-java\"\n" | save --force ($stage | path join "settings.gradle.kts")
@@ -174,7 +209,20 @@ def prepare-package [language: string, version: string, stage: string, owner: st
             cp ...(glob ($stage | path join "native" $platform "*")) $dest
         }
     }
+    # The source packages carry their version in their own manifests.
+    if $language == "haskell" {
+        let cabal = ($stage | path join "hackage" "stem-mqtt.cabal")
+        open --raw $cabal | str replace --regex '(?m)^version:\s+.*$' $"version:            ($version)" | save --force $cabal
+    }
+    if $language == "dart" {
+        let pubspec = ($stage | path join "pub" "pubspec.yaml")
+        open --raw $pubspec | str replace --regex '(?m)^version:.*$' $"version: ($version)" | save --force $pubspec
+        let changelog = ($stage | path join "pub" "CHANGELOG.md")
+        open --raw $changelog | str replace --regex '(?m)^## .*$' $"## ($version)" | save --force $changelog
+    }
     if $spec.registry == "maven" {
+        let gradle = ($stage | path join "build.gradle.kts")
+        open --raw $gradle | str replace --all "OWNER" $owner | save --force $gradle
         let res = ($stage | path join "native-resources")
         rm -rf $res
         cp -r ($stage | path join "native") $res
@@ -183,6 +231,19 @@ def prepare-package [language: string, version: string, stage: string, owner: st
         ^tar -czf ($stage | path join $"($name)-($version).tar.gz") -C $stage sources native
     }
 
+}
+
+# Hackage and pub.dev take source packages that build their own Rust core at install time, so
+# they are assembled from the generated bindings + the Rust sources instead of prebuilt libraries.
+def stage-source-package [language: string, stage: string] {
+    let spec = (spec-for $language)
+    let rust_root = if $spec.uniffi == "workspace" { $env.PWD } else { $env.PWD | path join "target" $"uniffi-($spec.uniffi)" }
+    let gen = ($stage | path join "sources")
+    if $language == "haskell" {
+        build-hackage-package $gen $rust_root (prepare-source $spec) ($stage | path join "hackage") "0.0.0"
+    } else if $language == "dart" {
+        build-dart-package $gen $rust_root ($stage | path join "pub") "0.0.0"
+    }
 }
 
 # Generate bindings + native libs for one language into a stage directory.
@@ -196,6 +257,7 @@ def "main stage" [language: string, --out: string] {
     stage-sources $language $stage
     stage-native $language $stage
     write-descriptor $language $stage
+    stage-source-package $language $stage
     print $"staged ($language) -> ($stage) \(platform: (platform-id)\)"
 }
 
@@ -206,7 +268,7 @@ def "main publish" [
     --from: string
     --owner: string = "sorinirimies"
     --repo: string = "stem-mqtt"
-    --target: string = "github"   # github | gitea
+    --target: string = "github"   # github | gitea | public
     --base-url: string = ""       # Gitea instance, e.g. http://192.168.1.44:3000
     --dry-run
 ] {
@@ -219,6 +281,14 @@ def "main publish" [
     let name = (package-name $language)
 
     prepare-package $language $version $stage $owner
+    if $target == "public" {
+        let ep = (registry-endpoints $target $owner $base_url $repo)
+        if $spec.registry == "npm" {
+            open ($stage | path join "package.json")
+            | upsert publishConfig { registry: $ep.npm, access: "public" }
+            | save --force ($stage | path join "package.json")
+        }
+    }
 
     let plan = (publish-plan $language $version $stage $owner $repo $target $base_url)
     for step in $plan {
@@ -228,7 +298,10 @@ def "main publish" [
             # here (not in the pure plan) so it never lands in a printed plan.
             let token = ($env.PACKAGES_TOKEN? | default ($env.GITHUB_TOKEN? | default ""))
             let args = if $step.cmd == "dotnet" and ("push" in $step.args) {
-                $step.args | append ["--api-key" $token]
+                let key = if $target == "public" { $env.NUGET_API_KEY? | default "" } else { $token }
+                $step.args | append ["--api-key" $key]
+            } else if $step.cmd == "cabal" and ("upload" in $step.args) {
+                $step.args | append ["--token" ($env.HACKAGE_TOKEN? | default "")]
             } else { $step.args }
             cd $step.cwd
             run-external $step.cmd ...$args

@@ -406,10 +406,175 @@ jobs:
     timeout-minutes: 60
     env:
       HAS_TOKEN: ${{ secrets.PACKAGES_TOKEN != '' }}
+      HAS_CENTRAL: ${{ secrets.MAVEN_CENTRAL_PASSWORD != '' }}
+    steps:
+      - name: Skip (no token)
+        if: env.HAS_TOKEN != 'true' && env.HAS_CENTRAL != 'true'
+        run: echo "⏭️  neither PACKAGES_TOKEN nor MAVEN_CENTRAL_PASSWORD set — skipping the Kotlin package."
+
+      - uses: actions/checkout@v4
+        if: env.HAS_TOKEN == 'true' || env.HAS_CENTRAL == 'true'
+        with:
+          ref: ${{ needs.validate.outputs.tag }}
+      - name: Install Rust stable
+        if: env.HAS_TOKEN == 'true' || env.HAS_CENTRAL == 'true'
+        run: |
+          export PATH="$HOME/.cargo/bin:$PATH"
+          for attempt in 1 2 3 4 5; do
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+              | sh -s -- -y --default-toolchain stable --profile minimal && break
+            echo "rustup install failed (attempt $attempt); retrying in 20s"; sleep 20
+          done
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+      - uses: Swatinem/rust-cache@v2
+        if: env.HAS_TOKEN == 'true' || env.HAS_CENTRAL == 'true'
+      - name: Install Nushell
+        if: env.HAS_TOKEN == 'true' || env.HAS_CENTRAL == 'true'
+        run: cargo install nu --locked
+      - uses: actions/setup-java@v4
+        if: env.HAS_TOKEN == 'true' || env.HAS_CENTRAL == 'true'
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Install Gradle
+        if: env.HAS_TOKEN == 'true' || env.HAS_CENTRAL == 'true'
+        run: |
+          (command -v unzip >/dev/null || sudo apt-get install -y -qq unzip)
+          curl -fsSL --retry 5 --retry-delay 10 -o /tmp/gradle.zip https://services.gradle.org/distributions/gradle-8.14.3-bin.zip
+          mkdir -p "$HOME/gradle" && unzip -q -o /tmp/gradle.zip -d "$HOME/gradle"
+          echo "$HOME/gradle/gradle-8.14.3/bin" >> $GITHUB_PATH
+
+      - name: Generate + stage client and broker
+        if: env.HAS_TOKEN == 'true' || env.HAS_CENTRAL == 'true'
+        run: |
+          nu scripts/generate_bindings.nu kotlin mqtt-client
+          nu scripts/generate_bindings.nu kotlin mqtt-broker
+          ./packaging/kotlin/stage.sh ${{ needs.validate.outputs.version }}
+      - name: Run the packaged-library smoke test
+        if: env.HAS_TOKEN == 'true' || env.HAS_CENTRAL == 'true'
+        working-directory: packaging/kotlin
+        run: gradle test --no-daemon
+      - name: Publish to Gitea Maven
+        if: env.HAS_TOKEN == 'true'
+        working-directory: packaging/kotlin
+        env:
+          PACKAGES_USER: ${{ github.repository_owner }}
+          PACKAGES_TOKEN: ${{ secrets.PACKAGES_TOKEN }}
+          PACKAGE_VERSION: ${{ needs.validate.outputs.version }}
+        run: gradle publish --no-daemon -PmavenUrl=${{ github.server_url }}/api/packages/${{ github.repository_owner }}/maven
+
+      # Maven Central takes a signed bundle of the Maven repository layout (Central Portal).
+      # Needs the verified namespace io.github.<owner> and the secrets MAVEN_CENTRAL_USERNAME,
+      # MAVEN_CENTRAL_PASSWORD (Portal user token), SIGNING_KEY (armoured private key), SIGNING_PASSWORD.
+      - name: Publish to Maven Central
+        if: env.HAS_CENTRAL == 'true'
+        working-directory: packaging/kotlin
+        env:
+          PACKAGE_VERSION: ${{ needs.validate.outputs.version }}
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+          SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
+          MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+        run: |
+          gradle publishAllPublicationsToStagingRepository --no-daemon -PgroupId=io.github.${{ github.repository_owner }}.stemmqtt
+          nu ../../scripts/publish_maven_central.nu build/staging-repo stem-mqtt-kotlin-${{ needs.validate.outputs.version }}
+
+  # ── Python wheels → Gitea PyPI registry ──────────────────────────────────────
+  publish-python:
+    name: Publish Python wheels
+    needs: [validate, release]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      HAS_TOKEN: ${{ secrets.PACKAGES_TOKEN != '' }}
+      HAS_PYPI: ${{ secrets.PYPI_API_TOKEN != '' }}
+    steps:
+      - name: Skip (no token)
+        if: env.HAS_TOKEN != 'true' && env.HAS_PYPI != 'true'
+        run: echo "⏭️  neither PACKAGES_TOKEN nor PYPI_API_TOKEN set — skipping the Python wheels."
+
+      - uses: actions/checkout@v4
+        if: env.HAS_TOKEN == 'true' || env.HAS_PYPI == 'true'
+        with:
+          ref: ${{ needs.validate.outputs.tag }}
+      - name: Install Rust stable
+        if: env.HAS_TOKEN == 'true' || env.HAS_PYPI == 'true'
+        run: |
+          export PATH="$HOME/.cargo/bin:$PATH"
+          for attempt in 1 2 3 4 5; do
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+              | sh -s -- -y --default-toolchain stable --profile minimal && break
+            echo "rustup install failed (attempt $attempt); retrying in 20s"; sleep 20
+          done
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+      - uses: Swatinem/rust-cache@v2
+        if: env.HAS_TOKEN == 'true' || env.HAS_PYPI == 'true'
+      - uses: actions/setup-python@v5
+        if: env.HAS_TOKEN == 'true' || env.HAS_PYPI == 'true'
+        with:
+          python-version: "3.12"
+      - name: Build the client and broker wheels
+        if: env.HAS_TOKEN == 'true' || env.HAS_PYPI == 'true'
+        run: |
+          pip install maturin twine
+          maturin build --release --manifest-path crates/mqtt-client/Cargo.toml -o dist
+          maturin build --release --manifest-path crates/mqtt-broker/Cargo.toml -o dist
+      - name: Smoke-test the wheels
+        if: env.HAS_TOKEN == 'true' || env.HAS_PYPI == 'true'
+        run: |
+          pip install dist/*.whl
+          python packaging/python/smoke_test.py
+      - name: Upload to Gitea PyPI
+        if: env.HAS_TOKEN == 'true'
+        env:
+          TWINE_USERNAME: ${{ github.repository_owner }}
+          TWINE_PASSWORD: ${{ secrets.PACKAGES_TOKEN }}
+        run: twine upload --repository-url ${{ github.server_url }}/api/packages/${{ github.repository_owner }}/pypi dist/*
+
+      # pypi.org only accepts manylinux wheels: build them against an old glibc with zig
+      # (no Docker needed), test them, then upload with a PyPI API token.
+      - name: Build manylinux wheels for PyPI
+        if: env.HAS_PYPI == 'true'
+        run: |
+          pip install "maturin[zig]" twine
+          maturin build --release --zig --compatibility manylinux_2_28 --manifest-path crates/mqtt-client/Cargo.toml -o dist-pypi
+          maturin build --release --zig --compatibility manylinux_2_28 --manifest-path crates/mqtt-broker/Cargo.toml -o dist-pypi
+          pip install --force-reinstall dist-pypi/*.whl
+          python packaging/python/smoke_test.py
+      - name: Upload to PyPI
+        if: env.HAS_PYPI == 'true'
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+        run: twine upload --skip-existing dist-pypi/*
+
+  # ── Public registries ────────────────────────────────────────────────────────
+  # npmjs.org, NuGet.org, Maven Central (Java), Hackage and the Go module repository. Each
+  # language needs its own secret and is skipped quietly without it:
+  #   node     NPM_TOKEN (automation token for the @<owner> scope)
+  #   csharp   NUGET_API_KEY
+  #   java     MAVEN_CENTRAL_USERNAME / MAVEN_CENTRAL_PASSWORD / SIGNING_KEY / SIGNING_PASSWORD
+  #   haskell  HACKAGE_TOKEN
+  #   go       GO_MODULE_TOKEN (push access to github.com/<owner>/stem-mqtt-go)
+  # Kotlin → Maven Central and Python → PyPI are in their own jobs above; pub.dev is
+  # published from GitHub Actions (.github/workflows/publish-pubdev.yml) because pub.dev only
+  # trusts that CI.
+  publish-public:
+    name: Publish ${{ matrix.language }} (public registry)
+    needs: [validate, release]
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        language: [node, csharp, java, haskell, go]
+    env:
+      HAS_TOKEN: ${{ (matrix.language == 'node' && secrets.NPM_TOKEN != '') || (matrix.language == 'csharp' && secrets.NUGET_API_KEY != '') || (matrix.language == 'java' && secrets.MAVEN_CENTRAL_PASSWORD != '') || (matrix.language == 'haskell' && secrets.HACKAGE_TOKEN != '') || (matrix.language == 'go' && secrets.GO_MODULE_TOKEN != '') }}
     steps:
       - name: Skip (no token)
         if: env.HAS_TOKEN != 'true'
-        run: echo "⏭️  PACKAGES_TOKEN not set — skipping the Kotlin package."
+        run: echo "⏭️  no registry token for ${{ matrix.language }} — skipping its public package."
 
       - uses: actions/checkout@v4
         if: env.HAS_TOKEN == 'true'
@@ -430,85 +595,68 @@ jobs:
       - name: Install Nushell
         if: env.HAS_TOKEN == 'true'
         run: cargo install nu --locked
+
+      - uses: actions/setup-dotnet@v4
+        if: env.HAS_TOKEN == 'true' && matrix.language == 'csharp'
+        with:
+          dotnet-version: "8.0.x"
       - uses: actions/setup-java@v4
-        if: env.HAS_TOKEN == 'true'
+        if: env.HAS_TOKEN == 'true' && matrix.language == 'java'
         with:
           distribution: temurin
-          java-version: "17"
-      - name: Install Gradle
-        if: env.HAS_TOKEN == 'true'
+          java-version: "22"
+      - uses: actions/setup-node@v4
+        if: env.HAS_TOKEN == 'true' && matrix.language == 'node'
+        with:
+          node-version: "22"
+          registry-url: https://registry.npmjs.org
+      - uses: haskell-actions/setup@v2
+        if: env.HAS_TOKEN == 'true' && matrix.language == 'haskell'
+      - uses: actions/setup-go@v5
+        if: env.HAS_TOKEN == 'true' && matrix.language == 'go'
+        with:
+          go-version: "stable"
+      - name: Install Gradle + zip
+        if: env.HAS_TOKEN == 'true' && matrix.language == 'java'
         run: |
-          (command -v unzip >/dev/null || sudo apt-get install -y -qq unzip)
+          (command -v unzip >/dev/null && command -v zip >/dev/null) || sudo apt-get install -y -qq unzip zip
           curl -fsSL --retry 5 --retry-delay 10 -o /tmp/gradle.zip https://services.gradle.org/distributions/gradle-8.14.3-bin.zip
           mkdir -p "$HOME/gradle" && unzip -q -o /tmp/gradle.zip -d "$HOME/gradle"
           echo "$HOME/gradle/gradle-8.14.3/bin" >> $GITHUB_PATH
 
-      - name: Generate + stage client and broker
+      - name: Restore generator cache
         if: env.HAS_TOKEN == 'true'
-        run: |
-          nu scripts/generate_bindings.nu kotlin mqtt-client
-          nu scripts/generate_bindings.nu kotlin mqtt-broker
-          ./packaging/kotlin/stage.sh ${{ needs.validate.outputs.version }}
-      - name: Run the packaged-library smoke test
-        if: env.HAS_TOKEN == 'true'
-        working-directory: packaging/kotlin
-        run: gradle test --no-daemon
-      - name: Publish to Gitea Maven
-        if: env.HAS_TOKEN == 'true'
-        working-directory: packaging/kotlin
-        env:
-          PACKAGES_USER: ${{ github.repository_owner }}
-          PACKAGES_TOKEN: ${{ secrets.PACKAGES_TOKEN }}
-          PACKAGE_VERSION: ${{ needs.validate.outputs.version }}
-        run: gradle publish --no-daemon -PmavenUrl=${{ github.server_url }}/api/packages/${{ github.repository_owner }}/maven
-
-  # ── Python wheels → Gitea PyPI registry ──────────────────────────────────────
-  publish-python:
-    name: Publish Python wheels
-    needs: [validate, release]
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    env:
-      HAS_TOKEN: ${{ secrets.PACKAGES_TOKEN != '' }}
-    steps:
-      - name: Skip (no token)
-        if: env.HAS_TOKEN != 'true'
-        run: echo "⏭️  PACKAGES_TOKEN not set — skipping the Python wheels."
-
-      - uses: actions/checkout@v4
-        if: env.HAS_TOKEN == 'true'
+        uses: actions/cache@v4
         with:
-          ref: ${{ needs.validate.outputs.tag }}
-      - name: Install Rust stable
+          path: ~/.bindgens
+          key: bindgens-${{ matrix.language }}-${{ hashFiles('scripts/bindings/spec.nu', 'packaging/haskell/uniffi-bindgen-haskell.patch') }}
+      - name: Install the generator
         if: env.HAS_TOKEN == 'true'
         run: |
-          export PATH="$HOME/.cargo/bin:$PATH"
-          for attempt in 1 2 3 4 5; do
-            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
-              | sh -s -- -y --default-toolchain stable --profile minimal && break
-            echo "rustup install failed (attempt $attempt); retrying in 20s"; sleep 20
-          done
-          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
-      - uses: Swatinem/rust-cache@v2
+          echo "$HOME/.bindgens/bin" >> $GITHUB_PATH
+          export PATH="$HOME/.bindgens/bin:$PATH"
+          nu scripts/install_bindgens.nu ${{ matrix.language }} --root "$HOME/.bindgens"
+
+      - name: Runtime-test the bindings before publishing them
         if: env.HAS_TOKEN == 'true'
-      - uses: actions/setup-python@v5
+        run: nu scripts/test_bindings.nu ${{ matrix.language }} --strict
+      - name: Stage ${{ matrix.language }}
         if: env.HAS_TOKEN == 'true'
-        with:
-          python-version: "3.12"
-      - name: Build the client and broker wheels
-        if: env.HAS_TOKEN == 'true'
-        run: |
-          pip install maturin twine
-          maturin build --release --manifest-path crates/mqtt-client/Cargo.toml -o dist
-          maturin build --release --manifest-path crates/mqtt-broker/Cargo.toml -o dist
-      - name: Smoke-test the wheels
-        if: env.HAS_TOKEN == 'true'
-        run: |
-          pip install dist/*.whl
-          python packaging/python/smoke_test.py
-      - name: Upload to Gitea PyPI
+        run: nu scripts/publish_packages.nu stage ${{ matrix.language }}
+
+      - name: Publish ${{ matrix.language }}
         if: env.HAS_TOKEN == 'true'
         env:
-          TWINE_USERNAME: ${{ github.repository_owner }}
-          TWINE_PASSWORD: ${{ secrets.PACKAGES_TOKEN }}
-        run: twine upload --repository-url ${{ github.server_url }}/api/packages/${{ github.repository_owner }}/pypi dist/*
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+          HACKAGE_TOKEN: ${{ secrets.HACKAGE_TOKEN }}
+          GO_MODULE_TOKEN: ${{ secrets.GO_MODULE_TOKEN }}
+          MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+          SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
+        run: >
+          nu scripts/publish_packages.nu publish ${{ matrix.language }}
+          ${{ needs.validate.outputs.version }}
+          --target public
+          --owner ${{ github.repository_owner }}

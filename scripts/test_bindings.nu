@@ -23,6 +23,8 @@
 
 use bindings/spec.nu *
 use bindings/source.nu *
+use bindings/hackage.nu *
+use bindings/dart_package.nu *
 
 const TESTED = [python swift go csharp java dart node haskell]
 
@@ -165,13 +167,17 @@ def run-dart [spec: record, work: string] {
     if (which dart | is-empty) { return { skip: "dart not found" } }
     let stage = ($work | path join "stage")
     rm -rf $stage
-    mkdir ($stage | path join "lib")
-    stage-libs $spec ($stage | path join "native") [mqtt-broker]
-    cp ...(glob ($work | path join "gen" "mqtt-broker" "*.dart")) ($stage | path join "lib")
-    cp -r ...(glob (smoke-src dart | path join "*")) $stage
-    let pub = (do { cd $stage; ^dart pub get } | complete)
+    mkdir $stage
+    # Test the package published to pub.dev: its build hook compiles the bundled Rust sources.
+    let pkg = ($stage | path join "stem_mqtt")
+    build-dart-package ($work | path join "gen" "mqtt-broker") (build-root $spec) $pkg "0.0.0"
+    let smoke = ($stage | path join "smoke")
+    mkdir $smoke
+    cp -r ...(glob (smoke-src dart | path join "bin")) $smoke
+    $"name: smoke\npublish_to: none\nversion: 0.0.0\nenvironment:\n  sdk: \">=3.9.0 <4.0.0\"\ndependencies:\n  stem_mqtt:\n    path: ../stem_mqtt\n" | save --force ($smoke | path join "pubspec.yaml")
+    let pub = (do { cd $smoke; ^dart pub get } | complete)
     if $pub.exit_code != 0 { return $pub }
-    do { cd $stage; ^dart run bin/smoke.dart } | complete
+    do { cd $smoke; ^dart run bin/smoke.dart } | complete
 }
 
 def run-node [spec: record, work: string] {
@@ -195,18 +201,13 @@ def run-haskell [spec: record, work: string] {
     if (which cabal | is-empty) { return { skip: "cabal not found" } }
     let stage = ($work | path join "stage")
     rm -rf $stage
-    mkdir ($stage | path join "native")
-    cp (build-root $spec | path join "target" "release" "libmqtt_broker.a") ($stage | path join "native")
-    # The runtime package lives in the generator's repo; use the patched checkout.
-    let runtime = ((prepare-source (spec-for haskell)) | path join "haskell" "uniffi-runtime")
-    # `generate` already emitted a Cabal package (broker output includes the client).
-    cp -r ($work | path join "gen" "mqtt-broker") ($stage | path join "gen")
-    let cabal_file = ($stage | path join "gen" "stem-mqtt-bindings.cabal")
-    open --raw $cabal_file
-    | str replace --regex '(?m)^(\s*)extra-libraries:' $"${1}extra-lib-dirs: ($stage | path join native)\n${1}extra-libraries:"
-    | save --force $cabal_file
+    mkdir $stage
+    # Test the package that is actually published to Hackage: it carries its own Rust sources
+    # and builds them with cargo from Setup.hs, so nothing native is pre-staged here.
+    let upstream = (prepare-source (spec-for haskell))
+    build-hackage-package ($work | path join "gen" "mqtt-broker") (build-root $spec) $upstream ($stage | path join "stem-mqtt") "0.0.0"
     cp -r (smoke-src haskell) ($stage | path join "smoke")
-    $"packages:\n  ($runtime)\n  gen\n  smoke\n" | save --force ($stage | path join "cabal.project")
+    $"packages:\n  stem-mqtt\n  smoke\n" | save --force ($stage | path join "cabal.project")
     do { cd $stage; ^cabal run smoke } | complete
 }
 

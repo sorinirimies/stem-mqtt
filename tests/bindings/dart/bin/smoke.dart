@@ -11,8 +11,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:uniffi/mqtt_broker.dart' as broker_api;
-import 'package:uniffi/mqtt_client.dart';
+import 'package:stem_mqtt/mqtt_broker.dart' as broker_api;
+import 'package:stem_mqtt/mqtt_client.dart';
 // Each component owns its QoS, so the broker's is reached through the prefix.
 
 void must(bool cond, String what) {

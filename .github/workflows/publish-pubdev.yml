@@ -1,0 +1,58 @@
+# Publish the Dart bindings to pub.dev as `stem_mqtt`.
+#
+# pub.dev only accepts automated publishing from GitHub Actions (OpenID Connect; no API
+# token exists), so this job lives here rather than in the Gitea release workflow.
+#
+# One-time setup on https://pub.dev/packages/stem_mqtt/admin (after a first manual
+# `dart pub publish` of the package, which pub.dev requires to create it):
+#   Automated publishing → enable GitHub Actions → repository <owner>/stem-mqtt,
+#   tag pattern  v{{version}}
+name: Publish to pub.dev
+
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish (without the leading v)"
+        required: true
+
+jobs:
+  publish:
+    name: Publish stem_mqtt
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # pub.dev authenticates this job through OIDC
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: dart-lang/setup-dart@v1
+      - name: Install Nushell
+        run: cargo install nu --locked
+      - name: Install the Dart generator
+        run: |
+          echo "$HOME/.bindgens/bin" >> $GITHUB_PATH
+          nu scripts/install_bindgens.nu dart --root "$HOME/.bindgens"
+      - name: Resolve the version
+        id: version
+        run: |
+          v="${{ github.event.inputs.version }}"
+          [ -n "$v" ] || v="${GITHUB_REF_NAME#v}"
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - name: Runtime-test the bindings
+        run: nu scripts/test_bindings.nu dart --strict
+      - name: Stage the package
+        run: nu scripts/publish_packages.nu stage dart
+      - name: Set the version
+        run: |
+          sed -i "s/^version:.*/version: ${{ steps.version.outputs.version }}/" dist/dart/pub/pubspec.yaml
+          sed -i "s/^## .*/## ${{ steps.version.outputs.version }}/" dist/dart/pub/CHANGELOG.md
+      - name: Validate
+        working-directory: dist/dart/pub
+        run: dart pub publish --dry-run
+      - name: Publish
+        working-directory: dist/dart/pub
+        run: dart pub publish --force

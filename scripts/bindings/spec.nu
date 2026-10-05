@@ -202,8 +202,18 @@ export def package-name [language: string]: nothing -> string {
 #   gitea  → a Gitea instance's built-in package registries (`base_url` required,
 #            e.g. http://192.168.1.44:3000): maven, npm, nuget and container
 #            (OCI) registries are all served from `<base>/api/packages/<owner>/…`.
+#   public → the public package indexes people actually install from: npmjs.org,
+#            NuGet.org, Maven Central, Hackage, pub.dev, Go modules (see `publish-plan`).
 export def registry-endpoints [target: string, owner: string, base_url: string, repo: string]: nothing -> record {
     match $target {
+        "public" => {
+            npm: "https://registry.npmjs.org/"
+            nuget: "https://api.nuget.org/v3/index.json"
+            maven: "https://central.sonatype.com"
+            oci_host: ""
+            plain_http: false
+            source_url: $"https://github.com/($owner)/($repo)"
+        }
         "github" => {
             npm: "https://npm.pkg.github.com"
             nuget: $"https://nuget.pkg.github.com/($owner)/index.json"
@@ -224,7 +234,7 @@ export def registry-endpoints [target: string, owner: string, base_url: string, 
                 source_url: $"($base)/($owner)/($repo)"
             }
         }
-        $other => { error make { msg: $"unknown publish target '($other)': expected github or gitea" } }
+        $other => { error make { msg: $"unknown publish target '($other)': expected github, gitea or public" } }
     }
 }
 
@@ -243,6 +253,7 @@ export def publish-plan [
     let spec = (spec-for $language)
     let name = (package-name $spec.language)
     let ep = (registry-endpoints $target $owner $base_url $repo)
+    if $target == "public" { return (public-plan $spec $version $stage $owner $ep) }
     match $spec.registry {
         "npm" => [
             { cwd: $stage, cmd: "npm", note: $"publish to ($ep.npm)"
@@ -268,6 +279,51 @@ export def publish-plan [
                      | append (if $ep.plain_http { ["--plain-http"] } else { [] })) }
         ]
         $other => { error make { msg: $"unknown registry '($other)' for ($language)" } }
+    }
+}
+
+# The Maven Central group: a verified `io.github.<user>` namespace (the GitHub registries use
+# `com.github.…`, which Central does not accept because it can't verify that domain).
+export def central-group [owner: string]: nothing -> string {
+    $"io.github.($owner).stemmqtt"
+}
+
+# Plans for the public package indexes. Credentials are injected by `publish_packages.nu`
+# at run time (NPM / NUGET_API_KEY / HACKAGE_TOKEN / MAVEN_CENTRAL_*), never part of the plan.
+def public-plan [spec: record, version: string, stage: string, owner: string, ep: record]: nothing -> list<record> {
+    let name = (package-name $spec.language)
+    match $spec.language {
+        "node" => [
+            { cwd: $stage, cmd: "npm", note: $"publish to ($ep.npm) \(npmjs.org)"
+              args: [publish "--registry" $ep.npm "--access" "public"] }
+        ]
+        "csharp" => [
+            { cwd: $stage, cmd: "dotnet", note: "pack the NuGet package"
+              args: [pack "StemMqtt.csproj" "-c" Release $"-p:Version=($version)" $"-p:PackageId=StemMqtt" "-o" "nupkg"] }
+            { cwd: $stage, cmd: "dotnet", note: "push to NuGet.org"
+              args: [nuget push "nupkg/*.nupkg" "--source" $ep.nuget "--skip-duplicate"] }
+        ]
+        "java" => [
+            { cwd: $stage, cmd: "gradle", note: "build + sign the artifacts into a staging repository"
+              args: [publishAllPublicationsToStagingRepository $"-Pversion=($version)" $"-PgroupId=(central-group $owner)"] }
+            { cwd: $stage, cmd: "nu", note: "upload the bundle to Maven Central (Central Portal)"
+              args: [($env.PWD | path join "scripts" "publish_maven_central.nu") "build/staging-repo" $"($name)-($version)"] }
+        ]
+        "haskell" => [
+            { cwd: ($stage | path join "hackage"), cmd: "cabal", note: "build the source distribution"
+              args: [sdist] }
+            { cwd: ($stage | path join "hackage"), cmd: "cabal", note: "upload to Hackage"
+              args: [upload "--publish" $"dist-newstyle/sdist/stem-mqtt-($version).tar.gz"] }
+        ]
+        "dart" => [
+            { cwd: ($stage | path join "pub"), cmd: "dart", note: "publish to pub.dev (needs pub.dev automated publishing: run from GitHub Actions)"
+              args: [pub publish "--force"] }
+        ]
+        "go" => [
+            { cwd: $env.PWD, cmd: "nu", note: "push the Go module to its repository and tag it"
+              args: [($env.PWD | path join "scripts" "publish_go_module.nu") $stage $version] }
+        ]
+        $other => { error make { msg: $"no public registry for ($other): it ships as a release asset" } }
     }
 }
 

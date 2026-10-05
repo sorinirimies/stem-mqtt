@@ -362,8 +362,30 @@ goes where it fits and the rest ship as OCI artifacts on `ghcr.io`:
 ¹ The Android AAR needs the NDK + Android SDK, so it stays on the GitHub workflow.
 ² The XCFrameworks need macOS; there is no Linux runner path for Swift packaging.
 
-Registry publishing needs a secret per target (`CRATES_IO_TOKEN`, `PYPI_API_TOKEN` for GitHub; `PACKAGES_TOKEN`,
-a Gitea token with `write:package`, for Gitea) and skips quietly without it.
+Registry publishing needs a secret per target and skips quietly without it (see below).
+
+### Public registries
+
+Besides the project's own registries, the Gitea release workflow publishes to the indexes people
+actually install from. `nu scripts/publish_packages.nu publish <language> <version> --target public`
+(`--dry-run` prints the plan):
+
+| Language | Public index | Package | Secret(s) | Notes |
+| --- | --- | --- | --- | --- |
+| Rust | crates.io | `stem-mqtt-client`, `stem-mqtt-broker` | `CRATES_IO_TOKEN` | |
+| Python | PyPI | `stem-mqtt-client`, `stem-mqtt-broker` | `PYPI_API_TOKEN` | manylinux_2_28 wheels (built with zig) |
+| Node.js | npmjs.org | `@<owner>/stem-mqtt-node` | `NPM_TOKEN` | the npm scope must exist |
+| C# | NuGet.org | `StemMqtt` | `NUGET_API_KEY` | |
+| Kotlin / Java | Maven Central | `io.github.<owner>.stemmqtt:stem-mqtt-kotlin` / `…-java` | `MAVEN_CENTRAL_USERNAME`, `MAVEN_CENTRAL_PASSWORD`, `SIGNING_KEY`, `SIGNING_PASSWORD` | verify the `io.github.<owner>` namespace on central.sonatype.com first |
+| Haskell | Hackage | `stem-mqtt` | `HACKAGE_TOKEN` | source package; builds the bundled Rust with `cargo` at install time |
+| Dart | pub.dev | `stem_mqtt` | — (OIDC) | published from GitHub Actions (`publish-pubdev.yml`); a build hook compiles the bundled Rust |
+| Go | Go modules (pkg.go.dev) | `github.com/<owner>/stem-mqtt-go` | `GO_MODULE_TOKEN` | pushes the generated module to its own repo and tags it; users install the native libs |
+| Swift | — | release asset (XCFrameworks) | — | needs macOS |
+
+The Haskell and Dart packages are what the runtime tests exercise, so the published artifact is
+the tested one. The Node, C#, Java and Kotlin packages bundle native libraries only for the
+platforms the release runner builds (Linux x86_64 today); other platforms need the libraries from
+the release assets or a source build.
 
 The GitHub release workflow stages each package on Linux, runtime-tests it, and publishes.
 A manual workflow (`.github/workflows/publish-packages.yml`) publishes — or dry-runs — a throw-away
