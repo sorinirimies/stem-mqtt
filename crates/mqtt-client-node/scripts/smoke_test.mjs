@@ -10,6 +10,24 @@
 import { MqttClient } from "../index.js";
 
 const port = Number(process.argv[2] ?? 18830);
+
+async function assertRejects(what, fn) {
+  try {
+    await fn();
+  } catch {
+    return;
+  }
+  throw new Error(`${what}: expected a rejection`);
+}
+
+function assertThrows(what, fn) {
+  try {
+    fn();
+  } catch {
+    return;
+  }
+  throw new Error(`${what}: expected an exception`);
+}
 const topic = "stem-mqtt/node-smoke-test";
 const payload = "hello from node";
 
@@ -37,6 +55,16 @@ if (subscribeResult.reasonCode >= 0x80) {
 }
 
 await client.publish(topic, Buffer.from(payload), 1, false);
+
+// Input validation surfaces as a rejected promise / thrown error, not a dropped connection.
+await assertRejects("wildcard publish topic", () =>
+  client.publish("bad/+/topic", Buffer.from("x"), 0, false),
+);
+await assertRejects("QoS 3", () => client.publish(topic, Buffer.from("x"), 3, false));
+assertThrows("unknown protocol version", () =>
+  new MqttClient({ host: "127.0.0.1", port, clientId: "v", version: "4" }),
+);
+if (!client.isConnected()) throw new Error("local validation must not cost us the connection");
 
 // Give the read loop a moment to deliver the message before checking.
 await new Promise((resolve) => setTimeout(resolve, 500));

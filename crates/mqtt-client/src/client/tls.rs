@@ -3,12 +3,13 @@
 //! default and is completely unaffected; this module is only reached when
 //! [`ConnectOptions::tls`] is `Some`.
 
-use std::io::BufReader;
 use std::sync::Arc;
 
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
 use tokio_rustls::rustls;
+use tokio_rustls::rustls::pki_types::pem::{Error as PemError, PemObject};
+use tokio_rustls::rustls::pki_types::{CertificateDer, PrivateKeyDer};
 
 use crate::error::{MqttError, MqttResult};
 
@@ -85,17 +86,16 @@ fn build_client_config(tls: &TlsOptions) -> MqttResult<rustls::ClientConfig> {
 }
 
 fn parse_certs(pem: &[u8]) -> MqttResult<Vec<rustls::pki_types::CertificateDer<'static>>> {
-    let mut reader = BufReader::new(pem);
-    rustls_pemfile::certs(&mut reader)
+    CertificateDer::pem_slice_iter(pem)
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| MqttError::Protocol(format!("invalid PEM certificate: {e}")))
 }
 
 fn parse_private_key(pem: &[u8]) -> MqttResult<rustls::pki_types::PrivateKeyDer<'static>> {
-    let mut reader = BufReader::new(pem);
-    rustls_pemfile::private_key(&mut reader)
-        .map_err(|e| MqttError::Protocol(format!("invalid PEM private key: {e}")))?
-        .ok_or_else(|| MqttError::Protocol("no private key found in PEM".into()))
+    PrivateKeyDer::from_pem_slice(pem).map_err(|e| match e {
+        PemError::NoItemsFound => MqttError::Protocol("no private key found in PEM".into()),
+        other => MqttError::Protocol(format!("invalid PEM private key: {other}")),
+    })
 }
 
 /// A [`rustls::client::danger::ServerCertVerifier`] that accepts any
@@ -150,5 +150,55 @@ impl rustls::client::danger::ServerCertVerifier for AcceptAnyServerCert {
 
     fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
         self.supported_schemes.clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn opts() -> TlsOptions {
+        TlsOptions::new()
+    }
+
+    #[test]
+    fn default_options_trust_the_bundled_roots() {
+        assert!(build_client_config(&opts()).is_ok());
+    }
+
+    #[test]
+    fn insecure_mode_builds_without_any_roots() {
+        let mut o = opts();
+        o.insecure_skip_certificate_verification = true;
+        assert!(build_client_config(&o).is_ok());
+    }
+
+    #[test]
+    fn a_client_cert_without_its_key_is_rejected() {
+        let mut o = opts();
+        o.client_cert_pem = Some(b"cert".to_vec());
+        let err = build_client_config(&o).unwrap_err().to_string();
+        assert!(err.contains("both be set"), "{err}");
+        let mut o = opts();
+        o.client_key_pem = Some(b"key".to_vec());
+        assert!(build_client_config(&o).is_err());
+    }
+
+    #[test]
+    fn an_unparseable_ca_bundle_is_an_error_not_silently_ignored() {
+        let mut o = opts();
+        o.ca_cert_pem = Some(
+            b"-----BEGIN CERTIFICATE-----\nnot base64!!\n-----END CERTIFICATE-----\n".to_vec(),
+        );
+        assert!(build_client_config(&o).is_err());
+    }
+
+    #[test]
+    fn a_pem_without_a_private_key_is_reported() {
+        let mut o = opts();
+        o.client_cert_pem = Some(b"".to_vec());
+        o.client_key_pem = Some(b"".to_vec());
+        let err = build_client_config(&o).unwrap_err().to_string();
+        assert!(err.contains("no private key"), "{err}");
     }
 }

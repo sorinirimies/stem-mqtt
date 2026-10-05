@@ -441,6 +441,32 @@ mod tests {
     }
 
     #[test]
+    fn auth_continue_roundtrips_with_method_and_data() {
+        let pkt = Packet::Auth(AuthPacket::continue_with(
+            "SCRAM-SHA-256",
+            Bytes::from_static(b"nonce"),
+        ));
+        let encoded = pkt.encode(MqttVersion::V5).unwrap();
+        assert_eq!(encoded[0] >> 4, 15, "AUTH is packet type 15");
+        let mut buf = BytesMut::from(&encoded[..]);
+        let Packet::Auth(auth) = Packet::decode(&mut buf, MqttVersion::V5).unwrap().unwrap() else {
+            panic!("expected AUTH");
+        };
+        assert_eq!(auth.reason_code, AuthPacket::CONTINUE);
+        assert_eq!(auth.properties.auth_method(), Some("SCRAM-SHA-256"));
+        assert_eq!(
+            auth.properties.auth_data().map(|d| &d[..]),
+            Some(&b"nonce"[..])
+        );
+    }
+
+    #[test]
+    fn auth_success_with_no_properties_is_an_empty_body() {
+        let pkt = Packet::Auth(AuthPacket::default());
+        assert_eq!(&pkt.encode(MqttVersion::V5).unwrap()[..], &[0xF0, 0x00]);
+    }
+
+    #[test]
     fn response_id_covers_exactly_the_ack_packets() {
         use crate::protocol::ack::SimpleAck;
         let ack = SimpleAck::success(9);

@@ -232,3 +232,101 @@ impl Session {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mqtt_client::QoS;
+
+    fn msg(qos: QoS) -> QueuedMessage {
+        QueuedMessage {
+            topic: "t".into(),
+            payload: Bytes::from_static(b"p"),
+            qos,
+            retain: false,
+        }
+    }
+
+    fn connected(capacity: usize) -> (Session, mpsc::Receiver<Bytes>) {
+        let mut s = Session::new("c".into(), MqttVersion::V5, true, 2);
+        let (tx, rx) = mpsc::channel(capacity);
+        s.conn = Some(LiveConn {
+            id: 1,
+            sender: tx,
+            shutdown: None,
+        });
+        (s, rx)
+    }
+
+    #[test]
+    fn offline_queue_drops_the_oldest_past_its_cap() {
+        let mut s = Session::new("c".into(), MqttVersion::V5, false, 2);
+        for i in 0..4u8 {
+            s.enqueue_offline(QueuedMessage {
+                payload: Bytes::from(vec![i]),
+                ..msg(QoS::AtMostOnce)
+            });
+        }
+        let kept: Vec<u8> = s.queued.iter().map(|m| m.payload[0]).collect();
+        assert_eq!(kept, [2, 3]);
+    }
+
+    #[test]
+    fn qos0_delivery_is_fire_and_forget() {
+        let (mut s, mut rx) = connected(4);
+        s.deliver(msg(QoS::AtMostOnce));
+        assert!(
+            rx.try_recv().is_ok(),
+            "the PUBLISH was queued for the socket"
+        );
+        assert!(s.pending_redelivery.is_empty(), "QoS 0 is never retried");
+    }
+
+    #[test]
+    fn qos1_delivery_is_tracked_for_redelivery() {
+        let (mut s, mut rx) = connected(4);
+        s.deliver(msg(QoS::AtLeastOnce));
+        assert!(rx.try_recv().is_ok());
+        assert_eq!(s.pending_redelivery.len(), 1);
+        let (id, entry) = s.pending_redelivery.iter().next().unwrap();
+        assert_ne!(*id, 0);
+        assert_eq!(entry.attempts, 0);
+    }
+
+    #[test]
+    fn a_full_channel_still_tracks_qos1_so_it_is_retried_later() {
+        let (mut s, _rx) = connected(1);
+        s.deliver(msg(QoS::AtMostOnce)); // fills the 1-slot channel
+        s.deliver(msg(QoS::AtLeastOnce)); // can't be sent now...
+        assert_eq!(
+            s.pending_redelivery.len(),
+            1,
+            "...but the redelivery sweep will resend it"
+        );
+    }
+
+    #[test]
+    fn send_raw_reports_missing_and_closed_connections() {
+        let s = Session::new("c".into(), MqttVersion::V5, true, 0);
+        assert!(!s.send_raw(Bytes::from_static(b"x")), "no connection");
+        let (s, rx) = connected(4);
+        drop(rx);
+        assert!(!s.send_raw(Bytes::from_static(b"x")), "receiver gone");
+    }
+
+    #[test]
+    fn queued_message_round_trips_through_a_publish_packet() {
+        let m = QueuedMessage {
+            retain: true,
+            ..msg(QoS::ExactlyOnce)
+        };
+        let p = m.to_publish(Some(9), true);
+        assert!(p.dup && p.retain);
+        assert_eq!(p.packet_id, Some(9));
+        let back = QueuedMessage::from(&p);
+        assert_eq!(
+            (back.topic, back.qos, back.retain),
+            ("t".into(), QoS::ExactlyOnce, true)
+        );
+    }
+}

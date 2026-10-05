@@ -67,6 +67,10 @@ const MAX_PUBLISH_RETRIES: u32 = 3;
 /// polls for a connection loss while otherwise idle.
 const RECONNECT_POLL_INTERVAL: Duration = Duration::from_millis(250);
 
+/// Most AUTH challenges the client will answer before giving up on a broker
+/// that never converges on CONNACK.
+const MAX_AUTH_ROUNDS: u32 = 16;
+
 /// MQTT 5.0 reason codes at or above this value are failures (§2.4).
 const REASON_FAILURE_THRESHOLD: u8 = 0x80;
 
@@ -451,6 +455,7 @@ async fn connect_once(shared: &Arc<ClientShared>) -> MqttResult<ConnectResult> {
     let mut buf = BytesMut::with_capacity(1024);
     // CONNACK normally follows CONNECT directly; with enhanced authentication
     // the broker first sends AUTH challenges, each answered in turn.
+    let mut auth_rounds = 0;
     let connack = loop {
         let packet = read_one_packet(
             &mut reader,
@@ -463,6 +468,12 @@ async fn connect_once(shared: &Arc<ClientShared>) -> MqttResult<ConnectResult> {
         match packet {
             Packet::ConnAck(ack) => break ack,
             Packet::Auth(auth) if auth.reason_code == AuthPacket::CONTINUE => {
+                auth_rounds += 1;
+                if auth_rounds > MAX_AUTH_ROUNDS {
+                    return Err(MqttError::ConnectionRefused(
+                        "broker kept sending authentication challenges".into(),
+                    ));
+                }
                 let response = answer_challenge(shared, &auth).await?;
                 let method = auth
                     .properties

@@ -206,3 +206,56 @@ fn debug_output_never_contains_credentials() {
         "no raw byte dump either: {shown}"
     );
 }
+
+/// A broker that answers CONNECT with endless AUTH challenges must not trap the
+/// client in an unbounded loop.
+#[tokio::test]
+async fn endless_auth_challenges_are_cut_off() {
+    use mqtt_client::protocol::packet::AuthPacket;
+    use mqtt_client::MqttAuthHandler;
+
+    struct Echo;
+    impl MqttAuthHandler for Echo {
+        fn respond(&self, _method: String, challenge: Vec<u8>) -> Option<Vec<u8>> {
+            Some(challenge)
+        }
+    }
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut buf = BytesMut::new();
+        assert!(matches!(
+            read_packet(&mut stream, &mut buf).await,
+            Packet::Connect(_)
+        ));
+        for _ in 0..40 {
+            let challenge = Packet::Auth(AuthPacket::continue_with(
+                "X",
+                bytes::Bytes::from_static(b"c"),
+            ));
+            if stream
+                .write_all(&challenge.encode(MqttVersion::V5).unwrap())
+                .await
+                .is_err()
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    });
+
+    let mut options = ConnectOptions::new("127.0.0.1", port, "loop", MqttVersion::V5);
+    options.auth_method = Some("X".into());
+    let client = MqttClient::new(options);
+    client.set_auth_handler(Arc::new(Echo));
+    let err = timeout(Duration::from_secs(10), client.connect())
+        .await
+        .expect("must give up instead of looping")
+        .unwrap_err();
+    assert!(
+        matches!(&err, MqttError::ConnectionRefused(m) if m.contains("challenges")),
+        "{err:?}"
+    );
+}

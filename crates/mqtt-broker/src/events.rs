@@ -40,7 +40,10 @@ macro_rules! hub_notifiers {
         $(
             $(#[$meta])*
             pub fn $name(&self $(, $arg: $ty)*) {
-                self.queue.push(BrokerEvent::$event { $( $arg: $arg.into() ),* });
+                // Build the event (allocating its strings) only if someone is polling.
+                if self.queue.is_enabled() {
+                    self.queue.push(BrokerEvent::$event { $( $arg: $arg.into() ),* });
+                }
                 let listener = self.listener.lock_safe().clone();
                 if let Some(listener) = listener {
                     guard_callback(stringify!($callback), || {
@@ -79,5 +82,71 @@ impl EventHub {
         fn notify_connected => on_client_connected(client_id: &str) => ClientConnected;
         fn notify_disconnected => on_client_disconnected(client_id: &str, reason: &str) => ClientDisconnected;
         fn notify_message_published => on_message_published(client_id: &str, topic: &str, qos: QoS) => MessagePublished;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::MqttBrokerEventListener;
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    #[derive(Default)]
+    struct Recorder(Mutex<Vec<String>>);
+    impl MqttBrokerEventListener for Recorder {
+        fn on_client_connected(&self, client_id: String) {
+            self.0.lock_safe().push(format!("up:{client_id}"));
+        }
+        fn on_client_disconnected(&self, client_id: String, reason: String) {
+            self.0
+                .lock_safe()
+                .push(format!("down:{client_id}:{reason}"));
+        }
+        fn on_message_published(&self, client_id: String, topic: String, _qos: QoS) {
+            self.0.lock_safe().push(format!("pub:{client_id}:{topic}"));
+        }
+    }
+
+    struct Panicker;
+    impl MqttBrokerEventListener for Panicker {
+        fn on_client_connected(&self, _: String) {
+            panic!("listener blew up");
+        }
+        fn on_client_disconnected(&self, _: String, _: String) {}
+        fn on_message_published(&self, _: String, _: String, _: QoS) {}
+    }
+
+    #[test]
+    fn every_notifier_reaches_the_listener_with_owned_arguments() {
+        let hub = EventHub::new();
+        let rec = Arc::new(Recorder::default());
+        hub.set_listener(rec.clone());
+        hub.notify_connected("c1");
+        hub.notify_message_published("c1", "t/x", QoS::AtLeastOnce);
+        hub.notify_disconnected("c1", "bye");
+        assert_eq!(*rec.0.lock_safe(), ["up:c1", "pub:c1:t/x", "down:c1:bye"]);
+    }
+
+    #[test]
+    fn a_panicking_listener_is_contained() {
+        let hub = EventHub::new();
+        hub.set_listener(Arc::new(Panicker));
+        hub.notify_connected("c"); // must not unwind into the caller
+    }
+
+    #[tokio::test]
+    async fn events_are_queued_only_when_the_queue_is_enabled() {
+        let hub = EventHub::new();
+        hub.notify_connected("ignored"); // disabled: nothing is built or kept
+        hub.queue.enable(4);
+        hub.notify_connected("kept");
+        assert_eq!(
+            hub.queue.next(Duration::from_millis(50)).await,
+            Some(BrokerEvent::ClientConnected {
+                client_id: "kept".into()
+            })
+        );
+        assert_eq!(hub.queue.next(Duration::from_millis(20)).await, None);
     }
 }

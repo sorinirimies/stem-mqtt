@@ -190,6 +190,12 @@ impl<T> EventQueue<T> {
         }
     }
 
+    /// Whether the queue is accepting events. Producers on a hot path check
+    /// this *before* building (cloning/allocating) an event nobody will read.
+    pub fn is_enabled(&self) -> bool {
+        self.state.lock_safe().capacity > 0
+    }
+
     /// Queue `event` (dropping the oldest if full) and wake a waiting poller.
     pub fn push(&self, event: T) {
         {

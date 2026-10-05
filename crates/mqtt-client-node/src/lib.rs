@@ -42,6 +42,10 @@ fn map_err(e: mqtt_client::MqttError) -> Error {
     Error::from_reason(e.to_string())
 }
 
+// NOTE: this crate has no Rust unit tests on purpose — a `cargo test` binary for a
+// napi `cdylib` can't link (the `napi_*` symbols only exist inside a Node process).
+// It is covered end to end by `scripts/smoke_test.mjs` (CI job `test-node`).
+
 /// Parse the JS-facing protocol version string.
 fn parse_version(version: &str) -> Result<CoreVersion> {
     match version {

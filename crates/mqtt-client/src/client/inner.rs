@@ -206,7 +206,9 @@ pub(super) fn unexpected(packet: &Packet) -> MqttError {
 /// the foreign callback is contained (see [`guard_callback`]) so it can't
 /// kill the read loop.
 pub(super) fn deliver(inner: &Arc<Inner>, message: MqttMessage) {
-    inner.listener.queue.push(message.clone());
+    if inner.listener.queue.is_enabled() {
+        inner.listener.queue.push(message.clone());
+    }
     if let Some(listener) = inner.take_listener() {
         guard_callback("on_message", || listener.on_message(message));
     }

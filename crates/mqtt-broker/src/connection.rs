@@ -33,6 +33,9 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
 /// always answers `Continue` can't hold a connection (and its task) forever.
 const MAX_AUTH_ROUNDS: u32 = 16;
 
+/// Upper bound on a whole enhanced-authentication exchange.
+const AUTH_EXCHANGE_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// MQTT 5.0 UNSUBACK reason code: "No subscription existed".
 const UNSUB_NO_SUBSCRIPTION: u8 = 0x11;
 
@@ -80,7 +83,10 @@ where
     // the CONNECT names a method; otherwise the username/password provider.
     let mut connack_properties = Properties::new();
     if let Some(method) = connect.properties.auth_method() {
-        match run_enhanced_auth(
+        // The whole exchange — not just each round — is bounded, so a client
+        // that answers just inside the per-round timeout can't hold the
+        // connection for MAX_AUTH_ROUNDS x CONNECT_TIMEOUT.
+        let exchange = run_enhanced_auth(
             &state,
             &client_id,
             method,
@@ -89,8 +95,10 @@ where
             &mut writer,
             &mut buf,
             max_packet_size,
-        )
-        .await
+        );
+        match tokio::time::timeout(AUTH_EXCHANGE_TIMEOUT, exchange)
+            .await
+            .unwrap_or(Err(ConnectReasonCode::NOT_AUTHORIZED))
         {
             Ok(final_data) => {
                 connack_properties = Properties::with_auth(method, final_data);

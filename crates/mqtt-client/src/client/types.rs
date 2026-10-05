@@ -289,3 +289,107 @@ pub trait MqttMessageListener: Send + Sync {
     /// by the client, the broker, or the network.
     fn on_disconnected(&self, reason: String);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn opts() -> ConnectOptions {
+        ConnectOptions::new("localhost", 1883, "cid", MqttVersion::V5)
+    }
+
+    #[test]
+    fn defaults_are_sane() {
+        let o = opts();
+        assert!(o.clean_start && !o.auto_reconnect);
+        assert_eq!(o.keep_alive_secs, 30);
+        assert_eq!(o.operation_timeout(), Duration::from_secs(15));
+        assert_eq!(o.initial_reconnect_backoff(), Duration::from_secs(1));
+        assert_eq!(o.max_reconnect_backoff(), Duration::from_secs(30));
+        assert_eq!(o.max_packet_size(), MAX_PACKET_SIZE);
+        assert!(o.validate().is_ok());
+    }
+
+    #[test]
+    fn explicit_values_override_the_zero_defaults() {
+        let mut o = opts();
+        o.operation_timeout_secs = 3;
+        o.reconnect_backoff_secs = 2;
+        o.reconnect_max_backoff_secs = 9;
+        o.max_packet_size = 4096;
+        assert_eq!(o.operation_timeout(), Duration::from_secs(3));
+        assert_eq!(o.initial_reconnect_backoff(), Duration::from_secs(2));
+        assert_eq!(o.max_reconnect_backoff(), Duration::from_secs(9));
+        assert_eq!(o.max_packet_size(), 4096);
+    }
+
+    #[test]
+    fn a_zero_connect_timeout_is_one_second_not_instant_failure() {
+        let mut o = opts();
+        o.connect_timeout_secs = 0;
+        assert_eq!(o.connect_timeout(), Duration::from_secs(1));
+    }
+
+    #[test]
+    fn validation_rejects_each_unusable_configuration() {
+        type Mutation = Box<dyn Fn(&mut ConnectOptions)>;
+        let cases: Vec<(&str, Mutation)> = vec![
+            ("host", Box::new(|o| o.host.clear())),
+            ("client_id", Box::new(|o| o.client_id = "x".repeat(70_000))),
+            (
+                "password requires a username",
+                Box::new(|o| {
+                    o.version = MqttVersion::V311;
+                    o.password = Some(b"pw".to_vec());
+                }),
+            ),
+            (
+                "will topic",
+                Box::new(|o| {
+                    o.will = Some(WillOptions {
+                        topic: "a/+".into(),
+                        payload: vec![],
+                        qos: QoS::AtMostOnce,
+                        retain: false,
+                    })
+                }),
+            ),
+            (
+                "requires MQTT 5.0",
+                Box::new(|o| {
+                    o.version = MqttVersion::V311;
+                    o.auth_method = Some("SCRAM".into());
+                }),
+            ),
+            (
+                "auth_data requires auth_method",
+                Box::new(|o| o.auth_data = Some(vec![1])),
+            ),
+        ];
+        for (needle, mutate) in cases {
+            let mut o = opts();
+            mutate(&mut o);
+            let err = o.validate().expect_err(needle).to_string();
+            assert!(err.contains(needle), "{needle:?} not in {err:?}");
+        }
+    }
+
+    #[test]
+    fn password_without_username_is_fine_in_mqtt5() {
+        let mut o = opts();
+        o.password = Some(b"pw".to_vec());
+        assert!(o.validate().is_ok());
+    }
+
+    #[test]
+    fn debug_redacts_the_auth_data_too() {
+        let mut o = opts();
+        o.auth_method = Some("SCRAM".into());
+        o.auth_data = Some(b"client-first-SECRET".to_vec());
+        let shown = format!("{o:?}");
+        assert!(
+            shown.contains("SCRAM") && !shown.contains("SECRET"),
+            "{shown}"
+        );
+    }
+}

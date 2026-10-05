@@ -233,3 +233,61 @@ pub trait MqttBrokerEventListener: Send + Sync {
 pub(crate) type SharedAuthProvider = Arc<dyn MqttAuthProvider>;
 pub(crate) type SharedEnhancedAuth = Arc<dyn MqttEnhancedAuthProvider>;
 pub(crate) type SharedEventListener = Arc<dyn MqttBrokerEventListener>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn zero_means_the_documented_defaults() {
+        let c = MqttBrokerConfig::new("127.0.0.1", 0);
+        assert_eq!(c.max_packet_size_bytes(), DEFAULT_MAX_PACKET_SIZE as usize);
+        assert_eq!(
+            c.outbound_queue_capacity(),
+            DEFAULT_MAX_OUTBOUND_QUEUE as usize
+        );
+        assert_eq!(c.redelivery_interval(), Duration::from_secs(5));
+        assert_eq!(c.session_expiry(), None, "sessions never expire by default");
+    }
+
+    #[test]
+    fn explicit_values_win() {
+        let mut c = MqttBrokerConfig::new("127.0.0.1", 0);
+        c.max_packet_size = 2048;
+        c.max_outbound_queue = 7;
+        c.redelivery_interval_secs = 2;
+        c.session_expiry_secs = 90;
+        assert_eq!(c.max_packet_size_bytes(), 2048);
+        assert_eq!(c.outbound_queue_capacity(), 7);
+        assert_eq!(c.redelivery_interval(), Duration::from_secs(2));
+        assert_eq!(c.session_expiry(), Some(Duration::from_secs(90)));
+    }
+
+    #[test]
+    fn tls_config_debug_never_prints_the_private_key() {
+        let tls = BrokerTlsConfig {
+            port: 8883,
+            cert_pem: b"CERT".to_vec(),
+            key_pem: b"-----BEGIN PRIVATE KEY-----TOPSECRET".to_vec(),
+            client_ca_pem: None,
+        };
+        let shown = format!("{tls:?}");
+        assert!(!shown.contains("TOPSECRET"), "{shown}");
+        let mut config = MqttBrokerConfig::new("127.0.0.1", 0);
+        config.tls = Some(tls);
+        assert!(!format!("{config:?}").contains("TOPSECRET"));
+    }
+
+    #[test]
+    fn enhanced_auth_step_constructors() {
+        assert_eq!(
+            EnhancedAuthStep::proceed(vec![1]).outcome,
+            EnhancedAuthOutcome::Continue
+        );
+        assert_eq!(
+            EnhancedAuthStep::success(vec![]).outcome,
+            EnhancedAuthOutcome::Success
+        );
+        assert_eq!(EnhancedAuthStep::failure().data, Vec::<u8>::new());
+    }
+}
