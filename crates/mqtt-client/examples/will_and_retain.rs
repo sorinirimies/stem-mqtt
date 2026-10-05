@@ -73,7 +73,9 @@ async fn main() -> anyhow::Result<()> {
     let watcher = client("watcher");
     watcher.set_message_listener(Arc::new(Printer("watcher")));
     watcher.connect().await?;
-    watcher.subscribe(will_topic.into(), QoS::AtLeastOnce).await?;
+    watcher
+        .subscribe(will_topic.into(), QoS::AtLeastOnce)
+        .await?;
     println!("  watcher is subscribed to {will_topic:?}");
 
     let mut options = ConnectOptions::new("127.0.0.1", 1883, "doomed-client", MqttVersion::V5);
