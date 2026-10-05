@@ -22,7 +22,7 @@ mod ws;
 pub use broker::MqttBroker;
 pub use config::{
     BrokerTlsConfig, EnhancedAuthOutcome, EnhancedAuthStep, MqttAuthProvider, MqttBrokerConfig,
-    MqttBrokerEventListener, MqttEnhancedAuthProvider, DEFAULT_MAX_OUTBOUND_QUEUE,
+    MqttBrokerEventListener, MqttEnhancedAuthProvider, QoS, DEFAULT_MAX_OUTBOUND_QUEUE,
     DEFAULT_MAX_PACKET_SIZE,
 };
 pub use error::{MqttBrokerError, MqttBrokerResult};

@@ -6,10 +6,9 @@
 
 use std::sync::Mutex;
 
+use crate::config::{QoS, SharedEventListener};
 use mqtt_client::support::{guard_callback, EventQueue, LockExt};
-use mqtt_client::QoS;
-
-use crate::config::SharedEventListener;
+use mqtt_client::QoS as CoreQoS;
 
 /// A broker event, as returned by the pull-style `MqttBroker::next_event`
 /// (the polling twin of [`MqttBrokerEventListener`](crate::config::MqttBrokerEventListener)).
@@ -81,7 +80,7 @@ impl EventHub {
     hub_notifiers! {
         fn notify_connected => on_client_connected(client_id: &str) => ClientConnected;
         fn notify_disconnected => on_client_disconnected(client_id: &str, reason: &str) => ClientDisconnected;
-        fn notify_message_published => on_message_published(client_id: &str, topic: &str, qos: QoS) => MessagePublished;
+        fn notify_message_published => on_message_published(client_id: &str, topic: &str, qos: CoreQoS) => MessagePublished;
     }
 }
 
@@ -123,7 +122,7 @@ mod tests {
         let rec = Arc::new(Recorder::default());
         hub.set_listener(rec.clone());
         hub.notify_connected("c1");
-        hub.notify_message_published("c1", "t/x", QoS::AtLeastOnce);
+        hub.notify_message_published("c1", "t/x", CoreQoS::AtLeastOnce);
         hub.notify_disconnected("c1", "bye");
         assert_eq!(*rec.0.lock_safe(), ["up:c1", "pub:c1:t/x", "down:c1:bye"]);
     }

@@ -526,7 +526,7 @@ fn handle_subscribe(state: &Arc<BrokerState>, client_id: &str, p: SubscribePacke
             reason_codes.push(SubAckReasonCode::FAILURE);
             continue;
         }
-        let granted_qos = filter.qos.min(state.config.max_qos);
+        let granted_qos = filter.qos.min(state.config.max_qos_core());
         let is_new = state.sessions.add_subscription(
             client_id,
             &filter.topic_filter,

@@ -2,7 +2,6 @@
 members = [
     "crates/mqtt-client",
     "crates/mqtt-broker",
-    "crates/mqtt-client-node",
     "demo/dashboard",
 ]
 resolver = "2"

@@ -5,7 +5,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use mqtt_client::support::secs_or;
-use mqtt_client::QoS;
 
 /// Default cap on a single inbound packet (fixed header + body): 1 MiB.
 /// An unauthenticated peer can announce any size up to the protocol's
@@ -17,6 +16,46 @@ pub const DEFAULT_MAX_PACKET_SIZE: u32 = 1024 * 1024;
 /// socket before further deliveries to it are dropped (see
 /// [`MqttBrokerConfig::max_outbound_queue`]).
 pub const DEFAULT_MAX_OUTBOUND_QUEUE: u32 = 4096;
+
+/// MQTT Quality of Service level, as used in the broker's own API
+/// ([`MqttBrokerConfig::max_qos`], [`MqttBrokerEventListener`], [`crate::BrokerEvent`]).
+///
+/// This is deliberately the **broker's own** enum rather than a re-export of
+/// `mqtt_client::QoS`. A type defined in another crate is an *external type*
+/// to UniFFI, and several binding generators (Node.js) can't handle those;
+/// owning it makes `mqtt_broker`'s bindings fully self-contained in every
+/// language — one package, no dependency on the client component's generated
+/// code. The cost is a second `QoS` next to the client's (identical, with
+/// lossless `From` conversions in Rust).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, uniffi::Enum)]
+pub enum QoS {
+    /// QoS 0 — fire and forget.
+    AtMostOnce,
+    /// QoS 1 — acknowledged delivery, may be duplicated.
+    AtLeastOnce,
+    /// QoS 2 — exactly-once delivery.
+    ExactlyOnce,
+}
+
+impl From<mqtt_client::QoS> for QoS {
+    fn from(qos: mqtt_client::QoS) -> Self {
+        match qos {
+            mqtt_client::QoS::AtMostOnce => QoS::AtMostOnce,
+            mqtt_client::QoS::AtLeastOnce => QoS::AtLeastOnce,
+            mqtt_client::QoS::ExactlyOnce => QoS::ExactlyOnce,
+        }
+    }
+}
+
+impl From<QoS> for mqtt_client::QoS {
+    fn from(qos: QoS) -> Self {
+        match qos {
+            QoS::AtMostOnce => mqtt_client::QoS::AtMostOnce,
+            QoS::AtLeastOnce => mqtt_client::QoS::AtLeastOnce,
+            QoS::ExactlyOnce => mqtt_client::QoS::ExactlyOnce,
+        }
+    }
+}
 
 /// Configuration for an [`crate::broker::MqttBroker`].
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
@@ -131,6 +170,11 @@ impl MqttBrokerConfig {
     pub(crate) fn session_expiry(&self) -> Option<Duration> {
         (self.session_expiry_secs > 0)
             .then(|| Duration::from_secs(u64::from(self.session_expiry_secs)))
+    }
+
+    /// [`Self::max_qos`] as the codec's QoS type.
+    pub(crate) fn max_qos_core(&self) -> mqtt_client::QoS {
+        self.max_qos.into()
     }
 
     pub(crate) fn max_packet_size_bytes(&self) -> usize {
@@ -248,6 +292,20 @@ mod tests {
         );
         assert_eq!(c.redelivery_interval(), Duration::from_secs(5));
         assert_eq!(c.session_expiry(), None, "sessions never expire by default");
+    }
+
+    #[test]
+    fn broker_qos_converts_losslessly_both_ways() {
+        for core in [
+            mqtt_client::QoS::AtMostOnce,
+            mqtt_client::QoS::AtLeastOnce,
+            mqtt_client::QoS::ExactlyOnce,
+        ] {
+            let ours: QoS = core.into();
+            assert_eq!(mqtt_client::QoS::from(ours), core);
+            assert_eq!(ours as u8, core.as_u8(), "same ordering as the wire QoS");
+        }
+        assert!(QoS::AtMostOnce < QoS::ExactlyOnce);
     }
 
     #[test]

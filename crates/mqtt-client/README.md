@@ -19,7 +19,7 @@ use mqtt_client::{ConnectOptions, MqttClient, MqttVersion, QoS};
 ```
 
 See the [root README's Installation section](../../README.md#installation)
-for every other supported language (Node, Kotlin, Swift, and Python).
+for every other supported language (Kotlin, Swift, Python, Go, C#, Java, Dart, Node.js and Haskell).
 
 ## Layout
 

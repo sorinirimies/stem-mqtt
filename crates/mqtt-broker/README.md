@@ -21,8 +21,7 @@ use mqtt_broker::{MqttBroker, MqttBrokerConfig};
 ```
 
 Both client and broker bindings ship for Kotlin, Android, Swift, and Python.
-Node.js remains client-only because it uses a separate hand-written napi-rs
-addon rather than UniFFI. See the
+Every other supported language ships both too — one UniFFI-generated package each. See the
 [root README's Installation section](../../README.md#installation) for every
 supported language.
 
@@ -117,6 +116,13 @@ impl MqttAuthProvider for FixedCreds {
 }
 ```
 
+## QoS in the bindings
+
+The broker's bindings are self-contained: `QoS` in `MqttBrokerConfig::max_qos` and in the event listener is
+the **broker's own** enum (`mqtt_broker::QoS`), with lossless `From` conversions to the client crate's
+`mqtt_client::QoS`. In a language that imports both packages you therefore have two `QoS` types — use the
+broker's for broker configuration/events and the client's for client calls.
+
 ## Limits and robustness
 
 All of these are fields on `MqttBrokerConfig` (and CLI flags on `mqtt-broker`):
@@ -162,7 +168,7 @@ For runtimes that can't receive callbacks (Dart, Haskell): `enable_event_queue(c
 
 Same pattern as `mqtt-client` — Kotlin, Swift, Python, Go, C#, Java, Dart, Node.js and Haskell
 (see the [root README](../../README.md#generating-foreign-language-bindings) for which generators
-support which features; the criccomini Node generator can't emit the broker):
+support which features):
 
 ```sh
 nu ../../scripts/generate_bindings.nu kotlin

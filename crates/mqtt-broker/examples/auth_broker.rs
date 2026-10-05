@@ -12,8 +12,8 @@
 
 use std::sync::Arc;
 
+use mqtt_broker::QoS;
 use mqtt_broker::{MqttAuthProvider, MqttBroker, MqttBrokerConfig, MqttBrokerEventListener};
-use mqtt_client::QoS;
 
 struct FixedCredentials;
 
