@@ -43,8 +43,10 @@ import mqtt_broker
 
 client = mqtt_client.MqttClient(...)
 broker_config = mqtt_broker.MqttBrokerConfig(
-    # Broker records use the broker wheel's generated external enum copy.
+    # The broker owns its own QoS enum (it is not the client's).
     max_qos=mqtt_broker.QoS.EXACTLY_ONCE,
     ...
 )
 ```
+
+A full guide (callbacks, pull-style API, authentication, TLS) is in [`docs/languages/python.md`](../../docs/languages/python.md).

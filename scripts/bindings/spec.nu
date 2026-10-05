@@ -353,8 +353,19 @@ export def build-plan [language: string, version: string, stage: string]: nothin
         "npm" => [{ cwd: $stage, cmd: "npm", note: "pack the npm package", args: [pack "--dry-run"] }]
         "nuget" => [{ cwd: $stage, cmd: "dotnet", note: "compile + pack the NuGet package"
                       args: [pack "StemMqtt.csproj" "-c" Release $"-p:Version=($version)" "-o" "nupkg"] }]
-        "maven" => [{ cwd: $stage, cmd: "gradle", note: "compile + assemble the jar"
-                      args: [build $"-Pversion=($version)"] }]
+        "maven" => {
+            # Run the smoke test against the *packaged jar alone* (no java.library.path): that is
+            # what a consumer does, and it proves the bundled native library is found.
+            let jar = $"build/libs/stem-mqtt-java-($version).jar"
+            let sep = if $nu.os-info.name == "windows" { ";" } else { ":" }
+            [
+                { cwd: $stage, cmd: "gradle", note: "compile + assemble the jar", args: [build $"-Pversion=($version)"] }
+                { cwd: $stage, cmd: "javac", note: "compile the smoke test against the jar"
+                  args: ["--release" "22" "-cp" $jar "-d" "build/smoke" ($env.PWD | path join "tests" "bindings" "java" "Smoke.java")] }
+                { cwd: $stage, cmd: "java", note: "run the smoke test with only the packaged jar on the classpath"
+                  args: ["--enable-native-access=ALL-UNNAMED" "-cp" $"($jar)($sep)build/smoke" "Smoke"] }
+            ]
+        }
         "oci" => [{ cwd: $stage, cmd: "tar", note: "assemble the OCI bundle"
                     args: ["-czf" $"($name)-($version).tar.gz" sources native] }]
         $other => { error make { msg: $"unknown registry '($other)' for ($language)" } }

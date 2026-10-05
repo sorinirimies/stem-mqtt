@@ -119,4 +119,13 @@ def "test public: the Dart package renames the native asset id away from the gen
     rm -rf $gen $root
 }
 
+def "test public: the java package check runs the smoke test against the packaged jar alone" [] {
+    let plan = (build-plan java "1.0.0" "dist/java")
+    assert equal ($plan | get cmd) [gradle javac java]
+    let run = ($plan | last)
+    assert ($run.args | any { |a| $a | str contains "stem-mqtt-java-1.0.0.jar" })
+    # no -Djava.library.path: the jar must find its own native library
+    assert (not ($run.args | any { |a| $a | str contains "java.library.path" }))
+}
+
 def main [] { run-tests }

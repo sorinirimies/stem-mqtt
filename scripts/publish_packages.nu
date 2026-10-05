@@ -116,8 +116,14 @@ def write-descriptor [language: string, stage: string] {
     <PackageId>StemMqtt</PackageId>
     <Description>MQTT 3.1.1 / 5.0 client and broker (Rust core, UniFFI C# bindings)</Description>
     <RepositoryUrl>https://github.com/OWNER/stem-mqtt</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/OWNER/stem-mqtt</PackageProjectUrl>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageTags>mqtt;broker;client;iot;rust;uniffi</PackageTags>
+    <Authors>Sorin Irimies</Authors>
   </PropertyGroup>
   <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="/" />
     <Compile Include="sources/**/*.cs" />
     <!-- native/<platform>/ is re-laid out as runtimes/<rid>/native/ at publish time -->
     <None Include="runtimes/**" Pack="true" PackagePath="runtimes" />
@@ -133,7 +139,7 @@ tasks.withType<JavaCompile> { options.release.set(22) }
 java { withSourcesJar(); withJavadocJar() }   // Maven Central requires both
 // Generated doc comments (copied from the Rust docs) aren't valid HTML; don't let doclint fail the jar.
 tasks.withType<Javadoc> { (options as StandardJavadocDocletOptions).addStringOption("Xdoclint:none", "-quiet") }
-sourceSets { main { java.srcDir("sources"); resources.srcDir("native-resources") } }
+sourceSets { main { java.srcDir("sources"); java.srcDir("loader"); resources.srcDir("native-resources") } }
 // GitHub Packages / Gitea: com.github.sorinirimies.stemmqtt. Maven Central needs a verified
 // namespace (io.github.<user>.…), passed as -PgroupId by scripts/publish_maven_central.nu.
 group = (findProperty("groupId") as String?) ?: "com.github.sorinirimies.stemmqtt"
@@ -178,9 +184,29 @@ System.getenv("SIGNING_KEY")?.let { key ->
 }
 '# | save --force ($stage | path join "build.gradle.kts")
             "rootProject.name = \"stem-mqtt-java\"\n" | save --force ($stage | path join "settings.gradle.kts")
+            # The generated loader only searches java.library.path; the jar carries the native
+            # libraries as resources, so add a loader that extracts them and hook it in.
+            let loader = ($stage | path join "loader" "io" "github" "stemmqtt")
+            mkdir $loader
+            cp ($env.PWD | path join "packaging" "java" "NativeLoader.java") $loader
+            for file in (glob ($stage | path join "sources" "**" "NamespaceLibrary.java")) {
+                let component = ($file | path dirname | path basename)
+                open --raw $file
+                | str replace "static synchronized String findLibraryName(String componentName) {" $"static synchronized String findLibraryName\(String componentName\) {\n        io.github.stemmqtt.NativeLoader.prepare\(componentName\);"
+                | save --force $file
+            }
         }
         _ => {}
     }
+}
+
+# The language guide (docs/languages/<language>.md) as a registry README. Its links are relative to the
+# repository, which would be broken on npmjs.org / nuget.org, so point them at the repository on GitHub.
+def registry-readme [language: string, owner: string]: nothing -> string {
+    let base = $"https://github.com/($owner)/stem-mqtt/blob/main"
+    open --raw ($env.PWD | path join "docs" "languages" $"($language).md")
+    | str replace --all "](../../" $"]\(($base)/"
+    | str replace --all --regex '\]\(([A-Za-z_-]+\.md)\)' $"]\(($base)/docs/languages/${1}\)"
 }
 
 # Registry-specific preparation that depends on the final version/owner:
@@ -188,6 +214,10 @@ System.getenv("SIGNING_KEY")?.let { key ->
 def prepare-package [language: string, version: string, stage: string, owner: string] {
     let spec = (spec-for $language)
     let name = (package-name $language)
+    # Registry pages show a README: use the language guide, with its repo-relative links made absolute.
+    if $spec.registry in ["npm" "nuget"] {
+        registry-readme $language $owner | save --force ($stage | path join "README.md")
+    }
     if $spec.registry == "npm" {
         open ($stage | path join "package.json")
         | upsert name $"@($owner)/($name)" | upsert version $version

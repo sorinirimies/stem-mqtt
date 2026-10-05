@@ -1,4 +1,4 @@
-//! Authentication from the client side: one login is rejected, another accepted.
+//! Authentication from the client side: three logins, two rejected and one accepted.
 //!
 //! Start the authenticating broker first:
 //! `cargo run -p stem-mqtt-broker --example auth_broker`
@@ -19,17 +19,20 @@ fn with_login(client_id: &str, user: &str, password: &str) -> ConnectOptions {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    println!("trying intruder / guess ...");
-    let intruder = MqttClient::new(with_login("intruder", "intruder", "guess"));
-    match intruder.connect().await {
-        Ok(_) => println!("  unexpectedly accepted"),
-        Err(e) => println!("  rejected: {e}"),
+    // Wrong user, wrong password: both refused with MQTT 5 reason code 0x86 (bad credentials).
+    for (client_id, user, password) in [("mallory", "intruder", "guess"), ("bob", "demo", "oops")] {
+        println!("login {user} / {password}");
+        let client = MqttClient::new(with_login(client_id, user, password));
+        match client.connect().await {
+            Ok(_) => println!("  -> unexpectedly accepted"),
+            Err(e) => println!("  -> rejected ({e})"),
+        }
     }
 
-    println!("trying demo / demo ...");
+    println!("login demo / demo");
     let client = MqttClient::new(with_login("alice", "demo", "demo"));
     client.connect().await?;
-    println!("  accepted");
+    println!("  -> accepted");
     client
         .publish(
             "stem-mqtt/examples/auth".into(),
@@ -38,7 +41,7 @@ async fn main() -> anyhow::Result<()> {
             false,
         )
         .await?;
-    println!("  published a message");
+    println!("  -> alice published a message");
     client.disconnect().await?;
     Ok(())
 }

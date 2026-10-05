@@ -1,6 +1,6 @@
 # VHS tape — stem-mqtt · Authentication Demo
 # Showcases: the `auth_broker` example (a pluggable MqttAuthProvider + an event listener).
-# A client with the wrong login is rejected, `demo`/`demo` is accepted and publishes, and the
+# Two clients with wrong logins are rejected, `demo`/`demo` is accepted and publishes, and the
 # broker's own log then shows each authentication decision and connection event.
 #
 # Run: vhs examples/vhs/auth-demo.tape
@@ -10,8 +10,8 @@ Output examples/vhs/generated/auth-demo.gif
 
 Set Theme "Catppuccin Mocha"
 Set Width 1200
-Set Height 500
-Set FontSize 16
+Set Height 620
+Set FontSize 20
 Set PlaybackSpeed 1.5
 
 # ── Start the authenticating broker in the background (hidden) ──────────────
