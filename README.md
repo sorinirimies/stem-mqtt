@@ -280,22 +280,25 @@ just bindings-all                                 # or: just bindings-third-part
 | Go | [uniffi-bindgen-go](https://github.com/NordSecurity/uniffi-bindgen-go) | ✅ client + broker + all callbacks | stable |
 | C# | [uniffi-bindgen-cs](https://github.com/NordSecurity/uniffi-bindgen-cs) | ✅ client + broker + all callbacks | stable |
 | Java (JDK 22+) | [uniffi-bindgen-java](https://github.com/IronCoreLabs/uniffi-bindgen-java) | ✅ client + broker + all callbacks | stable |
-| Dart | [uniffi-dart](https://github.com/acterglobal/uniffi-dart) | ✅ client + broker, **no callbacks** ² | experimental |
+| Dart | [uniffi-dart](https://github.com/acterglobal/uniffi-dart) | ✅ client + broker through the pull-style API ² | experimental |
 | Node.js | [uniffi-bindgen-node-js](https://github.com/criccomini/uniffi-bindgen-node-js) | ✅ client + listener callback; broker ❌ ¹ | experimental |
 | Node.js (early dev.) | [uniffi-bindgen-node](https://github.com/livekit/uniffi-bindgen-node) | ❌ broken ³ | not published |
-| Haskell | [uniffi-bindgen-haskell](https://github.com/mercury/uniffi-bindgen-haskell) + [our patch](packaging/haskell) | ✅ client + broker, **no callbacks** ² | experimental |
+| Haskell | [uniffi-bindgen-haskell](https://github.com/mercury/uniffi-bindgen-haskell) + [our patch](packaging/haskell) (PR [#3](https://github.com/mercury/uniffi-bindgen-haskell/pull/3)) | ✅ client + broker through the pull-style API ² | experimental |
 
 ¹ That generator rejects UniFFI *external types* and the broker imports `QoS`
 from the client crate.
-² Dart: foreign callbacks cannot be invoked from Rust's own threads (the VM aborts).
-Haskell: callback interfaces are exposed only as opaque handles. Either way
-`MqttMessageListener`, `MqttAuthProvider` and `MqttBrokerEventListener` cannot be
-implemented, so publishing/subscribing work but incoming messages cannot be received.
+² Dart: foreign callbacks cannot be invoked from Rust's own threads (the VM aborts). Haskell: callback
+interfaces are exposed only as opaque handles. So `MqttMessageListener`, `MqttAuthProvider`,
+`MqttBrokerEventListener` and the enhanced-auth callbacks can't be implemented there — use the
+**pull-style API** that exists for exactly this: `enable_message_queue` / `next_message(timeout_ms)` on the
+client and `enable_event_queue` / `next_event(timeout_ms)` on the broker. Their smoke tests receive
+messages and observe broker events that way. Authentication uses the built-in `allow_anonymous` rule.
 ³ Emits TypeScript referencing an undefined `FfiConverterBytes`; no client can be constructed.
-⁴ Upstream's Haskell generator had two bugs that made every binding unusable: constructors never
-lowered their arguments (generated code didn't compile) and flat-error variants dropped their message
-(decoder failed with "left N trailing bytes"). [`packaging/haskell/uniffi-bindgen-haskell.patch`](packaging/haskell/uniffi-bindgen-haskell.patch)
-fixes both; `install_bindgens.nu` builds the generator from the pinned revision with the patch applied.
+⁴ Upstream's Haskell generator had three bugs that made every binding unusable: constructors never
+lowered their arguments (generated code didn't compile), flat-error variants dropped their message
+(decoder failed with "left N trailing bytes"), and records sharing a field name broke the public module.
+[`packaging/haskell/uniffi-bindgen-haskell.patch`](packaging/haskell/uniffi-bindgen-haskell.patch)
+fixes all three (and is proposed upstream, see [`packaging/haskell`](packaging/haskell)); `install_bindgens.nu` builds the generator from the pinned revision with the patch applied.
 
 ³ is tracked as `known-broken` in `scripts/bindings/spec.nu`: its smoke test keeps running and
 reports `XFAIL`; the day upstream fixes it it reports `XPASS` and fails CI so the flag gets removed.

@@ -127,13 +127,36 @@ All of these are fields on `MqttBrokerConfig` (and CLI flags on `mqtt-broker`):
 | `max_outbound_queue` / `--max-outbound-queue` | 4096 | Packets queued per client socket; a slow consumer past this has further deliveries dropped (QoS 1/2 are retried) instead of growing memory without bound. |
 | `max_clients` / `--max-clients` | unlimited | Checked atomically; a client taking over its own session doesn't count against it. |
 | `redelivery_interval_secs` | 5 | Resend (DUP=1) interval for unacked QoS 1/2 deliveries. |
+| `session_expiry_secs` | 0 (never) | Discard persistent (`clean_start = false`) sessions — with their subscriptions and queued messages — that stay offline this long, so clients that never return can't leak memory. |
 
 Behaviour worth knowing: `start()` is all-or-nothing and serialised; `stop()` closes live
 connections (without publishing Last Wills) and keeps persistent sessions; dropping a broker stops
 it; a client id taken over by a newer connection never disturbs its replacement; an empty client id
-with `clean_start = false` is refused; MQTT 5 shared subscriptions (`$share/…`) are refused with
-reason code `0x9E`; `SIGTERM` shuts the CLI down gracefully. Foreign callbacks that panic or throw
+with `clean_start = false` is refused; `SIGTERM` shuts the CLI down gracefully. Foreign callbacks that panic or throw
 are contained and never kill a connection, and an auth provider that panics means "denied".
+
+## Subscriptions and routing
+
+- **Topic index:** subscriptions live in a topic-level trie, so a PUBLISH finds its subscribers by walking
+  the topic's own levels instead of scanning every session's filters.
+- **Shared subscriptions:** `$share/<group>/<filter>` delivers each message to **one** member of the group
+  (round-robin, preferring connected members); ordinary subscribers still receive everything. Retained
+  messages are not replayed to shared subscriptions (MQTT 5 §4.8.2).
+
+## Authentication
+
+- `MqttAuthProvider` — username/password, evaluated once per CONNECT (off the async workers; a panic = denied).
+- `MqttEnhancedAuthProvider` — MQTT 5 *enhanced* authentication: a multi-round challenge/response (SCRAM,
+  Kerberos, OAuth, …) during CONNECT. The provider's `step(client_id, method, data, round)` returns an
+  `EnhancedAuthStep { outcome: Continue | Success | Failure, data }`; the broker relays challenges as AUTH
+  packets and returns `data` on success in the CONNACK. A CONNECT naming a method with no provider
+  registered is refused (`0x8C`). The matching client side is `MqttAuthHandler`.
+
+## Pull-style events
+
+For runtimes that can't receive callbacks (Dart, Haskell): `enable_event_queue(capacity)` then
+`next_event(timeout_ms)` returns a `BrokerEvent` (`ClientConnected`, `ClientDisconnected`,
+`MessagePublished`) or `None` on timeout. Oldest events are dropped when the queue is full.
 
 ## Foreign-language bindings
 

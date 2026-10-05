@@ -96,6 +96,15 @@ impl MqttMessageListener for Printer {
 - **Listener safety:** a panic/exception in your `MqttMessageListener` is contained and can't kill the
   connection's read loop.
 
+## Pull-style delivery and enhanced authentication
+
+- **Pull-style:** for runtimes that can't receive callbacks (Dart, Haskell), `enable_message_queue(capacity)`
+  then `next_message(timeout_ms)` returns the next incoming message or `None` on timeout;
+  `last_disconnect_reason()` is the polling twin of `on_disconnected`. It can be combined with a listener.
+- **Enhanced authentication (MQTT 5):** set `ConnectOptions::auth_method` (and optionally `auth_data`) and
+  register an `MqttAuthHandler` with `set_auth_handler`; its `respond(method, challenge)` answers each
+  broker challenge (returning `None` aborts). Requires `MqttVersion::V5`.
+
 ## Foreign-language bindings
 
 ```sh

@@ -1,0 +1,101 @@
+name: Publish packages (manual)
+
+# Publish (or dry-run publish) the per-language packages to GitHub Packages
+# WITHOUT cutting a release. Use it to prove the Maven / NuGet / npm / ghcr.io
+# path end to end with a throw-away version such as 0.0.0-rc.1 before relying on
+# it in a real release (release.yml runs the same scripts after a tag).
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Package version to publish (e.g. 0.0.0-rc.1)"
+        required: true
+        default: "0.0.0-rc.1"
+      dry_run:
+        description: "Only print what would be published"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  stage:
+    name: Stage ${{ matrix.language }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [java, csharp, node, go, dart, haskell]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install Nushell
+        run: cargo install nu --locked
+      - name: Install the generator
+        run: nu scripts/install_bindgens.nu ${{ matrix.language }}
+      - name: Runtime-test the bindings first
+        run: nu scripts/test_bindings.nu ${{ matrix.language }} --strict
+      - name: Stage ${{ matrix.language }} package
+        run: nu scripts/publish_packages.nu stage ${{ matrix.language }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stage-${{ matrix.language }}
+          path: dist/${{ matrix.language }}
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    name: Publish ${{ matrix.language }}
+    needs: stage
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [java, csharp, node, go, dart, haskell]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Nushell
+        run: cargo install nu --locked
+      - uses: actions/download-artifact@v4
+        with:
+          name: stage-${{ matrix.language }}
+          path: dist/${{ matrix.language }}
+      - uses: actions/setup-node@v4
+        if: matrix.language == 'node'
+        with:
+          node-version: "22"
+          registry-url: https://npm.pkg.github.com
+          scope: "@${{ github.repository_owner }}"
+      - uses: actions/setup-dotnet@v4
+        if: matrix.language == 'csharp'
+        with:
+          dotnet-version: "8.0.x"
+      - uses: actions/setup-java@v4
+        if: matrix.language == 'java'
+        with:
+          distribution: temurin
+          java-version: "22"
+      - uses: gradle/actions/setup-gradle@v4
+        if: matrix.language == 'java'
+      - uses: oras-project/setup-oras@v1
+        if: matrix.language == 'go' || matrix.language == 'dart' || matrix.language == 'haskell'
+      - name: Log in to ghcr.io
+        if: (matrix.language == 'go' || matrix.language == 'dart' || matrix.language == 'haskell') && !inputs.dry_run
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - name: Publish ${{ matrix.language }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DRY_RUN: ${{ inputs.dry_run && '--dry-run' || '' }}
+        run: >
+          nu scripts/publish_packages.nu publish ${{ matrix.language }}
+          ${{ inputs.version }}
+          --owner ${{ github.repository_owner }}
+          $DRY_RUN
