@@ -11,6 +11,7 @@ mod config;
 mod connection;
 mod error;
 mod events;
+mod index;
 mod registry;
 mod retain;
 mod session;
@@ -20,9 +21,11 @@ mod ws;
 
 pub use broker::MqttBroker;
 pub use config::{
-    BrokerTlsConfig, MqttAuthProvider, MqttBrokerConfig, MqttBrokerEventListener,
-    DEFAULT_MAX_OUTBOUND_QUEUE, DEFAULT_MAX_PACKET_SIZE,
+    BrokerTlsConfig, EnhancedAuthOutcome, EnhancedAuthStep, MqttAuthProvider, MqttBrokerConfig,
+    MqttBrokerEventListener, MqttEnhancedAuthProvider, DEFAULT_MAX_OUTBOUND_QUEUE,
+    DEFAULT_MAX_PACKET_SIZE,
 };
 pub use error::{MqttBrokerError, MqttBrokerResult};
+pub use events::BrokerEvent;
 
 uniffi::setup_scaffolding!();

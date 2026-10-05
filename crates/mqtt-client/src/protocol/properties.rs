@@ -87,6 +87,32 @@ impl Properties {
         self.0.push(prop);
     }
 
+    /// The `Authentication Method` property (MQTT-5.0 §3.1.2.11.9), if present.
+    pub fn auth_method(&self) -> Option<&str> {
+        self.0.iter().find_map(|p| match p {
+            Property::AuthenticationMethod(m) => Some(m.as_str()),
+            _ => None,
+        })
+    }
+
+    /// The `Authentication Data` property (MQTT-5.0 §3.1.2.11.10), if present.
+    pub fn auth_data(&self) -> Option<&Bytes> {
+        self.0.iter().find_map(|p| match p {
+            Property::AuthenticationData(d) => Some(d),
+            _ => None,
+        })
+    }
+
+    /// Properties naming an authentication `method`, optionally with `data`.
+    pub fn with_auth(method: &str, data: Option<Bytes>) -> Self {
+        let mut props = Properties::new();
+        props.push(Property::AuthenticationMethod(method.to_string()));
+        if let Some(data) = data {
+            props.push(Property::AuthenticationData(data));
+        }
+        props
+    }
+
     pub fn find_u32(&self, id_of: impl Fn(&Property) -> Option<u32>) -> Option<u32> {
         self.0.iter().find_map(id_of)
     }

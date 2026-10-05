@@ -18,7 +18,7 @@ public class Smoke {
 
     static ConnectOptions options(short port, String id, String user) {
         return new ConnectOptions("127.0.0.1", port, id, MqttVersion.V5, true, (short) 30, user, null, null,
-                10, 5, false, 0, 0, null, 0);
+                10, 5, false, 0, 0, null, 0, null, null);
     }
 
     public static void main(String[] args) throws Exception {
@@ -26,7 +26,7 @@ public class Smoke {
         Set<String> connected = ConcurrentHashMap.newKeySet();
 
         MqttBroker broker = new MqttBroker(new MqttBrokerConfig("127.0.0.1", (short) 0, null, true, 0,
-                QoS.EXACTLY_ONCE, 100, 100, 0, null, 0, 0));
+                QoS.EXACTLY_ONCE, 100, 100, 0, null, 0, 0, 0));
         broker.setAuthProvider((clientId, username, password) -> !"bad".equals(username));
         broker.setEventListener(new MqttBrokerEventListener() {
             public void onClientConnected(String clientId) { connected.add(clientId); }

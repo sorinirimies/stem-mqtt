@@ -13,8 +13,8 @@ pub mod protocol;
 pub mod support;
 
 pub use client::{
-    ConnectOptions, ConnectResult, MqttClient, MqttMessage, MqttMessageListener, TlsOptions,
-    WillOptions,
+    ConnectOptions, ConnectResult, MqttAuthHandler, MqttClient, MqttMessage, MqttMessageListener,
+    TlsOptions, WillOptions,
 };
 pub use error::MqttError;
 pub use protocol::{MqttVersion, QoS};

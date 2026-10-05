@@ -19,3 +19,7 @@ crates/mqtt-client-node/npm/
 *.log
 .DS_Store
 dist/
+/fuzz/target/
+/fuzz/corpus/
+/fuzz/artifacts/
+/fuzz/Cargo.lock

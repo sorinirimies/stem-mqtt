@@ -51,6 +51,28 @@ class Events(mqtt_broker.MqttBrokerEventListener):
         pass
 
 
+class AddOneAuth(mqtt_broker.MqttEnhancedAuthProvider):
+    """MQTT 5 enhanced auth: challenge with [7]; the response must be [8]."""
+
+    def step(self, client_id, method, data, round):
+        if round == 0:
+            return mqtt_broker.EnhancedAuthStep(
+                outcome=mqtt_broker.EnhancedAuthOutcome.CONTINUE, data=b"\x07"
+            )
+        ok = data is not None and bytes(data) == b"\x08"
+        return mqtt_broker.EnhancedAuthStep(
+            outcome=mqtt_broker.EnhancedAuthOutcome.SUCCESS
+            if ok
+            else mqtt_broker.EnhancedAuthOutcome.FAILURE,
+            data=b"welcome" if ok else b"",
+        )
+
+
+class AddOneHandler(mqtt_client.MqttAuthHandler):
+    def respond(self, method, challenge):
+        return bytes(b + 1 for b in challenge)
+
+
 def options(port, client_id, username=None):
     return mqtt_client.ConnectOptions(
         host="127.0.0.1",
@@ -118,6 +140,29 @@ async def main():
     assert refused, "auth provider callback must be able to refuse a client"
 
     assert {"py-sub", "py-pub"} <= set(events.connected), events.connected
+
+    # Pull-style delivery (the path Dart/Haskell use), alongside callbacks.
+    polled = mqtt_client.MqttClient(options(port, "py-polled"))
+    polled.enable_message_queue(8)
+    await polled.connect()
+    await polled.subscribe("smoke/polled", mqtt_client.QoS.AT_LEAST_ONCE)
+    await pub.publish("smoke/polled", b"pulled", mqtt_client.QoS.AT_LEAST_ONCE, False)
+    pulled = await polled.next_message(5000)
+    assert pulled is not None and bytes(pulled.payload) == b"pulled", pulled
+    assert await polled.next_message(50) is None, "queue drained"
+    await polled.disconnect()
+
+    # MQTT 5 enhanced authentication: challenge/response through foreign
+    # callbacks in BOTH directions (broker provider + client handler).
+    broker.set_enhanced_auth_provider(AddOneAuth())
+    eopts = options(port, "py-eauth")
+    eopts.auth_method = "X-ADD-ONE"
+    eopts.auth_data = b"hello"
+    eclient = mqtt_client.MqttClient(eopts)
+    eclient.set_auth_handler(AddOneHandler())
+    await eclient.connect()
+    assert eclient.is_connected()
+    await eclient.disconnect()
 
     await pub.disconnect()
     await sub.disconnect()

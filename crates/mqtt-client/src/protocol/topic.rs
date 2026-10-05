@@ -41,6 +41,39 @@ pub fn topic_matches(filter: &str, topic: &str) -> bool {
     }
 }
 
+/// Prefix of an MQTT 5.0 shared subscription filter (`$share/<group>/<filter>`).
+pub const SHARED_PREFIX: &str = "$share/";
+
+/// What a subscription filter string denotes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FilterKind<'a> {
+    /// An ordinary filter.
+    Plain,
+    /// A well-formed `$share/<group>/<filter>`.
+    Shared { group: &'a str, filter: &'a str },
+    /// Starts with `$share/` but is malformed (empty group, wildcard in the
+    /// group name, or no filter after it) — MQTT-5.0 §4.8.2.
+    InvalidShared,
+}
+
+/// Classify `filter` as plain, shared, or a malformed shared subscription.
+pub fn classify_filter(filter: &str) -> FilterKind<'_> {
+    let Some(rest) = filter.strip_prefix(SHARED_PREFIX) else {
+        return FilterKind::Plain;
+    };
+    match rest.split_once('/') {
+        Some((group, inner))
+            if !group.is_empty() && !group.contains(['+', '#']) && !inner.is_empty() =>
+        {
+            FilterKind::Shared {
+                group,
+                filter: inner,
+            }
+        }
+        _ => FilterKind::InvalidShared,
+    }
+}
+
 /// Validate that `filter` is a syntactically legal subscription filter:
 /// `#` may only appear as the final, whole level; `+` may only appear as a
 /// whole level (not `a+` or `+a`).
@@ -113,6 +146,29 @@ mod tests {
         assert!(!is_valid_filter("a#"));
         assert!(!is_valid_filter("a+"));
         assert!(!is_valid_filter(""));
+    }
+
+    #[test]
+    fn filter_classification() {
+        assert_eq!(classify_filter("a/b"), FilterKind::Plain);
+        assert_eq!(
+            classify_filter("$share/g/a/#"),
+            FilterKind::Shared {
+                group: "g",
+                filter: "a/#"
+            }
+        );
+        for bad in [
+            "$share/",
+            "$share/g",
+            "$share//a",
+            "$share/g+/a",
+            "$share/g/",
+        ] {
+            assert_eq!(classify_filter(bad), FilterKind::InvalidShared, "{bad}");
+        }
+        // Not a prefix match: `$sharex/..` and mid-string `$share/` are plain.
+        assert_eq!(classify_filter("$sharex/a"), FilterKind::Plain);
     }
 
     #[test]

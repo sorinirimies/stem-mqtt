@@ -7,7 +7,7 @@
 //! composes alongside this registry rather than folding into it.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
@@ -20,10 +20,10 @@ use mqtt_client::support::{LockExt, RwLockExt};
 use mqtt_client::{MqttVersion, QoS};
 use tokio::sync::{mpsc, oneshot};
 
+use crate::index::{IndexEntry, SubscriptionIndex};
 use crate::session::{
     LiveConn, PendingRedelivery, QueuedMessage, Session, ShutdownReason, Subscription,
 };
-use crate::topic::topic_matches;
 
 /// How often [`SessionRegistry::retry_pending`] sweeps for unacked
 /// outgoing QoS 1/2 packets to resend, unless overridden by
@@ -74,6 +74,13 @@ pub struct SessionRegistry {
     /// Number of sessions that currently have a live connection.
     client_count: AtomicU32,
     next_conn_id: AtomicU64,
+    /// Topic trie of every subscription, so a PUBLISH finds its subscribers
+    /// without scanning all sessions. Lock order: `sessions` → a session →
+    /// `index`; a lookup copies its matches out and releases `index` before
+    /// touching any session.
+    index: RwLock<SubscriptionIndex>,
+    /// Round-robin cursor for shared-subscription groups.
+    shared_cursor: AtomicUsize,
 }
 
 impl SessionRegistry {
@@ -82,6 +89,16 @@ impl SessionRegistry {
             sessions: RwLock::new(HashMap::new()),
             client_count: AtomicU32::new(0),
             next_conn_id: AtomicU64::new(1),
+            index: RwLock::new(SubscriptionIndex::default()),
+            shared_cursor: AtomicUsize::new(0),
+        }
+    }
+
+    /// Remove every subscription of a discarded session from the index.
+    fn unindex_session(&self, client_id: &str, session: &Session) {
+        let mut index = self.index.write_safe();
+        for key in session.subscriptions.keys() {
+            index.remove(client_id, key);
         }
     }
 
@@ -134,7 +151,10 @@ impl SessionRegistry {
         let session_present = existing.is_some() && !req.clean_start;
         let session = match existing {
             Some(session) if session_present => session,
-            _ => {
+            replaced => {
+                if let Some(old) = replaced {
+                    self.unindex_session(&req.client_id, &old.lock_safe());
+                }
                 let session = Arc::new(Mutex::new(Session::new(
                     req.client_id.clone(),
                     req.version,
@@ -152,6 +172,7 @@ impl SessionRegistry {
             guard.version = req.version;
             guard.clean_start = req.clean_start;
             guard.will = req.will;
+            guard.offline_since = None;
             guard.conn = Some(LiveConn {
                 id: conn_id,
                 sender: req.sender,
@@ -190,10 +211,15 @@ impl SessionRegistry {
         self.client_count.fetch_sub(1, Ordering::Relaxed);
         let will = if graceful { None } else { guard.will.take() };
         let clean_start = guard.clean_start;
+        if !clean_start {
+            guard.offline_since = Some(Instant::now());
+        }
         drop(guard);
 
         if clean_start {
-            sessions.remove(client_id);
+            if let Some(removed) = sessions.remove(client_id) {
+                self.unindex_session(client_id, &removed.lock_safe());
+            }
         }
         will
     }
@@ -317,15 +343,56 @@ impl SessionRegistry {
 
     pub fn add_subscription(&self, client_id: &str, filter: &str, sub: Subscription) -> bool {
         self.with_session(client_id, |s| {
-            s.subscriptions.insert(filter.to_string(), sub).is_none()
+            let is_new = s.subscriptions.insert(filter.to_string(), sub).is_none();
+            if is_new {
+                if let Some(entry) = IndexEntry::from_key(client_id, filter) {
+                    self.index.write_safe().insert(entry);
+                }
+            }
+            is_new
         })
         .unwrap_or(false)
     }
 
     /// Remove a subscription. Returns whether it existed.
     pub fn remove_subscription(&self, client_id: &str, filter: &str) -> bool {
-        self.with_session(client_id, |s| s.subscriptions.remove(filter).is_some())
-            .unwrap_or(false)
+        self.with_session(client_id, |s| {
+            let existed = s.subscriptions.remove(filter).is_some();
+            if existed {
+                self.index.write_safe().remove(client_id, filter);
+            }
+            existed
+        })
+        .unwrap_or(false)
+    }
+
+    /// Discard persistent sessions that have been offline for at least `ttl`
+    /// (`MqttBrokerConfig::session_expiry_secs`) — otherwise every
+    /// `clean_start = false` client that never returns (random client ids are
+    /// the usual culprit) would stay in memory forever. Returns how many were
+    /// removed.
+    pub fn sweep_expired(&self, ttl: Duration) -> usize {
+        self.sweep_expired_at(Instant::now(), ttl)
+    }
+
+    fn sweep_expired_at(&self, now: Instant, ttl: Duration) -> usize {
+        let mut sessions = self.sessions.write_safe();
+        let expired: Vec<String> = sessions
+            .iter()
+            .filter(|(_, s)| {
+                let s = s.lock_safe();
+                !s.is_connected()
+                    && s.offline_since
+                        .is_some_and(|since| now.saturating_duration_since(since) >= ttl)
+            })
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in &expired {
+            if let Some(removed) = sessions.remove(id) {
+                self.unindex_session(id, &removed.lock_safe());
+            }
+        }
+        expired.len()
     }
 
     pub fn discard_will(&self, client_id: &str) {
@@ -347,19 +414,60 @@ impl SessionRegistry {
 
     /// Deliver `message` (published by `publisher_id`) to every matching
     /// subscriber, live or queued for later delivery.
+    ///
+    /// Subscribers come from the [`SubscriptionIndex`], not a scan of every
+    /// session. A client with several matching filters still gets the
+    /// message once, at the highest QoS among them. Shared subscriptions
+    /// (`$share/<group>/<filter>`) deliver to **one** member per group,
+    /// rotating round-robin and preferring connected members.
     pub fn fan_out(&self, publisher_id: &str, message: &QueuedMessage) {
+        // Copy the matches out so `index` is released before any session lock.
+        let matches = self.index.read_safe().matching(&message.topic);
+        if matches.is_empty() {
+            return;
+        }
+
+        let mut targets: HashMap<String, Vec<String>> = HashMap::new();
+        let mut groups: HashMap<(String, String), Vec<IndexEntry>> = HashMap::new();
+        for entry in matches {
+            match &entry.group {
+                None => targets.entry(entry.client_id).or_default().push(entry.key),
+                Some(group) => groups
+                    .entry((group.clone(), entry.filter.clone()))
+                    .or_default()
+                    .push(entry),
+            }
+        }
+
         let sessions = self.sessions.read_safe();
-        for (client_id, session) in sessions.iter() {
-            let mut guard = session.lock_safe();
-            let best = guard
-                .subscriptions
-                .iter()
-                .filter(|(filter, sub)| {
-                    topic_matches(filter, &message.topic)
-                        && !(client_id.as_str() == publisher_id && sub.no_local)
+        for members in groups.into_values() {
+            let start = self.shared_cursor.fetch_add(1, Ordering::Relaxed) % members.len();
+            let rotated = (0..members.len()).map(|i| &members[(start + i) % members.len()]);
+            let pick = rotated
+                .clone()
+                .find(|m| {
+                    sessions
+                        .get(&m.client_id)
+                        .is_some_and(|s| s.lock_safe().is_connected())
                 })
-                .map(|(_, sub)| sub.clone())
-                .max_by_key(|sub| sub.qos);
+                .unwrap_or(&members[start]);
+            targets
+                .entry(pick.client_id.clone())
+                .or_default()
+                .push(pick.key.clone());
+        }
+
+        for (client_id, keys) in targets {
+            let Some(session) = sessions.get(&client_id) else {
+                continue; // dropped since the index was read
+            };
+            let mut guard = session.lock_safe();
+            let best = keys
+                .iter()
+                .filter_map(|key| guard.subscriptions.get(key))
+                .filter(|sub| !(client_id == publisher_id && sub.no_local))
+                .max_by_key(|sub| sub.qos)
+                .cloned();
             let Some(sub) = best else { continue };
 
             let outgoing = QueuedMessage {
@@ -487,6 +595,64 @@ mod tests {
         registry.shutdown_all();
         assert_eq!(a.shutdown_rx.try_recv(), Ok(ShutdownReason::BrokerStopped));
         assert_eq!(b.shutdown_rx.try_recv(), Ok(ShutdownReason::BrokerStopped));
+    }
+
+    #[test]
+    fn expired_sessions_are_removed_with_their_index_entries() {
+        let registry = SessionRegistry::new();
+        let (req, _a) = request("ghost", false, 0);
+        let attached = registry.attach(req).unwrap();
+        registry.add_subscription(
+            "ghost",
+            "t/#",
+            Subscription {
+                qos: QoS::AtLeastOnce,
+                no_local: false,
+                retain_as_published: false,
+            },
+        );
+        registry.detach("ghost", attached.conn_id, true);
+
+        let ttl = Duration::from_secs(60);
+        let now = Instant::now();
+        assert_eq!(registry.sweep_expired_at(now, ttl), 0, "not old enough yet");
+        assert_eq!(
+            registry.sweep_expired_at(now + Duration::from_secs(61), ttl),
+            1
+        );
+        assert!(registry.index.read_safe().matching("t/x").is_empty());
+        assert_eq!(
+            registry.sweep_expired_at(now + Duration::from_secs(120), ttl),
+            0
+        );
+    }
+
+    #[test]
+    fn connected_sessions_never_expire() {
+        let registry = SessionRegistry::new();
+        let (req, _a) = request("alive", false, 0);
+        registry.attach(req).unwrap();
+        let far = Instant::now() + Duration::from_secs(10_000);
+        assert_eq!(registry.sweep_expired_at(far, Duration::from_secs(1)), 0);
+    }
+
+    #[test]
+    fn dropped_clean_session_leaves_nothing_in_the_index() {
+        let registry = SessionRegistry::new();
+        let (req, _a) = request("clean", true, 0);
+        let attached = registry.attach(req).unwrap();
+        registry.add_subscription(
+            "clean",
+            "$share/g/a/+",
+            Subscription {
+                qos: QoS::AtMostOnce,
+                no_local: false,
+                retain_as_published: false,
+            },
+        );
+        assert_eq!(registry.index.read_safe().matching("a/b").len(), 1);
+        registry.detach("clean", attached.conn_id, true);
+        assert!(registry.index.read_safe().matching("a/b").is_empty());
     }
 
     #[test]

@@ -122,14 +122,25 @@ pub struct ConnectOptions {
     /// built-in default (the MQTT protocol maximum, ~256 MiB).
     #[uniffi(default = 0)]
     pub max_packet_size: u32,
+    /// MQTT 5.0 enhanced authentication (SCRAM, Kerberos, OAuth, …): the
+    /// `Authentication Method` to announce in CONNECT. The broker may then
+    /// send challenges, which are answered by the
+    /// [`MqttAuthHandler`] registered with `MqttClient::set_auth_handler`.
+    /// Requires [`MqttVersion::V5`].
+    #[uniffi(default = None)]
+    pub auth_method: Option<String>,
+    /// Initial `Authentication Data` sent with CONNECT (e.g. a SCRAM
+    /// client-first message). Requires [`Self::auth_method`].
+    #[uniffi(default = None)]
+    pub auth_data: Option<Vec<u8>>,
 }
 
 // Hand-rolled `Debug` so the password never reaches a log line.
 crate::redacted_debug!(ConnectOptions {
     host, port, client_id, version, clean_start, keep_alive_secs, username, will,
     connect_timeout_secs, operation_timeout_secs, auto_reconnect,
-    reconnect_backoff_secs, reconnect_max_backoff_secs, tls, max_packet_size
-} secret { password });
+    reconnect_backoff_secs, reconnect_max_backoff_secs, tls, max_packet_size, auth_method
+} secret { password, auth_data });
 
 impl ConnectOptions {
     pub fn new(
@@ -155,6 +166,8 @@ impl ConnectOptions {
             reconnect_max_backoff_secs: 0,
             tls: None,
             max_packet_size: 0,
+            auth_method: None,
+            auth_data: None,
         }
     }
 
@@ -198,6 +211,14 @@ impl ConnectOptions {
             return Err(Protocol(
                 "ConnectOptions.password requires a username in MQTT 3.1.1".into(),
             ));
+        }
+        if self.auth_method.is_some() && !self.version.is_v5() {
+            return Err(Protocol(
+                "enhanced authentication (auth_method) requires MQTT 5.0".into(),
+            ));
+        }
+        if self.auth_data.is_some() && self.auth_method.is_none() {
+            return Err(Protocol("auth_data requires auth_method".into()));
         }
         if let Some(will) = &self.will {
             if !is_valid_topic_name(&will.topic) {
@@ -247,6 +268,15 @@ impl From<&crate::protocol::publish::PublishPacket> for MqttMessage {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Record)]
 pub struct SubscribeResult {
     pub reason_code: u8,
+}
+
+/// Answers the broker's authentication challenges during an MQTT 5.0
+/// enhanced-authentication handshake (see [`ConnectOptions::auth_method`]).
+#[uniffi::export(with_foreign)]
+pub trait MqttAuthHandler: Send + Sync {
+    /// The broker sent `challenge` for `method`; return the response, or
+    /// `None` to abort the connection attempt.
+    fn respond(&self, method: String, challenge: Vec<u8>) -> Option<Vec<u8>>;
 }
 
 /// Callback interface implemented by foreign code to receive events from an

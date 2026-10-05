@@ -18,17 +18,29 @@ use tokio::task::JoinHandle;
 use crate::error::{MqttError, MqttResult};
 use crate::protocol::packet::Packet;
 use crate::protocol::MqttVersion;
-use crate::support::{guard_callback, LockExt};
+use crate::support::{guard_callback, EventQueue, LockExt};
 
 use super::tls::Transport;
 use super::types::{MqttMessage, MqttMessageListener};
 
-/// The registered listener, shared between the [`crate::client::MqttClient`]
-/// handle and every live connection it ever creates. A single shared slot
-/// (instead of a "pending" copy that's handed over at connect time) means
-/// `set_message_listener` takes effect immediately whether it races with
-/// `connect()`, runs before it, or runs after it — and survives reconnects.
-pub(super) type ListenerSlot = Arc<Mutex<Option<Arc<dyn MqttMessageListener>>>>;
+/// How incoming messages and disconnects reach the application, shared
+/// between the [`crate::client::MqttClient`] handle and every live connection
+/// it ever creates. A single shared object (instead of a copy handed over at
+/// connect time) means `set_message_listener` takes effect immediately
+/// whether it races with `connect()`, runs before it, or runs after it — and
+/// survives reconnects.
+///
+/// Two delivery styles coexist: the push-style `listener` callback, and a
+/// pull-style `queue` for runtimes that can't receive callbacks from Rust
+/// threads (see [`crate::support::EventQueue`]).
+#[derive(Default)]
+pub(super) struct Delivery {
+    pub listener: Mutex<Option<Arc<dyn MqttMessageListener>>>,
+    pub queue: EventQueue<MqttMessage>,
+    pub last_disconnect: Mutex<Option<String>>,
+}
+
+pub(super) type ListenerSlot = Arc<Delivery>;
 
 /// Everything about one live connection: the write half, in-flight
 /// operations awaiting a broker ack, the registered listener, and the
@@ -94,7 +106,7 @@ impl Inner {
     }
 
     pub fn take_listener(&self) -> Option<Arc<dyn MqttMessageListener>> {
-        self.listener.lock_safe().clone()
+        self.listener.listener.lock_safe().clone()
     }
 
     /// Record that the broker just sent us something.
@@ -194,6 +206,7 @@ pub(super) fn unexpected(packet: &Packet) -> MqttError {
 /// the foreign callback is contained (see [`guard_callback`]) so it can't
 /// kill the read loop.
 pub(super) fn deliver(inner: &Arc<Inner>, message: MqttMessage) {
+    inner.listener.queue.push(message.clone());
     if let Some(listener) = inner.take_listener() {
         guard_callback("on_message", || listener.on_message(message));
     }
@@ -210,6 +223,7 @@ pub(super) fn finish_disconnected(inner: &Arc<Inner>, reason: String) {
     if !was_connected {
         return;
     }
+    *inner.listener.last_disconnect.lock_safe() = Some(reason.clone());
     if let Some(listener) = inner.take_listener() {
         guard_callback("on_disconnected", || listener.on_disconnected(reason));
     }

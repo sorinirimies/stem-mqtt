@@ -1082,17 +1082,115 @@ async fn unsubscribe_reports_unknown_filter_on_v5() {
     broker.stop().await.unwrap();
 }
 
+/// `$share/<group>/<filter>`: each message goes to exactly ONE member of the
+/// group (round-robin), while ordinary subscribers still get every message.
 #[tokio::test]
-async fn shared_subscriptions_are_refused_not_silently_accepted() {
+async fn shared_subscription_delivers_each_message_to_one_group_member() {
     let (broker, port) = start_broker(|_| {}).await;
-    let c = client(port, "shared");
-    c.connect().await.unwrap();
-    let result = c
-        .subscribe("$share/g/some/topic".into(), QoS::AtMostOnce)
+
+    let mut inboxes = Vec::new();
+    let mut members = Vec::new();
+    for name in ["worker-a", "worker-b"] {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let c = client(port, name);
+        c.set_message_listener(Arc::new(ChannelListener { tx }));
+        c.connect().await.unwrap();
+        let granted = c
+            .subscribe("$share/workers/jobs/#".into(), QoS::AtLeastOnce)
+            .await
+            .unwrap();
+        assert!(
+            granted.reason_code < 0x80,
+            "shared subscribe must be granted"
+        );
+        inboxes.push(rx);
+        members.push(c);
+    }
+    let (tx, mut observer_rx) = mpsc::unbounded_channel();
+    let observer = client(port, "observer");
+    observer.set_message_listener(Arc::new(ChannelListener { tx }));
+    observer.connect().await.unwrap();
+    observer
+        .subscribe("jobs/#".into(), QoS::AtLeastOnce)
         .await
         .unwrap();
-    assert_eq!(result.reason_code, 0x9E);
+
+    let publisher = client(port, "dispatcher");
+    publisher.connect().await.unwrap();
+    for i in 0..6 {
+        publisher
+            .publish(format!("jobs/{i}"), vec![i as u8], QoS::AtLeastOnce, false)
+            .await
+            .unwrap();
+    }
+
+    for _ in 0..6 {
+        recv_message(&mut observer_rx).await; // the plain subscriber sees all 6
+    }
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let counts: Vec<usize> = inboxes
+        .iter_mut()
+        .map(|rx| std::iter::from_fn(|| rx.try_recv().ok()).count())
+        .collect();
+    assert_eq!(
+        counts.iter().sum::<usize>(),
+        6,
+        "no duplicates, no losses: {counts:?}"
+    );
+    assert!(
+        counts.iter().all(|&c| c > 0),
+        "load is spread across members: {counts:?}"
+    );
+
+    broker.stop().await.unwrap();
+}
+
+#[tokio::test]
+async fn malformed_shared_subscription_is_rejected() {
+    let (broker, port) = start_broker(|_| {}).await;
+    let c = client(port, "shared-bad");
+    c.connect().await.unwrap();
+    for bad in ["$share/onlygroup", "$share//a", "$share/g/"] {
+        let result = c.subscribe(bad.into(), QoS::AtMostOnce).await.unwrap();
+        assert!(result.reason_code >= 0x80, "{bad:?} must be refused");
+    }
     c.disconnect().await.unwrap();
+    broker.stop().await.unwrap();
+}
+
+/// Persistent sessions that stay offline past `session_expiry_secs` are
+/// discarded, so clients that never return can't leak memory forever.
+#[tokio::test]
+async fn offline_sessions_expire() {
+    let (broker, port) = start_broker(|c| {
+        c.session_expiry_secs = 1;
+        c.redelivery_interval_secs = 1; // the sweep runs on this tick
+    })
+    .await;
+
+    let mut opts = ConnectOptions::new("127.0.0.1", port, "forgetful", MqttVersion::V5);
+    opts.clean_start = false;
+    let first = MqttClient::new(opts.clone());
+    first.connect().await.unwrap();
+    first
+        .subscribe("t/expire".into(), QoS::AtLeastOnce)
+        .await
+        .unwrap();
+    first.disconnect().await.unwrap();
+
+    // Still resumable right after disconnecting...
+    let again = MqttClient::new(opts.clone());
+    assert!(again.connect().await.unwrap().session_present);
+    again.disconnect().await.unwrap();
+
+    // ...but gone once the expiry has passed.
+    tokio::time::sleep(Duration::from_millis(3500)).await;
+    let later = MqttClient::new(opts);
+    assert!(
+        !later.connect().await.unwrap().session_present,
+        "the expired session must not be resumed"
+    );
+    later.disconnect().await.unwrap();
     broker.stop().await.unwrap();
 }
 
@@ -1133,4 +1231,174 @@ async fn panicking_listener_does_not_kill_the_connection() {
     assert_eq!(recv_message(&mut rx).await.payload, b"second");
     assert!(sub.is_connected());
     broker.stop().await.unwrap();
+}
+
+// ── Pull-style delivery (for runtimes without callbacks: Dart, Haskell) ──
+
+#[tokio::test]
+async fn polled_messages_and_events_work_without_any_callback() {
+    use mqtt_broker::BrokerEvent;
+
+    let (broker, port) = start_broker(|_| {}).await;
+    broker.enable_event_queue(16);
+
+    let sub = client(port, "poll-sub");
+    sub.enable_message_queue(16); // no listener registered anywhere
+    sub.connect().await.unwrap();
+    sub.subscribe("poll/#".into(), QoS::AtLeastOnce)
+        .await
+        .unwrap();
+
+    let publisher = client(port, "poll-pub");
+    publisher.connect().await.unwrap();
+    publisher
+        .publish("poll/x".into(), b"pulled".to_vec(), QoS::AtLeastOnce, false)
+        .await
+        .unwrap();
+
+    let msg = sub
+        .next_message(5_000)
+        .await
+        .expect("a queued message must arrive");
+    assert_eq!(msg.topic, "poll/x");
+    assert_eq!(msg.payload, b"pulled");
+    assert!(
+        sub.next_message(100).await.is_none(),
+        "queue is drained; a poll with nothing pending times out"
+    );
+
+    // The broker saw both connections and the publish, in order.
+    let mut seen = Vec::new();
+    while let Some(event) = broker.next_event(300).await {
+        seen.push(event);
+    }
+    assert!(seen.contains(&BrokerEvent::ClientConnected {
+        client_id: "poll-sub".into()
+    }));
+    assert!(seen.contains(&BrokerEvent::ClientConnected {
+        client_id: "poll-pub".into()
+    }));
+    assert!(seen.iter().any(|e| matches!(
+        e,
+        BrokerEvent::MessagePublished { topic, .. } if topic == "poll/x"
+    )));
+
+    // A lost connection is observable by polling too.
+    broker.stop().await.unwrap();
+    timeout(Duration::from_secs(5), async {
+        while sub.is_connected() {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(sub.last_disconnect_reason().is_some());
+}
+
+// ── MQTT 5.0 enhanced authentication (challenge/response) ────────────────
+
+mod enhanced_auth {
+    use super::*;
+    use mqtt_broker::{EnhancedAuthStep, MqttEnhancedAuthProvider};
+    use mqtt_client::MqttAuthHandler;
+
+    /// Round 0: challenge with [7]. Round 1: the response must be [8].
+    struct AddOne;
+    impl MqttEnhancedAuthProvider for AddOne {
+        fn step(
+            &self,
+            _client_id: String,
+            method: String,
+            data: Option<Vec<u8>>,
+            round: u32,
+        ) -> EnhancedAuthStep {
+            assert_eq!(method, "X-ADD-ONE");
+            match (round, data.as_deref()) {
+                (0, Some(b"hello")) => EnhancedAuthStep::proceed(vec![7]),
+                (1, Some([8])) => EnhancedAuthStep::success(b"welcome".to_vec()),
+                _ => EnhancedAuthStep::failure(),
+            }
+        }
+    }
+
+    struct Answer(Option<Vec<u8>>);
+    impl MqttAuthHandler for Answer {
+        fn respond(&self, _method: String, challenge: Vec<u8>) -> Option<Vec<u8>> {
+            self.0
+                .clone()
+                .or_else(|| Some(challenge.iter().map(|b| b + 1).collect()))
+        }
+    }
+
+    fn options(port: u16, id: &str) -> ConnectOptions {
+        let mut o = ConnectOptions::new("127.0.0.1", port, id, MqttVersion::V5);
+        o.auth_method = Some("X-ADD-ONE".into());
+        o.auth_data = Some(b"hello".to_vec());
+        o
+    }
+
+    #[tokio::test]
+    async fn correct_response_authenticates() {
+        let (broker, port) = start_broker(|c| c.allow_anonymous = false).await;
+        broker.set_enhanced_auth_provider(Arc::new(AddOne));
+        let c = MqttClient::new(options(port, "eauth-ok"));
+        c.set_auth_handler(Arc::new(Answer(None)));
+        c.connect()
+            .await
+            .expect("challenge/response should succeed");
+        assert!(c.is_connected());
+        // A full session works afterwards.
+        c.subscribe("x".into(), QoS::AtMostOnce).await.unwrap();
+        c.disconnect().await.unwrap();
+        broker.stop().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn wrong_response_is_refused() {
+        let (broker, port) = start_broker(|_| {}).await;
+        broker.set_enhanced_auth_provider(Arc::new(AddOne));
+        let c = MqttClient::new(options(port, "eauth-bad"));
+        c.set_auth_handler(Arc::new(Answer(Some(vec![99]))));
+        let err = c.connect().await.unwrap_err();
+        assert!(
+            matches!(err, mqtt_client::MqttError::ConnectionRefused(_)),
+            "{err:?}"
+        );
+        assert_eq!(broker.client_count(), 0);
+        broker.stop().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn method_without_a_provider_is_refused() {
+        let (broker, port) = start_broker(|_| {}).await;
+        let c = MqttClient::new(options(port, "eauth-none"));
+        c.set_auth_handler(Arc::new(Answer(None)));
+        let err = c.connect().await.unwrap_err();
+        assert!(
+            matches!(err, mqtt_client::MqttError::ConnectionRefused(_)),
+            "{err:?}"
+        );
+        broker.stop().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn challenge_without_a_client_handler_is_refused() {
+        let (broker, port) = start_broker(|_| {}).await;
+        broker.set_enhanced_auth_provider(Arc::new(AddOne));
+        let c = MqttClient::new(options(port, "eauth-nohandler"));
+        let err = c.connect().await.unwrap_err();
+        assert!(
+            matches!(&err, mqtt_client::MqttError::ConnectionRefused(m) if m.contains("MqttAuthHandler")),
+            "{err:?}"
+        );
+        broker.stop().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn auth_method_requires_mqtt5() {
+        let mut o = ConnectOptions::new("127.0.0.1", 1883, "c", MqttVersion::V311);
+        o.auth_method = Some("X".into());
+        let err = MqttClient::new(o).connect().await.unwrap_err();
+        assert!(matches!(err, mqtt_client::MqttError::Protocol(m) if m.contains("MQTT 5.0")));
+    }
 }

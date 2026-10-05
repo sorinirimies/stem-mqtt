@@ -25,8 +25,8 @@ mod tls;
 mod types;
 
 pub use types::{
-    ConnectOptions, ConnectResult, MqttMessage, MqttMessageListener, SubscribeResult, TlsOptions,
-    WillOptions,
+    ConnectOptions, ConnectResult, MqttAuthHandler, MqttMessage, MqttMessageListener,
+    SubscribeResult, TlsOptions, WillOptions,
 };
 
 use std::collections::HashMap;
@@ -41,16 +41,16 @@ use tokio::sync::Mutex as AsyncMutex;
 use crate::error::{MqttError, MqttResult};
 use crate::protocol::{
     ack::SimpleAck,
-    packet::{DisconnectPacket, Packet},
+    packet::{AuthPacket, DisconnectPacket, Packet},
     properties::Properties,
     publish::PublishPacket,
     subscribe::{SubAckReasonCode, SubscribeFilter, SubscribePacket, UnsubscribePacket},
     topic::{is_valid_filter, is_valid_topic_name},
     QoS,
 };
-use crate::support::LockExt;
+use crate::support::{guard_callback, LockExt};
 
-use inner::{unexpected, Inner, ListenerSlot};
+use inner::{unexpected, Delivery, Inner, ListenerSlot};
 use io::{
     build_connect_packet, exchange, exchange_with_retry, keepalive_loop, read_loop,
     read_one_packet, send_packet,
@@ -81,13 +81,15 @@ struct ClientShared {
     /// The registered message listener. One slot shared with every `Inner`
     /// this client ever creates, so registering it never races with
     /// `connect()` and it survives reconnects.
-    listener: ListenerSlot,
+    delivery: ListenerSlot,
     /// Topic filters this client is currently subscribed to, tracked
     /// client-side (the broker doesn't tell us this) so the reconnect
     /// supervisor can replay them after re-establishing the connection.
     /// QoS is what was originally requested, not necessarily what was
     /// granted.
     subscriptions: Mutex<HashMap<String, QoS>>,
+    /// Answers broker challenges during MQTT 5 enhanced authentication.
+    auth_handler: Mutex<Option<Arc<dyn MqttAuthHandler>>>,
     /// Set by `disconnect()` so the reconnect supervisor (if running)
     /// knows this loss was deliberate and should stop instead of
     /// reconnecting.
@@ -136,8 +138,9 @@ impl MqttClient {
             shared: Arc::new(ClientShared {
                 options,
                 inner: AsyncMutex::new(None),
-                listener: Arc::new(Mutex::new(None)),
+                delivery: Arc::new(Delivery::default()),
                 subscriptions: Mutex::new(HashMap::new()),
+                auth_handler: Mutex::new(None),
                 user_disconnected: AtomicBool::new(false),
                 supervisor_running: AtomicBool::new(false),
             }),
@@ -147,7 +150,40 @@ impl MqttClient {
     /// Register (or replace) the listener that receives incoming messages
     /// and disconnect notifications. Safe to call before or after connect.
     pub fn set_message_listener(&self, listener: Arc<dyn MqttMessageListener>) {
-        *self.shared.listener.lock_safe() = Some(listener);
+        *self.shared.delivery.listener.lock_safe() = Some(listener);
+    }
+
+    /// Register the handler that answers the broker's authentication
+    /// challenges when [`ConnectOptions::auth_method`] is set (MQTT 5.0
+    /// enhanced authentication). Must be set before `connect()`.
+    pub fn set_auth_handler(&self, handler: Arc<dyn MqttAuthHandler>) {
+        *self.shared.auth_handler.lock_safe() = Some(handler);
+    }
+
+    /// Pull-style alternative to [`set_message_listener`](Self::set_message_listener)
+    /// for runtimes that can't receive callbacks from Rust threads (Dart,
+    /// Haskell): keep up to `capacity` incoming messages for
+    /// [`next_message`](Self::next_message). `0` turns the queue off. When it
+    /// fills up the oldest message is dropped. May be combined with a listener.
+    pub fn enable_message_queue(&self, capacity: u32) {
+        self.shared.delivery.queue.enable(capacity as usize);
+    }
+
+    /// The next queued incoming message, waiting up to `timeout_ms`
+    /// milliseconds for one; `None` if none arrived. Requires
+    /// [`enable_message_queue`](Self::enable_message_queue).
+    pub async fn next_message(&self, timeout_ms: u32) -> Option<MqttMessage> {
+        self.shared
+            .delivery
+            .queue
+            .next(Duration::from_millis(u64::from(timeout_ms)))
+            .await
+    }
+
+    /// Why the most recent connection was lost (`None` if it never was) —
+    /// the pull-style twin of `MqttMessageListener::on_disconnected`.
+    pub fn last_disconnect_reason(&self) -> Option<String> {
+        self.shared.delivery.last_disconnect.lock_safe().clone()
     }
 
     /// Open the TCP connection and complete the CONNECT/CONNACK handshake.
@@ -413,20 +449,36 @@ async fn connect_once(shared: &Arc<ClientShared>) -> MqttResult<ConnectResult> {
     writer.write_all(&encoded).await?;
 
     let mut buf = BytesMut::with_capacity(1024);
-    let connack = read_one_packet(
-        &mut reader,
-        &mut buf,
-        options.version,
-        connect_timeout,
-        max_packet_size,
-    )
-    .await?;
-    let connack = match connack {
-        Packet::ConnAck(ack) => ack,
-        other => {
-            return Err(MqttError::MalformedPacket(format!(
-                "expected CONNACK, got {other:?}"
-            )))
+    // CONNACK normally follows CONNECT directly; with enhanced authentication
+    // the broker first sends AUTH challenges, each answered in turn.
+    let connack = loop {
+        let packet = read_one_packet(
+            &mut reader,
+            &mut buf,
+            options.version,
+            connect_timeout,
+            max_packet_size,
+        )
+        .await?;
+        match packet {
+            Packet::ConnAck(ack) => break ack,
+            Packet::Auth(auth) if auth.reason_code == AuthPacket::CONTINUE => {
+                let response = answer_challenge(shared, &auth).await?;
+                let method = auth
+                    .properties
+                    .auth_method()
+                    .unwrap_or_default()
+                    .to_string();
+                let reply = Packet::Auth(AuthPacket::continue_with(&method, Bytes::from(response)))
+                    .encode(options.version)
+                    .map_err(|e| MqttError::Protocol(e.to_string()))?;
+                writer.write_all(&reply).await?;
+            }
+            other => {
+                return Err(MqttError::MalformedPacket(format!(
+                    "expected CONNACK, got {other:?}"
+                )))
+            }
         }
     };
     if !connack.reason_code.is_success() {
@@ -445,7 +497,7 @@ async fn connect_once(shared: &Arc<ClientShared>) -> MqttResult<ConnectResult> {
     let inner = Arc::new(Inner::new(
         options.version,
         writer,
-        shared.listener.clone(),
+        shared.delivery.clone(),
         options.operation_timeout(),
     ));
 
@@ -463,6 +515,34 @@ async fn connect_once(shared: &Arc<ClientShared>) -> MqttResult<ConnectResult> {
         session_present: connack.session_present,
         reason_code: connack.reason_code.0,
     })
+}
+
+/// Ask the registered [`MqttAuthHandler`] to answer one broker challenge.
+async fn answer_challenge(shared: &Arc<ClientShared>, auth: &AuthPacket) -> MqttResult<Vec<u8>> {
+    let handler = shared.auth_handler.lock_safe().clone().ok_or_else(|| {
+        MqttError::ConnectionRefused(
+            "broker requested enhanced authentication but no MqttAuthHandler is registered".into(),
+        )
+    })?;
+    let method = auth
+        .properties
+        .auth_method()
+        .unwrap_or_default()
+        .to_string();
+    let challenge = auth
+        .properties
+        .auth_data()
+        .map(|d| d.to_vec())
+        .unwrap_or_default();
+    // Foreign code may block (a key-derivation, an HSM call): keep it off the
+    // async workers, and treat a panic/exception as "abort".
+    tokio::task::spawn_blocking(move || {
+        guard_callback("auth_handler", || handler.respond(method, challenge)).flatten()
+    })
+    .await
+    .ok()
+    .flatten()
+    .ok_or_else(|| MqttError::ConnectionRefused("authentication aborted by the client".into()))
 }
 
 /// Re-sends SUBSCRIBE for every topic filter this client's own

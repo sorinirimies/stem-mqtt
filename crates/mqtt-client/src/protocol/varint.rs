@@ -35,32 +35,21 @@ pub fn encode_varint(mut value: u32, out: &mut BytesMut) -> MqttResult<()> {
 /// the decoded value. Returns `Ok(None)` if `buf` does not yet contain a
 /// complete encoding (caller should read more bytes and retry).
 pub fn decode_varint(buf: &mut Bytes) -> MqttResult<Option<u32>> {
-    let mut multiplier: u32 = 1;
+    // At most 4 bytes (MQTT-1.5.5); a fifth continuation byte is malformed.
+    // Bounding the loop by byte count (not by the running multiplier) is what
+    // keeps a hostile 5-byte encoding from overflowing the arithmetic.
     let mut value: u32 = 0;
-    let mut consumed = 0usize;
-    let snapshot = buf.clone();
-    loop {
-        if !buf.has_remaining() {
-            *buf = snapshot;
-            return Ok(None);
-        }
-        let byte = buf.get_u8();
-        consumed += 1;
-        value += (byte & 0x7F) as u32 * multiplier;
-        if multiplier > 128 * 128 * 128 {
-            return Err(MqttError::Protocol(
-                "malformed variable byte integer".into(),
-            ));
-        }
-        multiplier *= 128;
+    for (i, &byte) in buf.iter().take(4).enumerate() {
+        value |= u32::from(byte & 0x7F) << (7 * i);
         if byte & 0x80 == 0 {
-            break;
-        }
-        if consumed > 4 {
-            return Err(MqttError::Protocol("variable byte integer too long".into()));
+            buf.advance(i + 1);
+            return Ok(Some(value));
         }
     }
-    Ok(Some(value))
+    if buf.len() >= 4 {
+        return Err(MqttError::Protocol("variable byte integer too long".into()));
+    }
+    Ok(None) // ran out of input mid-encoding; caller reads more and retries
 }
 
 /// Parse a Variable Byte Integer from the front of `bytes` **without
@@ -173,6 +162,15 @@ mod tests {
     fn varint_rejects_overflow() {
         let mut out = BytesMut::new();
         assert!(encode_varint(MAX_VARINT + 1, &mut out).is_err());
+    }
+
+    #[test]
+    fn varint_overlong_encoding_is_an_error_not_an_overflow() {
+        // Five continuation bytes used to overflow `multiplier *= 128`.
+        let mut buf = Bytes::from_static(&[0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x7F]);
+        assert!(decode_varint(&mut buf).is_err());
+        let mut buf = Bytes::from_static(&[0x80, 0x80, 0x80, 0x80]);
+        assert!(decode_varint(&mut buf).is_err());
     }
 
     #[test]

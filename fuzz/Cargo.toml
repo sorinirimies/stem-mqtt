@@ -1,0 +1,28 @@
+[package]
+name = "stem-mqtt-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+bytes = "1"
+stem-mqtt-client = { path = "../crates/mqtt-client" }
+
+# Not part of the main workspace: fuzzing needs nightly + cargo-fuzz.
+[workspace]
+
+[[bin]]
+name = "decode"
+path = "fuzz_targets/decode.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "topics"
+path = "fuzz_targets/topics.rs"
+test = false
+doc = false

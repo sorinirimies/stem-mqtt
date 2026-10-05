@@ -71,6 +71,11 @@ pub struct MqttBrokerConfig {
     /// ([`DEFAULT_MAX_OUTBOUND_QUEUE`], 4096).
     #[uniffi(default = 0)]
     pub max_outbound_queue: u32,
+    /// Seconds a persistent (`clean_start = false`) session may stay offline
+    /// before the broker discards it, with its subscriptions and queued
+    /// messages. `0` (the default) keeps sessions forever, as before.
+    #[uniffi(default = 0)]
+    pub session_expiry_secs: u32,
 }
 
 /// TLS configuration for [`MqttBrokerConfig::tls`]. All certificate/key
@@ -111,6 +116,7 @@ impl MqttBrokerConfig {
             tls: None,
             max_packet_size: 0,
             max_outbound_queue: 0,
+            session_expiry_secs: 0,
         }
     }
 
@@ -119,6 +125,12 @@ impl MqttBrokerConfig {
             self.redelivery_interval_secs,
             crate::registry::DEFAULT_REDELIVERY_INTERVAL.as_secs() as u32,
         )
+    }
+
+    /// `None` = persistent sessions never expire.
+    pub(crate) fn session_expiry(&self) -> Option<Duration> {
+        (self.session_expiry_secs > 0)
+            .then(|| Duration::from_secs(u64::from(self.session_expiry_secs)))
     }
 
     pub(crate) fn max_packet_size_bytes(&self) -> usize {
@@ -148,6 +160,67 @@ pub trait MqttAuthProvider: Send + Sync {
     ) -> bool;
 }
 
+/// The verdict of one round of an MQTT 5.0 enhanced authentication exchange.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum EnhancedAuthOutcome {
+    /// Send [`EnhancedAuthStep::data`] to the client as a challenge and wait
+    /// for its response.
+    Continue,
+    /// Authentication succeeded; [`EnhancedAuthStep::data`] (if non-empty) is
+    /// returned to the client in the CONNACK (e.g. a SCRAM server-final message).
+    Success,
+    /// Refuse the connection.
+    Failure,
+}
+
+/// What the broker should do after one authentication round — a record
+/// (outcome + payload) rather than an enum-with-data, because several
+/// binding generators mishandle callbacks that return data-carrying enums.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct EnhancedAuthStep {
+    pub outcome: EnhancedAuthOutcome,
+    /// Challenge (for `Continue`) or final data (for `Success`); empty = none.
+    pub data: Vec<u8>,
+}
+
+impl EnhancedAuthStep {
+    pub fn proceed(challenge: Vec<u8>) -> Self {
+        Self {
+            outcome: EnhancedAuthOutcome::Continue,
+            data: challenge,
+        }
+    }
+    pub fn success(final_data: Vec<u8>) -> Self {
+        Self {
+            outcome: EnhancedAuthOutcome::Success,
+            data: final_data,
+        }
+    }
+    pub fn failure() -> Self {
+        Self {
+            outcome: EnhancedAuthOutcome::Failure,
+            data: Vec::new(),
+        }
+    }
+}
+
+/// Pluggable MQTT 5.0 *enhanced* authentication (SCRAM, Kerberos, OAuth, …):
+/// a multi-round challenge/response evaluated during CONNECT, before the
+/// session is attached. A CONNECT naming an `Authentication Method` is refused
+/// unless a provider is registered.
+#[uniffi::export(with_foreign)]
+pub trait MqttEnhancedAuthProvider: Send + Sync {
+    /// One round. `round` is `0` for the CONNECT's own `Authentication Data`
+    /// (`data`, possibly `None`) and `1, 2, …` for each client response.
+    fn step(
+        &self,
+        client_id: String,
+        method: String,
+        data: Option<Vec<u8>>,
+        round: u32,
+    ) -> EnhancedAuthStep;
+}
+
 /// Broker-side view of a delivered/observed event, for monitoring and
 /// logging from foreign code.
 #[uniffi::export(with_foreign)]
@@ -158,4 +231,5 @@ pub trait MqttBrokerEventListener: Send + Sync {
 }
 
 pub(crate) type SharedAuthProvider = Arc<dyn MqttAuthProvider>;
+pub(crate) type SharedEnhancedAuth = Arc<dyn MqttEnhancedAuthProvider>;
 pub(crate) type SharedEventListener = Arc<dyn MqttBrokerEventListener>;

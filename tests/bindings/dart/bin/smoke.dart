@@ -1,14 +1,12 @@
 // Runtime smoke test for the Dart bindings: client + broker over real sockets.
 // Prints "SMOKE OK" on success.
 //
-// KNOWN UPSTREAM LIMITATION (uniffi-dart): foreign callback interfaces cannot
-// be invoked from Rust's own threads — the Dart VM aborts with "Cannot invoke
-// native callback outside an isolate". That rules out every callback in this
-// API: MqttMessageListener, MqttAuthProvider and MqttBrokerEventListener. So
-// unlike the other languages' smoke tests this one deliberately uses none of
-// them, and verifies delivery indirectly: broker-side client counts, SUBACK,
-// and QoS 1 PUBACK round trips. Authentication goes through the built-in
-// `allowAnonymous: false` rule instead of a provider.
+// uniffi-dart cannot service callbacks that Rust invokes from its own threads
+// (the VM aborts with "Cannot invoke native callback outside an isolate"), so
+// MqttMessageListener, MqttAuthProvider and MqttBrokerEventListener are
+// unusable from Dart. This test therefore uses the *pull-style* API instead:
+// `enableMessageQueue`/`nextMessage` and `enableEventQueue`/`nextEvent`.
+// Authentication goes through the built-in `allowAnonymous: false` rule.
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -50,12 +48,14 @@ Future<void> main() async {
     maxQueuedPerClient: 100,
     redeliveryIntervalSecs: 0,
   ));
+  broker.enableEventQueue(capacity: 16);
   await broker.start();
   must(broker.isRunning(), 'broker running');
   final port = broker.boundPort();
   must(port != null && port != 0, 'bound port');
 
   final sub = MqttClient(options: options(port!, 'dart-sub', 'user'));
+  sub.enableMessageQueue(capacity: 16); // pull, don't push
   final connected = await sub.connect();
   must(connected.reasonCode == 0, 'connect accepted');
   must(sub.isConnected(), 'client reports connected');
@@ -73,6 +73,12 @@ Future<void> main() async {
       qos: QoS.atLeastOnce,
       retain: false);
 
+  // The message arrives through the queue — no callback involved.
+  final message = await sub.nextMessage(timeoutMs: 5000);
+  must(message != null, 'message delivered');
+  must(message!.topic == 'smoke/dart' && utf8.decode(message.payload) == 'hello-dart',
+      'message content');
+
   var refused = false;
   try {
     await MqttClient(options: options(port, 'dart-bad')).connect();
@@ -80,6 +86,15 @@ Future<void> main() async {
     refused = true;
   }
   must(refused, 'broker must refuse an anonymous client when allowAnonymous is false');
+
+  // The broker's events are pulled the same way.
+  final seen = <String>{};
+  for (BrokerEvent? e = await broker.nextEvent(timeoutMs: 300);
+      e != null;
+      e = await broker.nextEvent(timeoutMs: 300)) {
+    if (e is ClientConnectedBrokerEvent) seen.add(e.clientId);
+  }
+  must(seen.containsAll(['dart-sub', 'dart-pub']), 'broker event queue saw the connections');
 
   await pub.disconnect();
   await sub.disconnect();

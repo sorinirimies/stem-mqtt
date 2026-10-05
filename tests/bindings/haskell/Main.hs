@@ -4,10 +4,10 @@
 --
 -- The generated Haskell bindings expose callback interfaces only as opaque
 -- handles (no way to implement MqttMessageListener / MqttAuthProvider /
--- MqttBrokerEventListener in Haskell), so — like the Dart test — this one uses
--- none of them. Delivery is verified indirectly: broker-side client counts,
--- SUBACK, and a QoS 1 PUBACK round trip. Authentication uses the built-in
--- `allowAnonymous = False` rule.
+-- MqttBrokerEventListener in Haskell), so this test uses the *pull-style* API:
+-- `mqttClientEnableMessageQueue`/`mqttClientNextMessage` and
+-- `mqttBrokerEnableEventQueue`/`mqttBrokerNextEvent`. Authentication uses the
+-- built-in `allowAnonymous = False` rule.
 module Main (main) where
 
 import Control.Monad (unless)
@@ -29,13 +29,14 @@ ok _ (Right a) = pure a
 
 options :: Word16 -> Text -> Maybe Text -> C.ConnectOptions
 options port clientId user =
-  C.ConnectOptions "127.0.0.1" port clientId C.MqttVersionV5 True 30 user Nothing Nothing 10 5 False 0 0 Nothing 0
+  C.ConnectOptions "127.0.0.1" port clientId C.MqttVersionV5 True 30 user Nothing Nothing 10 5 False 0 0 Nothing 0 Nothing Nothing
 
 main :: IO ()
 main = do
   broker <-
     newMqttBroker
-      (MqttBrokerConfig "127.0.0.1" 0 Nothing False 0 C.QoSExactlyOnce 100 100 0 Nothing 0 0)
+      (MqttBrokerConfig "127.0.0.1" 0 Nothing False 0 C.QoSExactlyOnce 100 100 0 Nothing 0 0 0)
+  mqttBrokerEnableEventQueue broker 16
   ok "broker start" =<< mqttBrokerStart broker
   running <- mqttBrokerIsRunning broker
   must running "broker running"
@@ -43,6 +44,7 @@ main = do
   must (port /= 0) "bound port"
 
   sub <- C.newMqttClient (options port "hs-sub" (Just "user"))
+  C.mqttClientEnableMessageQueue sub 16 -- pull, don't push
   C.ConnectResult _ connectReason <- ok "sub connect" =<< C.mqttClientConnect sub
   must (connectReason == 0) "connect accepted"
   C.SubscribeResult subReason <- ok "subscribe" =<< C.mqttClientSubscribe sub "smoke/#" C.QoSAtLeastOnce
@@ -55,8 +57,22 @@ main = do
   -- QoS 1 completes only after the broker's PUBACK.
   ok "publish" =<< C.mqttClientPublish pub "smoke/haskell" (B.pack "hello-haskell") C.QoSAtLeastOnce False
 
+  -- The message arrives through the queue: no callback involved.
+  delivered <- C.mqttClientNextMessage sub 5000
+  case delivered of
+    Just (C.MqttMessage topic payload _ _) -> do
+      must (topic == "smoke/haskell") "message topic"
+      must (payload == B.pack "hello-haskell") "message payload"
+    Nothing -> must False "message delivered"
+
   refused <- C.mqttClientConnect =<< C.newMqttClient (options port "hs-bad" Nothing)
   must (either (const True) (const False) refused) "anonymous client refused when allowAnonymous is False"
+
+  -- The broker's events are pulled the same way.
+  let drain acc = mqttBrokerNextEvent broker 300 >>= maybe (pure acc) (\e -> drain (e : acc))
+  events <- drain []
+  must (BrokerEventClientConnected "hs-sub" `elem` events) "event queue saw hs-sub"
+  must (BrokerEventClientConnected "hs-pub" `elem` events) "event queue saw hs-pub"
 
   ok "pub disconnect" =<< C.mqttClientDisconnect pub
   ok "sub disconnect" =<< C.mqttClientDisconnect sub

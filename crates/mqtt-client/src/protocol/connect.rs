@@ -191,6 +191,7 @@ impl ConnectReasonCode {
     pub const BAD_USERNAME_OR_PASSWORD: ConnectReasonCode = ConnectReasonCode(0x86);
     pub const CLIENT_IDENTIFIER_NOT_VALID: ConnectReasonCode = ConnectReasonCode(0x85);
     pub const UNSUPPORTED_PROTOCOL_VERSION: ConnectReasonCode = ConnectReasonCode(0x84);
+    pub const BAD_AUTHENTICATION_METHOD: ConnectReasonCode = ConnectReasonCode(0x8C);
     pub const SERVER_UNAVAILABLE: ConnectReasonCode = ConnectReasonCode(0x88);
     pub const QUOTA_EXCEEDED: ConnectReasonCode = ConnectReasonCode(0x97);
 

@@ -111,6 +111,19 @@ pub struct AuthPacket {
 }
 
 impl AuthPacket {
+    /// "Success" — authentication finished (MQTT-5.0 §3.15.2.1).
+    pub const SUCCESS: u8 = 0x00;
+    /// "Continue authentication" — another challenge/response round follows.
+    pub const CONTINUE: u8 = 0x18;
+
+    /// An AUTH packet continuing the exchange for `method` with `data`.
+    pub fn continue_with(method: &str, data: Bytes) -> Self {
+        AuthPacket {
+            reason_code: Self::CONTINUE,
+            properties: Properties::with_auth(method, Some(data)),
+        }
+    }
+
     fn encode_body(&self, out: &mut BytesMut) -> MqttResult<()> {
         if self.reason_code != 0 || !self.properties.0.is_empty() {
             out.put_u8(self.reason_code);

@@ -16,11 +16,12 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::task::JoinHandle;
 
 use crate::config::{
-    MqttAuthProvider, MqttBrokerConfig, MqttBrokerEventListener, SharedAuthProvider,
+    MqttAuthProvider, MqttBrokerConfig, MqttBrokerEventListener, MqttEnhancedAuthProvider,
+    SharedAuthProvider, SharedEnhancedAuth,
 };
 use crate::connection::handle_connection;
 use crate::error::{MqttBrokerError, MqttBrokerResult};
-use crate::events::EventHub;
+use crate::events::{BrokerEvent, EventHub};
 use crate::registry::SessionRegistry;
 use crate::retain::RetainStore;
 use crate::session::QueuedMessage;
@@ -38,6 +39,7 @@ pub(crate) struct BrokerState {
     pub sessions: SessionRegistry,
     pub retained: RetainStore,
     pub auth_provider: Mutex<Option<SharedAuthProvider>>,
+    pub enhanced_auth: Mutex<Option<SharedEnhancedAuth>>,
     pub events: EventHub,
 }
 
@@ -49,6 +51,7 @@ impl BrokerState {
             sessions: SessionRegistry::new(),
             retained,
             auth_provider: Mutex::new(None),
+            enhanced_auth: Mutex::new(None),
             events: EventHub::new(),
         }
     }
@@ -156,9 +159,35 @@ impl MqttBroker {
         *self.state.auth_provider.lock_safe() = Some(provider);
     }
 
+    /// Register the MQTT 5.0 enhanced-authentication provider (multi-round
+    /// challenge/response during CONNECT). Without one, a CONNECT that names
+    /// an `Authentication Method` is refused with "Bad authentication method".
+    pub fn set_enhanced_auth_provider(&self, provider: Arc<dyn MqttEnhancedAuthProvider>) {
+        *self.state.enhanced_auth.lock_safe() = Some(provider);
+    }
+
     /// Register a listener for connect/disconnect/publish events.
     pub fn set_event_listener(&self, listener: Arc<dyn MqttBrokerEventListener>) {
         self.state.events.set_listener(listener);
+    }
+
+    /// Pull-style alternative to [`set_event_listener`](Self::set_event_listener)
+    /// for runtimes that can't receive callbacks from Rust threads (Dart,
+    /// Haskell): keep up to `capacity` events for [`next_event`](Self::next_event).
+    /// `0` turns the queue off; when it fills up the oldest event is dropped.
+    pub fn enable_event_queue(&self, capacity: u32) {
+        self.state.events.queue.enable(capacity as usize);
+    }
+
+    /// The next queued [`BrokerEvent`], waiting up to `timeout_ms`
+    /// milliseconds; `None` if none arrived. Requires
+    /// [`enable_event_queue`](Self::enable_event_queue).
+    pub async fn next_event(&self, timeout_ms: u32) -> Option<BrokerEvent> {
+        self.state
+            .events
+            .queue
+            .next(Duration::from_millis(u64::from(timeout_ms)))
+            .await
     }
 
     /// Bind the listening socket(s) and start accepting connections. Also
@@ -226,6 +255,7 @@ impl MqttBroker {
 
         let state = self.state.clone();
         let interval = config.redelivery_interval();
+        let expiry = config.session_expiry();
         running.tasks.push(tokio::spawn(async move {
             let mut ticker = tokio::time::interval(interval);
             // The first tick fires immediately; skip it so we don't sweep
@@ -234,6 +264,12 @@ impl MqttBroker {
             loop {
                 ticker.tick().await;
                 state.sessions.retry_pending(interval);
+                if let Some(ttl) = expiry {
+                    let removed = state.sessions.sweep_expired(ttl);
+                    if removed > 0 {
+                        tracing::info!(removed, "expired offline sessions");
+                    }
+                }
             }
         }));
 

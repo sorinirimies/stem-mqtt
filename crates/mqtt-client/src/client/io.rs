@@ -46,7 +46,12 @@ pub(super) fn build_connect_packet(options: &ConnectOptions) -> ConnectPacket {
         username: options.username.clone(),
         password: options.password.clone().map(Bytes::from),
         will,
-        properties: Properties::new(),
+        properties: match &options.auth_method {
+            Some(method) => {
+                Properties::with_auth(method, options.auth_data.clone().map(Bytes::from))
+            }
+            None => Properties::new(),
+        },
     }
 }
 

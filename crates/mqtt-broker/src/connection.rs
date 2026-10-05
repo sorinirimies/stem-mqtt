@@ -8,7 +8,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use bytes::{Bytes, BytesMut};
 use mqtt_client::protocol::ack::SimpleAck;
 use mqtt_client::protocol::connect::{ConnAckPacket, ConnectPacket, ConnectReasonCode};
-use mqtt_client::protocol::packet::Packet;
+use mqtt_client::protocol::packet::{AuthPacket, Packet};
 use mqtt_client::protocol::properties::Properties;
 use mqtt_client::protocol::publish::PublishPacket;
 use mqtt_client::protocol::subscribe::{
@@ -21,11 +21,17 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::broker::BrokerState;
+use crate::config::{EnhancedAuthOutcome, EnhancedAuthStep};
 use crate::registry::{AttachError, AttachRequest};
 use crate::session::{QueuedMessage, ShutdownReason, Subscription};
 use crate::topic::{is_valid_filter, is_valid_topic_name};
+use mqtt_client::protocol::topic::{classify_filter, FilterKind};
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// Longest an enhanced-authentication exchange may go on, so a provider that
+/// always answers `Continue` can't hold a connection (and its task) forever.
+const MAX_AUTH_ROUNDS: u32 = 16;
 
 /// MQTT 5.0 UNSUBACK reason code: "No subscription existed".
 const UNSUB_NO_SUBSCRIPTION: u8 = 0x11;
@@ -70,7 +76,31 @@ where
         connect.client_id.clone()
     };
 
-    if !authenticate(&state, &client_id, &connect).await {
+    // MQTT 5.0 enhanced authentication (multi-round challenge/response) when
+    // the CONNECT names a method; otherwise the username/password provider.
+    let mut connack_properties = Properties::new();
+    if let Some(method) = connect.properties.auth_method() {
+        match run_enhanced_auth(
+            &state,
+            &client_id,
+            method,
+            &connect,
+            &mut reader,
+            &mut writer,
+            &mut buf,
+            max_packet_size,
+        )
+        .await
+        {
+            Ok(final_data) => {
+                connack_properties = Properties::with_auth(method, final_data);
+            }
+            Err(reason) => {
+                reject(&mut writer, version, reason).await;
+                return;
+            }
+        }
+    } else if !authenticate(&state, &client_id, &connect).await {
         reject(
             &mut writer,
             version,
@@ -114,7 +144,7 @@ where
     let connack = Packet::ConnAck(ConnAckPacket {
         session_present: attached.session_present,
         reason_code: ConnectReasonCode::SUCCESS,
-        properties: Properties::new(),
+        properties: connack_properties,
     });
     if !state.sessions.send_to(&client_id, &connack) {
         writer_task.abort();
@@ -221,6 +251,28 @@ async fn reject<W: AsyncWrite + Unpin>(
     let _ = writer.shutdown().await;
 }
 
+/// Read exactly one packet, within `timeout` and `max_packet_size`.
+async fn read_packet<R: AsyncRead + Unpin>(
+    reader: &mut R,
+    buf: &mut BytesMut,
+    version: MqttVersion,
+    timeout: Duration,
+    max_packet_size: usize,
+) -> mqtt_client::error::MqttResult<Packet> {
+    tokio::time::timeout(timeout, async {
+        loop {
+            if let Some(packet) = Packet::decode_with_limit(buf, version, max_packet_size)? {
+                return Ok(packet);
+            }
+            if reader.read_buf(buf).await? == 0 {
+                return Err(MqttError::Io("connection closed".into()));
+            }
+        }
+    })
+    .await
+    .map_err(|_| MqttError::Timeout)?
+}
+
 async fn read_connect<R: AsyncRead + Unpin>(
     reader: &mut R,
     buf: &mut BytesMut,
@@ -228,28 +280,98 @@ async fn read_connect<R: AsyncRead + Unpin>(
 ) -> mqtt_client::error::MqttResult<ConnectPacket> {
     // The version passed here is irrelevant: CONNECT decodes its own
     // protocol level from the packet body.
-    let packet = tokio::time::timeout(CONNECT_TIMEOUT, async {
-        loop {
-            if let Some(packet) =
-                Packet::decode_with_limit(buf, MqttVersion::V311, max_packet_size)?
-            {
-                return Ok(packet);
-            }
-            let n = reader.read_buf(buf).await?;
-            if n == 0 {
-                return Err(MqttError::Io("connection closed before CONNECT".into()));
-            }
-        }
-    })
-    .await
-    .map_err(|_| MqttError::Timeout)??;
-
+    let packet = read_packet(
+        reader,
+        buf,
+        MqttVersion::V311,
+        CONNECT_TIMEOUT,
+        max_packet_size,
+    )
+    .await?;
     match packet {
         Packet::Connect(c) => Ok(c),
         other => Err(MqttError::MalformedPacket(format!(
             "expected CONNECT, got {other:?}"
         ))),
     }
+}
+
+/// Drive an MQTT 5.0 enhanced-authentication exchange (MQTT-5.0 §4.12) with
+/// the registered provider: ask it for each round's verdict, relay its
+/// challenges as AUTH packets, and read the client's responses. Returns the
+/// provider's `final_data` for the CONNACK, or the reason code to refuse with.
+#[allow(clippy::too_many_arguments)]
+async fn run_enhanced_auth<R, W>(
+    state: &Arc<BrokerState>,
+    client_id: &str,
+    method: &str,
+    connect: &ConnectPacket,
+    reader: &mut R,
+    writer: &mut W,
+    buf: &mut BytesMut,
+    max_packet_size: usize,
+) -> Result<Option<Bytes>, ConnectReasonCode>
+where
+    R: AsyncRead + Unpin,
+    W: AsyncWrite + Unpin,
+{
+    let provider = state
+        .enhanced_auth
+        .lock_safe()
+        .clone()
+        .ok_or(ConnectReasonCode::BAD_AUTHENTICATION_METHOD)?;
+    let mut data = connect.properties.auth_data().map(|d| d.to_vec());
+
+    for round in 0..MAX_AUTH_ROUNDS {
+        let (p, id, m, d) = (
+            provider.clone(),
+            client_id.to_string(),
+            method.to_string(),
+            data.take(),
+        );
+        // Foreign code that may block: off the async workers; a panic is a refusal.
+        let step = tokio::task::spawn_blocking(move || {
+            guard_callback("enhanced_auth", || p.step(id, m, d, round))
+        })
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_else(EnhancedAuthStep::failure);
+
+        match step.outcome {
+            EnhancedAuthOutcome::Success => {
+                return Ok((!step.data.is_empty()).then(|| Bytes::from(step.data)))
+            }
+            EnhancedAuthOutcome::Failure => return Err(ConnectReasonCode::NOT_AUTHORIZED),
+            EnhancedAuthOutcome::Continue => {
+                let challenge = step.data;
+                let challenge =
+                    Packet::Auth(AuthPacket::continue_with(method, Bytes::from(challenge)))
+                        .encode(MqttVersion::V5)
+                        .map_err(|_| ConnectReasonCode::UNSPECIFIED_ERROR)?;
+                writer
+                    .write_all(&challenge)
+                    .await
+                    .map_err(|_| ConnectReasonCode::UNSPECIFIED_ERROR)?;
+                let response = read_packet(
+                    reader,
+                    buf,
+                    MqttVersion::V5,
+                    CONNECT_TIMEOUT,
+                    max_packet_size,
+                )
+                .await
+                .map_err(|_| ConnectReasonCode::NOT_AUTHORIZED)?;
+                match response {
+                    Packet::Auth(auth) if auth.reason_code == AuthPacket::CONTINUE => {
+                        data = auth.properties.auth_data().map(|d| d.to_vec());
+                    }
+                    _ => return Err(ConnectReasonCode::MALFORMED_PACKET),
+                }
+            }
+        }
+    }
+    Err(ConnectReasonCode::NOT_AUTHORIZED) // never converged
 }
 
 async fn read_next_packet<R: AsyncRead + Unpin>(
@@ -379,22 +501,20 @@ fn dispatch_publish(state: &Arc<BrokerState>, publisher_id: &str, message: &Queu
     state.sessions.fan_out(publisher_id, message);
 }
 
-/// MQTT 5.0 shared subscriptions (`$share/<group>/<filter>`) aren't
-/// implemented; refuse them explicitly rather than silently registering a
-/// filter that can never match.
-fn is_shared_subscription(filter: &str) -> bool {
-    filter.starts_with("$share/")
-}
-
 fn handle_subscribe(state: &Arc<BrokerState>, client_id: &str, p: SubscribePacket) {
     let mut reason_codes = Vec::with_capacity(p.filters.len());
     let mut newly_subscribed = Vec::new();
     for filter in &p.filters {
-        if is_shared_subscription(&filter.topic_filter) {
-            reason_codes.push(SubAckReasonCode::SHARED_SUBSCRIPTIONS_NOT_SUPPORTED);
-            continue;
-        }
-        if !is_valid_filter(&filter.topic_filter) {
+        // `$share/<group>/<filter>`: validate the inner filter, not the prefix.
+        let (shared, proper_filter) = match classify_filter(&filter.topic_filter) {
+            FilterKind::Plain => (false, filter.topic_filter.as_str()),
+            FilterKind::Shared { filter: inner, .. } => (true, inner),
+            FilterKind::InvalidShared => {
+                reason_codes.push(SubAckReasonCode::FAILURE);
+                continue;
+            }
+        };
+        if !is_valid_filter(proper_filter) {
             reason_codes.push(SubAckReasonCode::FAILURE);
             continue;
         }
@@ -409,12 +529,16 @@ fn handle_subscribe(state: &Arc<BrokerState>, client_id: &str, p: SubscribePacke
             },
         );
         reason_codes.push(SubAckReasonCode::granted(granted_qos));
-        newly_subscribed.push((
-            filter.topic_filter.clone(),
-            granted_qos,
-            filter.retain_handling,
-            is_new,
-        ));
+        // Retained messages are never sent for shared subscriptions
+        // (MQTT-5.0 §4.8.2).
+        if !shared {
+            newly_subscribed.push((
+                filter.topic_filter.clone(),
+                granted_qos,
+                filter.retain_handling,
+                is_new,
+            ));
+        }
     }
 
     state.sessions.send_to(
@@ -484,11 +608,5 @@ mod tests {
     fn generated_client_ids_are_unique() {
         let ids: std::collections::HashSet<_> = (0..1000).map(|_| generate_client_id()).collect();
         assert_eq!(ids.len(), 1000);
-    }
-
-    #[test]
-    fn shared_subscription_filters_detected() {
-        assert!(is_shared_subscription("$share/group/a/b"));
-        assert!(!is_shared_subscription("a/$share/b"));
     }
 }

@@ -128,6 +128,9 @@ pub struct Session {
     /// broker-initiated QoS 1/2 delivery that's lost in flight (or whose
     /// ack is lost) would just silently never complete.
     pub pending_redelivery: HashMap<u16, RedeliveryEntry>,
+    /// When this (persistent) session lost its connection; `None` while
+    /// connected. Drives `session_expiry_secs`.
+    pub offline_since: Option<Instant>,
     next_packet_id: u16,
     max_queued: usize,
 }
@@ -149,6 +152,7 @@ impl Session {
             queued: VecDeque::new(),
             incoming_qos2: HashMap::new(),
             pending_redelivery: HashMap::new(),
+            offline_since: None,
             next_packet_id: 1,
             max_queued,
         }

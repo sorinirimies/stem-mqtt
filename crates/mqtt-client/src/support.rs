@@ -14,12 +14,18 @@
 //!   process into another panic.
 //! - [`secs_or`] — the "`0` means use the built-in default" convention used
 //!   by every `*_secs` configuration field.
+//! - [`EventQueue`] — a bounded, pull-based event queue. Some foreign
+//!   runtimes (Dart, Haskell) cannot implement a callback interface that Rust
+//!   invokes from its own threads, so every "listener" has a polling twin
+//!   (`next_message`, `next_event`) built on this.
 
+use std::collections::VecDeque;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::{Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::time::Duration;
 
 use bytes::Bytes;
+use tokio::sync::Notify;
 
 /// Describes a secret value for `Debug` output without revealing it.
 ///
@@ -140,6 +146,88 @@ pub fn secs_or(value: u32, default_secs: u32) -> Duration {
     Duration::from_secs(u64::from(if value == 0 { default_secs } else { value }))
 }
 
+/// A bounded multi-producer queue of events that a single consumer *pulls*
+/// with a timeout — for languages that can't receive callbacks.
+///
+/// Disabled until [`enable`](Self::enable)d, so users of the callback API pay
+/// nothing. When full, the **oldest** event is dropped (a slow poller loses
+/// history, never memory).
+pub struct EventQueue<T> {
+    state: Mutex<QueueState<T>>,
+    notify: Notify,
+}
+
+struct QueueState<T> {
+    items: VecDeque<T>,
+    /// `0` = disabled: `push` is a no-op.
+    capacity: usize,
+}
+
+impl<T> Default for EventQueue<T> {
+    fn default() -> Self {
+        EventQueue {
+            state: Mutex::new(QueueState {
+                items: VecDeque::new(),
+                capacity: 0,
+            }),
+            notify: Notify::new(),
+        }
+    }
+}
+
+impl<T> EventQueue<T> {
+    /// Start (or resize) queueing, keeping at most `capacity` events;
+    /// `0` disables the queue and discards anything pending.
+    pub fn enable(&self, capacity: usize) {
+        let mut state = self.state.lock_safe();
+        state.capacity = capacity;
+        if capacity == 0 {
+            state.items.clear();
+        } else {
+            while state.items.len() > capacity {
+                state.items.pop_front();
+            }
+        }
+    }
+
+    /// Queue `event` (dropping the oldest if full) and wake a waiting poller.
+    pub fn push(&self, event: T) {
+        {
+            let mut state = self.state.lock_safe();
+            if state.capacity == 0 {
+                return;
+            }
+            if state.items.len() >= state.capacity {
+                state.items.pop_front();
+            }
+            state.items.push_back(event);
+        }
+        self.notify.notify_one();
+    }
+
+    fn pop(&self) -> Option<T> {
+        self.state.lock_safe().items.pop_front()
+    }
+
+    /// The next event, waiting up to `timeout` for one; `None` on timeout.
+    pub async fn next(&self, timeout: Duration) -> Option<T> {
+        let deadline = tokio::time::Instant::now() + timeout;
+        loop {
+            if let Some(event) = self.pop() {
+                return Some(event);
+            }
+            // `notify_one` stores a permit when nobody is waiting, so a push
+            // that lands between the `pop` above and this await isn't lost.
+            if tokio::time::timeout_at(deadline, self.notify.notified())
+                .await
+                .is_err()
+            {
+                return self.pop();
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -167,6 +255,39 @@ mod tests {
         .join();
         assert!(m.is_poisoned());
         assert_eq!(*m.lock_safe(), 1);
+    }
+
+    #[tokio::test]
+    async fn event_queue_is_disabled_until_enabled() {
+        let q = EventQueue::<u32>::default();
+        q.push(1);
+        assert_eq!(q.next(Duration::from_millis(20)).await, None);
+        q.enable(4);
+        q.push(2);
+        assert_eq!(q.next(Duration::from_millis(20)).await, Some(2));
+    }
+
+    #[tokio::test]
+    async fn event_queue_drops_oldest_when_full() {
+        let q = EventQueue::<u32>::default();
+        q.enable(2);
+        for i in 0..5 {
+            q.push(i);
+        }
+        assert_eq!(q.next(Duration::ZERO).await, Some(3));
+        assert_eq!(q.next(Duration::ZERO).await, Some(4));
+        assert_eq!(q.next(Duration::ZERO).await, None);
+    }
+
+    #[tokio::test]
+    async fn event_queue_wakes_a_waiting_poller() {
+        let q = std::sync::Arc::new(EventQueue::<&'static str>::default());
+        q.enable(8);
+        let q2 = q.clone();
+        let poller = tokio::spawn(async move { q2.next(Duration::from_secs(5)).await });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        q.push("hello");
+        assert_eq!(poller.await.unwrap(), Some("hello"));
     }
 
     #[test]
