@@ -1,70 +1,136 @@
 # stem-mqtt
 
-MQTT 3.1.1 / MQTT 5.0 client and broker, written in Rust and exposed via
-[UniFFI](https://mozilla.github.io/uniffi-rs/) to Kotlin, Swift, Python, Go, C#, Java, Dart,
-Node.js and Haskell — **client and broker in every language, one generator per language**, each
-runtime-tested against a real broker in CI.
+An **MQTT 3.1.1 / 5.0 client and broker written in Rust** — async (`tokio`), TLS, WebSocket,
+QoS 0/1/2, shared subscriptions, enhanced authentication — usable as a Rust library, as a
+standalone broker binary, and from **Kotlin, Swift, Python, Go, C#, Java, Dart, Node.js and
+Haskell** through generated [UniFFI](https://mozilla.github.io/uniffi-rs/) bindings. Client *and*
+broker ship in every language, one generator per language, each runtime-tested against a real
+broker in CI.
 
 [![CI](https://github.com/sorinirimies/stem-mqtt/actions/workflows/ci.yml/badge.svg)](https://github.com/sorinirimies/stem-mqtt/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![MSRV](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](Cargo.toml)
+
+| Crate | Version | Downloads | Docs |
+| --- | --- | --- | --- |
+| `stem-mqtt-client` | [![crates.io](https://img.shields.io/crates/v/stem-mqtt-client.svg)](https://crates.io/crates/stem-mqtt-client) | [![downloads](https://img.shields.io/crates/d/stem-mqtt-client.svg)](https://crates.io/crates/stem-mqtt-client) | [![docs.rs](https://img.shields.io/docsrs/stem-mqtt-client)](https://docs.rs/stem-mqtt-client) |
+| `stem-mqtt-broker` | [![crates.io](https://img.shields.io/crates/v/stem-mqtt-broker.svg)](https://crates.io/crates/stem-mqtt-broker) | [![downloads](https://img.shields.io/crates/d/stem-mqtt-broker.svg)](https://crates.io/crates/stem-mqtt-broker) | [![docs.rs](https://img.shields.io/docsrs/stem-mqtt-broker)](https://docs.rs/stem-mqtt-broker) |
+
+- [Quick start](#quick-start-rust) · [Installation](#installation) · [Features](#features) ·
+  [Running the broker](#running-the-broker) · [Other languages](#generating-foreign-language-bindings) ·
+  [Publishing](#publishing) · [Development](#development)
+
+## Quick start (Rust)
+
+```sh
+cargo add stem-mqtt-client stem-mqtt-broker anyhow
+cargo add tokio --features full
+```
+
+An embedded broker and a client talking to each other:
+
+```rust,no_run
+use mqtt_broker::{MqttBroker, MqttBrokerConfig};
+use mqtt_client::{ConnectOptions, MqttClient, MqttVersion, QoS};
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    // Broker on a free local port.
+    let broker = MqttBroker::new(MqttBrokerConfig::new("127.0.0.1", 0));
+    broker.start().await?;
+    let port = broker.bound_port().expect("bound");
+
+    // Client (MQTT 5; use MqttVersion::V311 for 3.1.1).
+    let client = MqttClient::new(ConnectOptions::new("127.0.0.1", port, "my-client-id", MqttVersion::V5));
+    client.connect().await?;
+    client.subscribe("stem/demo".into(), QoS::AtLeastOnce).await?;
+    client.publish("stem/demo".into(), b"hello".to_vec(), QoS::AtLeastOnce, false).await?;
+
+    client.disconnect().await?;
+    broker.stop().await?;
+    Ok(())
+}
+```
+
+Just want a broker? `cargo install stem-mqtt-broker && mqtt-broker --port 1883`
+(see [Running the broker](#running-the-broker)).
+
+Runnable examples (the `mqtt-client` ones need a broker already running):
+
+```sh
+cargo run -p stem-mqtt-broker --example simple_broker
+cargo run -p stem-mqtt-client --example pub_sub
+cargo run -p stem-mqtt-client --example will_and_retain
+cargo run -p stem-mqtt-client --example mqtt_versions          # MQTT 3.1.1 + 5.0 on the same broker
+cargo run -p stem-mqtt-client --example topics                 # topic hierarchies, `+` / `#` wildcards
+cargo run -p stem-mqtt-client --example long_lived_connection  # persistent connection, keep-alive
+cargo run -p stem-mqtt-client --example shared_subscriptions   # $share/<group>/… round-robin work queue
+cargo run -p stem-mqtt-broker --example auth_broker            # then, in another terminal:
+cargo run -p stem-mqtt-client --example auth_client            # one login rejected, one accepted
+```
+
+Full crate docs: [`crates/mqtt-client`](crates/mqtt-client/README.md),
+[`crates/mqtt-broker`](crates/mqtt-broker/README.md).
 
 ## Preview
 
-![Pub/Sub Demo](examples/vhs/generated/pub-sub-demo.gif)
+| | |
+| --- | --- |
+| ![Pub/Sub](examples/vhs/generated/pub-sub-demo.gif) | ![MQTT versions](examples/vhs/generated/mqtt-versions-demo.gif) |
+| **Publish / subscribe** — the `mqtt-broker` CLI, then the `pub_sub` example against it. | **3.1.1 and 5.0 side by side** — the protocol version is negotiated per connection, not per broker. |
+| ![Topics](examples/vhs/generated/topics-demo.gif) | ![Shared subscriptions](examples/vhs/generated/shared-subscriptions-demo.gif) |
+| **Topics & wildcards** — exact, `+` and `#` filters on one topic tree. | **Shared subscriptions** — three workers split nine jobs round-robin; a plain subscriber still sees all nine. |
+| ![Retained and will](examples/vhs/generated/will-and-retain-demo.gif) | ![Authentication](examples/vhs/generated/auth-demo.gif) |
+| **Retained messages & Last Will** — a late subscriber gets the retained message; the broker publishes a vanished client's will. | **Authentication** — a pluggable auth provider rejects one login, accepts another, and logs connection events. |
+| ![Long-lived connection](examples/vhs/generated/long-lived-connection-demo.gif) | |
+| **Long-lived connection** — a heartbeat across keep-alive intervals, like a background service or IoT device. | |
 
-Starting the `mqtt-broker` CLI, then running the `pub_sub` client example
-against it for a full publish/subscribe round trip.
-
-![MQTT Versions Demo](examples/vhs/generated/mqtt-versions-demo.gif)
-
-MQTT 3.1.1 and MQTT 5.0 clients connected to the same broker at the same
-time, each publishing and both receiving both messages — the protocol
-version is negotiated per-connection, not per-broker.
-
-![Topics & Wildcards Demo](examples/vhs/generated/topics-demo.gif)
-
-An exact topic, a `+` single-level wildcard, and a `#` multi-level
-wildcard all watching the same topic tree, then four publishes of varying
-depth — see exactly which filter catches which message and why.
-
-![Long-Lived Connection Demo](examples/vhs/generated/long-lived-connection-demo.gif)
-
-A single connection held open for ~20 seconds across multiple keep-alive
-intervals, publishing a heartbeat every 2 seconds — the shape a
-long-running background service or IoT device holds a connection in,
-rather than connect-publish-disconnect.
-
-All four recorded with [VHS](https://github.com/charmbracelet/vhs) —
-regenerate one with `just vhs-tape <name>` (tape names match the `.gif`
-filenames above, minus the extension), or render every tape under
-[`examples/vhs`](examples/vhs) with `just vhs-all`.
+Recorded with [VHS](https://github.com/charmbracelet/vhs): `just vhs-tape <name>` or `just vhs-all`
+(tapes in [`examples/vhs`](examples/vhs); each tape runs the example of the same name).
 
 ## Installation
 
-Every published package name is prefixed `stem-mqtt-` —
-`mqtt-client`/`mqtt-broker` are already taken by unrelated projects on
-crates.io and PyPI, so this project uses the `stem-mqtt-` prefix
-consistently everywhere to avoid that collision. Language-facing import/use
-names (Rust `mqtt_client`/`mqtt_broker`, Python `mqtt_client`/`mqtt_broker`,
-Swift `MqttClient`) are unaffected — only the *published package* identity
-is prefixed.
+Every published package is prefixed `stem-mqtt-` (`mqtt-client` / `mqtt-broker` are taken by unrelated
+projects on crates.io and PyPI); import names in code are unchanged. A package is available once a
+release has published it to that registry — see [Publishing](#publishing) for what goes where.
 
-### Rust (crates.io)
+| Language | Install | Import |
+| --- | --- | --- |
+| **Rust** | `cargo add stem-mqtt-client stem-mqtt-broker` | `use mqtt_client::…; use mqtt_broker::…;` |
+| Python | `pip install stem-mqtt-client stem-mqtt-broker` | `import mqtt_client, mqtt_broker` |
+| Node.js | `npm i @sorinirimies/stem-mqtt-node` | `@sorinirimies/stem-mqtt-node/client` · `/broker` |
+| Kotlin (JVM/Android) | `io.github.sorinirimies.stemmqtt:stem-mqtt-kotlin` (Maven Central) | `import uniffi.mqtt_client.*` |
+| Java (JDK 22+) | `io.github.sorinirimies.stemmqtt:stem-mqtt-java` (Maven Central) | `import uniffi.mqtt_client.*;` |
+| C# | `dotnet add package StemMqtt` | `using uniffi.mqtt_client;` |
+| Go | `go get github.com/sorinirimies/stem-mqtt-go` | `…/stem-mqtt-go/mqtt_client` |
+| Dart | `dart pub add stem_mqtt` | `package:stem_mqtt/mqtt_client.dart` |
+| Haskell | `cabal install stem-mqtt` | `import UniFFI.MqttClient` |
+| Swift | `StemMqttSwift-<version>.zip` from the GitHub Release | `import MqttClient` |
 
-```sh
-cargo add stem-mqtt-client   # client
-cargo add stem-mqtt-broker   # broker (depends on stem-mqtt-client)
+Everything except the Rust crates ships the same two components — a client and a broker — so each
+language section below shows only what's specific to it.
+
+### Rust
+
+Covered in [Quick start](#quick-start-rust). The client crate also hosts the wire-protocol codec
+(`mqtt_client::protocol`) that the broker reuses. MSRV: Rust 1.75.
+
+### Python
+
+```python
+import mqtt_client
+
+client = mqtt_client.MqttClient(mqtt_client.ConnectOptions(
+    host="localhost", port=1883, client_id="demo", version=mqtt_client.MqttVersion.V5,
+    clean_start=True, keep_alive_secs=30, username=None, password=None, will=None,
+    connect_timeout_secs=10, operation_timeout_secs=15, auto_reconnect=True,
+    reconnect_backoff_secs=1, reconnect_max_backoff_secs=30, tls=None,
+))
 ```
 
-```rust,no_run
-use mqtt_client::{ConnectOptions, MqttClient, MqttVersion, QoS}; // import path unaffected by the package rename
-```
+Complete scenario: [`tests/bindings/python`](tests/bindings/python). Details: [`packaging/python`](packaging/python/README.md).
 
-### Node.js / TypeScript (npm)
-
-```sh
-npm install @sorinirimies/stem-mqtt-node      # from GitHub Packages or your Gitea npm registry
-```
+### Node.js / TypeScript
 
 ```ts
 import * as mqtt from "@sorinirimies/stem-mqtt-node/client";
@@ -79,101 +145,61 @@ await client.subscribe("demo/topic", mqtt.QoS.AtLeastOnce);
 ```
 
 Server-side Node only (no browser build). Generated by
-[`uniffi-bindgen-node-js`](https://github.com/criccomini/uniffi-bindgen-node-js), like every other
-language here; see [`tests/bindings/node/smoke.mjs`](tests/bindings/node/smoke.mjs) for a complete example
-(broker + client, callbacks, polling, enhanced auth). This replaces the earlier hand-written napi-rs
-client addon (`stem-mqtt-client` on npm), which had no broker and had to be kept in sync by hand.
+[`uniffi-bindgen-node-js`](https://github.com/criccomini/uniffi-bindgen-node-js); a complete example is
+[`tests/bindings/node/smoke.mjs`](tests/bindings/node/smoke.mjs). (This replaces the earlier hand-written
+napi-rs addon `stem-mqtt-client`, which had no broker.)
 
-### Kotlin (JVM or Android, via GitHub Packages)
-
-```kotlin
-// settings.gradle.kts
-dependencyResolutionManagement {
-    repositories {
-        maven {
-            url = uri("https://maven.pkg.github.com/sorinirimies/stem-mqtt")
-            credentials {
-                username = providers.gradleProperty("gpr.user").getOrElse(System.getenv("GITHUB_ACTOR") ?: "")
-                password = providers.gradleProperty("gpr.token").getOrElse(System.getenv("GITHUB_TOKEN") ?: "")
-            }
-        }
-    }
-}
-```
+### Kotlin (JVM and Android)
 
 ```kotlin
-// build.gradle.kts
-dependencies {
-    // JVM/desktop, client + broker:
-    implementation("com.github.sorinirimies.stemmqtt:stem-mqtt-kotlin:<version>")
-    // Android AAR, client + broker, with all four Android ABIs:
-    implementation("com.github.sorinirimies.stemmqtt:stem-mqtt-android:<version>")
-}
+// build.gradle.kts — JVM/desktop (client + broker):
+implementation("io.github.sorinirimies.stemmqtt:stem-mqtt-kotlin:<version>")
+// Android AAR (client + broker, all four ABIs), from GitHub Packages:
+implementation("com.github.sorinirimies.stemmqtt:stem-mqtt-android:<version>")
 ```
 
-Reading a GitHub Package requires an authenticated `GITHUB_TOKEN`/PAT with
-`read:packages`, including for a public repository. Full details:
+GitHub Packages (and your Gitea Maven registry) use the group `com.github.sorinirimies.stemmqtt` and need an
+authenticated token even for public packages; Maven Central needs none. Details:
 [`packaging/kotlin/README.md`](packaging/kotlin/README.md).
+
+### Java
+
+Needs **JDK 22+** (Foreign Function & Memory API); run with `--enable-native-access=ALL-UNNAMED`.
+`implementation("io.github.sorinirimies.stemmqtt:stem-mqtt-java:<version>")`; example:
+[`tests/bindings/java/Smoke.java`](tests/bindings/java/Smoke.java).
+
+### C#
+
+`dotnet add package StemMqtt`; `uniffi.mqtt_client` and `uniffi.mqtt_broker` define their own `QoS`, so
+alias them (`using ClientQoS = uniffi.mqtt_client.QoS;`). Example:
+[`tests/bindings/csharp/Program.cs`](tests/bindings/csharp/Program.cs).
+
+### Go
+
+cgo module; the native libraries `libmqtt_client` / `libmqtt_broker` are installed separately
+(release assets or `cargo build --release`) and found through `CGO_LDFLAGS`. Details:
+[`packaging/go/README.md`](packaging/go/README.md); example: [`tests/bindings/go/main.go`](tests/bindings/go/main.go).
+
+### Dart
+
+`dart pub add stem_mqtt`. A native-assets build hook compiles the bundled Rust with `cargo`, so a Rust
+toolchain is required. Dart can't receive Rust callbacks — use the [pull-style API](#generating-foreign-language-bindings).
+Details: [`packaging/dart/pub/README.md`](packaging/dart/pub/README.md).
+
+### Haskell
+
+`build-depends: stem-mqtt`. A source package: it builds its bundled Rust with `cargo` at install time (Rust
+toolchain required). Callbacks aren't available — use the pull-style API.
+Details: [`packaging/haskell/hackage/README.md`](packaging/haskell/hackage/README.md).
 
 ### Swift
 
-Download `StemMqttSwift-<version>.zip` from the matching GitHub Release,
-extract it, then add the contained `StemMqttSwift` directory as a local Swift
-package. It includes client and broker products plus prebuilt XCFrameworks for
-macOS, iOS devices, and iOS simulators.
+Download `StemMqttSwift-<version>.zip` from the matching GitHub Release, extract it, and add the
+`StemMqttSwift` directory as a local Swift package (client and broker products, XCFrameworks for macOS,
+iOS and the iOS simulator). Details: [`packaging/swift/README.md`](packaging/swift/README.md).
 
-```swift
-import MqttClient
-import MqttBroker
-```
-
-Full details: [`packaging/swift/README.md`](packaging/swift/README.md).
-
-### Python (PyPI)
-
-```sh
-pip install stem-mqtt-client   # client
-pip install stem-mqtt-broker   # broker
-```
-
-```python
-import mqtt_client  # import name unaffected by the package rename
-
-options = mqtt_client.ConnectOptions(
-    host="localhost", port=1883, client_id="demo",
-    version=mqtt_client.MqttVersion.V5,
-    clean_start=True, keep_alive_secs=30,
-    username=None, password=None, will=None,
-    connect_timeout_secs=10, operation_timeout_secs=15,
-    auto_reconnect=True, reconnect_backoff_secs=1,
-    reconnect_max_backoff_secs=30, tls=None,
-)
-client = mqtt_client.MqttClient(options)
-```
-
-Not yet published (requires the `PYPI_API_TOKEN` repository secret to be
-configured — the release workflow's `publish-python` job skips gracefully
-until then). Full details: [`packaging/python/README.md`](packaging/python/README.md).
-
-### Ruby
-
-Not currently supported. UniFFI 0.29 has no official Ruby backend, and no
-production-ready Ruby generator is available. See
-[`packaging/ruby/README.md`](packaging/ruby/README.md).
-
-## Workspace layout
-
-| Crate | Description |
-| --- | --- |
-| [`crates/mqtt-client`](crates/mqtt-client) | Async, `tokio`-based MQTT client. Also hosts the wire-protocol codec (`mqtt_client::protocol`) shared by the broker. |
-| [`crates/mqtt-broker`](crates/mqtt-broker) | Standalone MQTT broker (library + `mqtt-broker` CLI binary), reusing the client crate's codec instead of duplicating it. |
-| [`tests/bindings`](tests/bindings) | One end-to-end smoke test per language, run by `scripts/test_bindings.nu`. |
-| [`fuzz`](fuzz) | `cargo-fuzz` targets for the packet decoder and topic matching (`cargo +nightly fuzz run decode`). |
-
-There is intentionally no separate "core" crate — `mqtt-client::protocol` is
-a pure, allocation-friendly, synchronous codec with no networking or async
-dependencies, so it doubles as the shared foundation for both the client and
-the broker.
+> **Ruby** isn't supported: UniFFI has no official Ruby backend and no production-ready generator exists
+> ([`packaging/ruby`](packaging/ruby/README.md)).
 
 ## Features
 
@@ -216,62 +242,47 @@ the broker.
   that can't crash I/O tasks, and a decoder that is fuzzed (randomised tests in
   every build + `cargo-fuzz` targets in [`fuzz/`](fuzz)) — see `CHANGELOG.md`.
 
-## Quick start (Rust)
-
-```rust,no_run
-use mqtt_client::{ConnectOptions, MqttClient, MqttVersion, QoS};
-
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    let client = MqttClient::new(ConnectOptions::new(
-        "broker.example.com", 1883, "my-client-id", MqttVersion::V5,
-    ));
-    client.connect().await?;
-    client.subscribe("stem/demo".into(), QoS::AtLeastOnce).await?;
-    client.publish("stem/demo".into(), b"hello".to_vec(), QoS::AtLeastOnce, false).await?;
-    client.disconnect().await?;
-    Ok(())
-}
-```
-
-See [`crates/mqtt-client/README.md`](crates/mqtt-client/README.md) and
-[`crates/mqtt-broker/README.md`](crates/mqtt-broker/README.md) for full
-crate-level docs.
-
-## Examples
-
-```sh
-cargo run -p stem-mqtt-client --example pub_sub
-cargo run -p stem-mqtt-client --example will_and_retain
-cargo run -p stem-mqtt-client --example mqtt_versions          # MQTT 3.1.1 + 5.0 on the same broker
-cargo run -p stem-mqtt-client --example topics                 # topic hierarchies, `+`/`#` wildcards
-cargo run -p stem-mqtt-client --example long_lived_connection  # persistent connection, keep-alive over ~20s
-cargo run -p stem-mqtt-broker --example simple_broker
-cargo run -p stem-mqtt-broker --example auth_broker
-```
-
-(All `mqtt-client` examples need a broker already running — either
-`simple_broker`/`auth_broker` above or the `mqtt-broker` CLI below.)
-
 ## Running the broker
 
 ```sh
-cargo run -p stem-mqtt-broker --bin mqtt-broker -- --bind 0.0.0.0 --port 1883
+cargo install stem-mqtt-broker                 # or: cargo run -p stem-mqtt-broker --bin mqtt-broker --
+mqtt-broker --bind 0.0.0.0 --port 1883 --ws-port 8083 --allow-anonymous
 ```
 
-Add `--ws-port 8083` to also accept MQTT-over-WebSocket connections (for
-browser clients — see [`demo/`](demo)).
+| Option | Meaning |
+| --- | --- |
+| `--bind`, `--port` | TCP listener (default `0.0.0.0:1883`) |
+| `--ws-port` | also accept MQTT-over-WebSocket (browser clients) |
+| `--allow-anonymous` | accept clients without credentials |
+| `--max-clients` | connection limit (0 = unlimited) |
+| `--log-level` | `error` … `trace` (default `info`) |
 
-## Demo: browser client + Docker + Kubernetes
+Pre-built Linux and Windows `mqtt-broker` binaries are attached to every release.
+
+### Demos
 
 ```sh
-docker compose up --build      # broker (TCP+WS) + a Topcoat/mqtt.js demo webpage
-open http://localhost:8090
+docker compose up --build        # broker (TCP + WS) + a browser client at http://localhost:8090
+just demo-dashboard              # broker + the Rust/Topcoat web dashboard (multi-client, live feed) on :3000
 ```
 
-See [`demo/README.md`](demo/README.md) for the plain-binaries path, and
-[`packaging/k8s/README.md`](packaging/k8s/README.md) for a one-Pod or
-Deployment+Service Kubernetes demo.
+[`demo/README.md`](demo/README.md) covers the plain-binaries path; [`packaging/k8s`](packaging/k8s/README.md)
+has a one-Pod and a Deployment + Service Kubernetes demo.
+
+## Workspace layout
+
+| Path | Description |
+| --- | --- |
+| [`crates/mqtt-client`](crates/mqtt-client) | Async, `tokio`-based MQTT client; also hosts the wire-protocol codec (`mqtt_client::protocol`) shared with the broker. |
+| [`crates/mqtt-broker`](crates/mqtt-broker) | Standalone broker (library + `mqtt-broker` CLI), reusing the client's codec. |
+| [`demo/`](demo) | Browser client (`web/`) and a Rust + Topcoat dashboard (`dashboard/`). |
+| [`tests/bindings`](tests/bindings) | One end-to-end smoke test per language, run by `scripts/test_bindings.nu`. |
+| [`packaging/`](packaging) | Per-language package templates, Dockerfile and Kubernetes manifests. |
+| [`scripts/`](scripts) | Nushell scripts for bindings, packaging, publishing and releases (tested in `scripts/tests`). |
+| [`fuzz/`](fuzz) | `cargo-fuzz` targets for the packet decoder and topic matching. |
+
+There is deliberately no separate "core" crate: `mqtt-client::protocol` is a pure, synchronous codec with
+no networking or async dependencies, so it is the shared foundation for both client and broker.
 
 ## Generating foreign-language bindings
 
@@ -338,73 +349,43 @@ header of each test). Verdicts: `PASS`, `FAIL`, `SKIP` (toolchain missing). CI (
 package (`test-packaging`: `dotnet pack`, `gradle build`, `npm pack`, OCI bundle) and runs the Kotlin
 Gradle test; the release workflow runs the runtime test before packaging each language.
 
-### GitHub Packages
+## Publishing
 
 ```sh
-nu scripts/publish_packages.nu stage <language>                  # bindings + native libs -> dist/<language>
-nu scripts/publish_packages.nu publish <language> <version> --dry-run
+nu scripts/publish_packages.nu stage <language>                       # bindings + native libs -> dist/<language>
+nu scripts/publish_packages.nu publish <language> <version> --dry-run  # print the plan; --target github|gitea|public
 ```
-
-GitHub Packages hosts Maven, npm, NuGet and containers only, so each language
-goes where it fits and the rest ship as OCI artifacts on `ghcr.io`:
-
-| Language | Package | GitHub release | Gitea release |
-| --- | --- | :-: | :-: |
-| Rust | `stem-mqtt-client`, `stem-mqtt-broker` on crates.io | ✅ | ✅ |
-| Kotlin | Maven — `com.github.sorinirimies.stemmqtt:stem-mqtt-kotlin` (JVM) / `stem-mqtt-android` (AAR) | ✅ JVM + AAR | ✅ JVM ¹ |
-| Java | Maven — `com.github.sorinirimies.stemmqtt:stem-mqtt-java` | ✅ | ✅ |
-| C# | NuGet — `StemMqtt` | ✅ | ✅ |
-| Node.js | npm — `@sorinirimies/stem-mqtt-node` | ✅ | ✅ |
-| Python | PyPI (`stem-mqtt-client`, `stem-mqtt-broker`) / Gitea PyPI registry | ✅ PyPI | ✅ |
-| Go, Dart, Haskell | `<registry>/<owner>/stem-mqtt-<language>:<version>` (OCI bundle, `oras pull`) | ✅ ghcr.io | ✅ |
-| Swift | `StemMqttSwift-<version>.zip` release asset (XCFrameworks) | ✅ asset | ❌ ² |
-
-¹ The Android AAR needs the NDK + Android SDK, so it stays on the GitHub workflow.
-² The XCFrameworks need macOS; there is no Linux runner path for Swift packaging.
-
-Registry publishing needs a secret per target and skips quietly without it (see below).
 
 ### Public registries
 
-Besides the project's own registries, the Gitea release workflow publishes to the indexes people
-actually install from. `nu scripts/publish_packages.nu publish <language> <version> --target public`
-(`--dry-run` prints the plan):
+The Gitea release workflow publishes to the indexes people install from (`--target public`). Each job needs
+its own repository secret and **skips quietly without it**:
 
-| Language | Public index | Package | Secret(s) | Notes |
+| Language | Registry | Package | Secret(s) | Notes |
 | --- | --- | --- | --- | --- |
 | Rust | crates.io | `stem-mqtt-client`, `stem-mqtt-broker` | `CRATES_IO_TOKEN` | |
-| Python | PyPI | `stem-mqtt-client`, `stem-mqtt-broker` | `PYPI_API_TOKEN` | manylinux_2_28 wheels (built with zig) |
+| Python | PyPI | `stem-mqtt-client`, `stem-mqtt-broker` | `PYPI_API_TOKEN` | manylinux_2_28 wheels (zig) |
 | Node.js | npmjs.org | `@<owner>/stem-mqtt-node` | `NPM_TOKEN` | the npm scope must exist |
 | C# | NuGet.org | `StemMqtt` | `NUGET_API_KEY` | |
-| Kotlin / Java | Maven Central | `io.github.<owner>.stemmqtt:stem-mqtt-kotlin` / `…-java` | `MAVEN_CENTRAL_USERNAME`, `MAVEN_CENTRAL_PASSWORD`, `SIGNING_KEY`, `SIGNING_PASSWORD` | verify the `io.github.<owner>` namespace on central.sonatype.com first |
-| Haskell | Hackage | `stem-mqtt` | `HACKAGE_TOKEN` | source package; builds the bundled Rust with `cargo` at install time |
-| Dart | pub.dev | `stem_mqtt` | — (OIDC) | published from GitHub Actions (`publish-pubdev.yml`); a build hook compiles the bundled Rust |
-| Go | Go modules (pkg.go.dev) | `github.com/<owner>/stem-mqtt-go` | `GO_MODULE_TOKEN` | pushes the generated module to its own repo and tags it; users install the native libs |
+| Kotlin / Java | Maven Central | `io.github.<owner>.stemmqtt:stem-mqtt-kotlin` / `…-java` | `MAVEN_CENTRAL_USERNAME`, `MAVEN_CENTRAL_PASSWORD`, `SIGNING_KEY`, `SIGNING_PASSWORD` | verify the `io.github.<owner>` namespace first |
+| Haskell | Hackage | `stem-mqtt` | `HACKAGE_TOKEN` | source package, builds the bundled Rust with `cargo` |
+| Dart | pub.dev | `stem_mqtt` | — (OIDC) | from GitHub Actions (`publish-pubdev.yml`); first release by hand |
+| Go | Go modules | `github.com/<owner>/stem-mqtt-go` | `GO_MODULE_TOKEN` | pushes the module to its own repo and tags it |
 | Swift | — | release asset (XCFrameworks) | — | needs macOS |
 
-The Haskell and Dart packages are what the runtime tests exercise, so the published artifact is
-the tested one. The Node, C#, Java and Kotlin packages bundle native libraries only for the
-platforms the release runner builds (Linux x86_64 today); other platforms need the libraries from
-the release assets or a source build.
+The Haskell and Dart packages are exactly what their runtime tests exercise. The Node, C#, Java, Kotlin and
+Go packages bundle or expect native libraries only for the platforms the release runner builds (Linux x86_64
+today); other platforms use the release assets or a source build. Maven Central and Hackage releases cannot
+be deleted — read the job logs of the first release.
 
-The GitHub release workflow stages each package on Linux, runtime-tests it, and publishes.
-A manual workflow (`.github/workflows/publish-packages.yml`) publishes — or dry-runs — a throw-away
-version such as `0.0.0-rc.1` without cutting a release, to prove the path end to end.
+### Project registries
 
-**Gitea instead (or as well):** Gitea ships its own Maven, NuGet, npm and container registries, so the
-same script can publish there:
-
-```sh
-nu scripts/publish_packages.nu publish go 0.4.0 --target gitea --base-url http://192.168.1.44:3000 --owner sorin
-```
-
-The Gitea release workflow does this for every language when the repository secret `PACKAGES_TOKEN`
-(a Gitea token with `write:package`) is set, and skips quietly otherwise.
-
-See [`packaging/README.md`](packaging/README.md) for release artifact layout,
-and [`packaging/python`](packaging/python),
-[`packaging/kotlin`](packaging/kotlin), and
-[`packaging/swift`](packaging/swift) for language-specific packaging.
+Besides the public indexes, every language also goes to GitHub Packages (Maven, npm, NuGet, and OCI bundles
+on `ghcr.io` for Go, Dart and Haskell) and/or your Gitea instance's own registries
+(`--target gitea --base-url http://host:3000`, secret `PACKAGES_TOKEN` with `write:package`). Kotlin's Android AAR
+and the Swift XCFrameworks need the GitHub workflow (NDK / macOS). A manual workflow
+(`.github/workflows/publish-packages.yml`) dry-runs or publishes a throw-away version such as `0.0.0-rc.1`
+without cutting a release. See [`packaging/README.md`](packaging/README.md) for the artifact layout.
 
 ## Development
 
@@ -453,18 +434,12 @@ reachable as `just test-nu`).
 
 ## CI/CD
 
-- **GitHub** (`.github/workflows/`): `ci.yml` (fmt/clippy/test/build/doc/nu
-  tests, per-language binding runtime tests), `release.yml` (on `vX.Y.Z` tag: cross-platform `mqtt-broker` +
-  `mqtt-client` native library artifacts, validated Kotlin/Swift/Python
-  bindings, multi-platform Python wheels, a verified Swift client+broker
-  package, GitHub Release, then crates.io + PyPI +
-  GitHub Packages (Kotlin and every other language) publishing — token-gated registry jobs skip
-  when their secret isn't configured), `auto-merge.yml` (Dependabot), `dependabot.yml`
-  (GitHub Actions version bumps).
-- **Gitea** (`.gitea/workflows/`): the CI above including the per-language binding runtime tests and
-  package builds (it's the Linux runner these run on), plus a reduced Linux/Windows
-  broker-binary release workflow (Apple/mobile and registry publishing remain
-  GitHub-hosted), and `deps-update.yml` for dependency updates.
+- **Gitea** (`.gitea/workflows/`) — the Linux runner that does the real work: `ci.yml` (fmt, clippy, tests,
+  docs, nu tests, a runtime test and a package build per language, toolchain setup retried once on network
+  flakes), `release.yml` (on a `vX.Y.Z` tag: broker binaries for Linux and Windows, Gitea release, then crates.io
+  and every registry above), `deps-update.yml`.
+- **GitHub** (`.github/workflows/`) — mirrors CI and adds what needs GitHub-hosted runners: macOS/iOS/Android
+  builds, the Swift package, GitHub Packages, PyPI wheels for several platforms, and `publish-pubdev.yml`.
 
 ## Release process
 
@@ -472,9 +447,8 @@ reachable as `just test-nu`).
 just release <version>   # preflight + bump + quality gate + tag + push
 ```
 
-See the [`justfile`](justfile) for the full release/version-bump/multi-remote
-(GitHub + Gitea) workflow — `just bump`, `just release-all`, `just sync-gitea`,
-`just migrate-gitea`, etc.
+See the [`justfile`](justfile) for the multi-remote (GitHub + Gitea) workflow: `just bump`, `just release-all`,
+`just sync-gitea`, `just migrate-gitea`, …
 
 ## License
 

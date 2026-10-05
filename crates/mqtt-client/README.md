@@ -122,6 +122,8 @@ platform first: `nu ../../scripts/generate_bindings.nu kotlin`.
 ```sh
 cargo run -p stem-mqtt-client --example pub_sub               # connect, subscribe, publish, receive
 cargo run -p stem-mqtt-client --example will_and_retain        # Last-Will-and-Testament + retained messages
+cargo run -p stem-mqtt-client --example shared_subscriptions   # $share/<group>/... round-robin work queue
+cargo run -p stem-mqtt-client --example auth_client            # pairs with `stem-mqtt-broker --example auth_broker`
 cargo run -p stem-mqtt-client --example mqtt_versions          # MQTT 3.1.1 + 5.0 on the same broker
 cargo run -p stem-mqtt-client --example topics                 # topic hierarchies, `+`/`#` wildcards
 cargo run -p stem-mqtt-client --example long_lived_connection  # persistent connection, keep-alive over ~20s
