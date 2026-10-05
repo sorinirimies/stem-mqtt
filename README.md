@@ -161,6 +161,7 @@ production-ready Ruby generator is available. See
 | [`crates/mqtt-client`](crates/mqtt-client) | Async, `tokio`-based MQTT client. Also hosts the wire-protocol codec (`mqtt_client::protocol`) shared by the broker. |
 | [`crates/mqtt-broker`](crates/mqtt-broker) | Standalone MQTT broker (library + `mqtt-broker` CLI binary), reusing the client crate's codec instead of duplicating it. |
 | [`tests/bindings`](tests/bindings) | One end-to-end smoke test per language, run by `scripts/test_bindings.nu`. |
+| [`fuzz`](fuzz) | `cargo-fuzz` targets for the packet decoder and topic matching (`cargo +nightly fuzz run decode`). |
 | [`crates/mqtt-client-node`](crates/mqtt-client-node) | Node.js/TypeScript bindings for `mqtt-client` via napi-rs (server-side Node only — see [`packaging/node`](packaging/node)). |
 
 There is intentionally no separate "core" crate — `mqtt-client::protocol` is
@@ -178,8 +179,8 @@ the broker.
   — not just a single fire-and-hope attempt.
 - **Wire codec for all control packet types** — CONNECT/CONNACK, PUBLISH and
   its ack chain, SUBSCRIBE/SUBACK, UNSUBSCRIBE/UNSUBACK, PING, DISCONNECT,
-  and MQTT 5 AUTH. Enhanced-authentication flows beyond packet encoding are
-  not currently implemented.
+  and MQTT 5 AUTH — with the enhanced-authentication exchange built on top
+  (see *Authentication* below).
 - **TLS** (client + broker, `mqtt-client::TlsOptions` /
   `mqtt-broker::BrokerTlsConfig`) — pure-Rust `rustls`, custom CA support,
   and mutual TLS (mTLS) client-certificate verification. No OpenSSL/system-
@@ -191,14 +192,23 @@ the broker.
 - **MQTT-over-WebSocket** (`--ws-port`) alongside raw TCP, so browser
   clients (which can't open raw TCP sockets) can connect directly —
   see [`demo/`](demo) for a full browser pub/sub demo webpage.
-- **Pluggable broker auth** (`MqttAuthProvider`) and event observation
-  (`MqttBrokerEventListener`) for foreign callers.
+- **Authentication** — pluggable username/password (`MqttAuthProvider`) and MQTT 5
+  **enhanced authentication** (multi-round challenge/response: SCRAM, Kerberos, OAuth, …) via
+  `MqttEnhancedAuthProvider` on the broker and `MqttAuthHandler` on the client.
+- **Shared subscriptions** (`$share/<group>/<filter>`) — one delivery per group, round-robin —
+  routed through a **topic-trie subscription index** instead of a per-publish scan of every session.
+- **Session expiry** (`session_expiry_secs`) for persistent sessions that never return.
+- **Event observation** (`MqttBrokerEventListener`) and, for runtimes that can't receive callbacks
+  (Dart, Haskell), a **pull-style API**: `enable_message_queue` / `next_message` on the client,
+  `enable_event_queue` / `next_event` on the broker.
 - **UniFFI bindings** — both crates build as `cdylib`/`staticlib` and ship a
   `uniffi-bindgen` binary for Kotlin, Swift and Python; Go, C#, Java, Dart,
-  Node.js and Haskell are generated through pinned community generators.
+  Node.js and Haskell are generated through pinned community generators — all of
+  them runtime-tested in CI against a real broker.
 - **Hardened by default** — packet-size limits, bounded per-client send queues,
-  keep-alive timeout detection, credential-redacting `Debug`, and foreign
-  callbacks that can't crash I/O tasks (see `CHANGELOG.md`).
+  keep-alive timeout detection, credential-redacting `Debug`, foreign callbacks
+  that can't crash I/O tasks, and a decoder that is fuzzed (randomised tests in
+  every build + `cargo-fuzz` targets in [`fuzz/`](fuzz)) — see `CHANGELOG.md`.
 - **Node.js / TypeScript bindings** for `mqtt-client` via napi-rs
   (`crates/mqtt-client-node`) — server-side Node, not the browser (no
   MQTT-over-WebSocket transport yet).
@@ -275,8 +285,9 @@ just bindings-all                                 # or: just bindings-third-part
 
 | Language | Generator | Runtime-tested | Status |
 | --- | --- | :-: | --- |
-| Kotlin, Swift | UniFFI (built in) | CI packaging tests | stable |
-| Python | UniFFI (built in) | ✅ | stable |
+| Kotlin | UniFFI (built in) | Gradle packaging test in CI | stable |
+| Swift | UniFFI (built in) | ✅ client + broker + all callbacks | stable |
+| Python | UniFFI (built in) | ✅ client + broker + all callbacks | stable |
 | Go | [uniffi-bindgen-go](https://github.com/NordSecurity/uniffi-bindgen-go) | ✅ client + broker + all callbacks | stable |
 | C# | [uniffi-bindgen-cs](https://github.com/NordSecurity/uniffi-bindgen-cs) | ✅ client + broker + all callbacks | stable |
 | Java (JDK 22+) | [uniffi-bindgen-java](https://github.com/IronCoreLabs/uniffi-bindgen-java) | ✅ client + broker + all callbacks | stable |
@@ -353,8 +364,19 @@ goes where it fits and the rest ship as OCI artifacts on `ghcr.io`:
 | Node.js | npm — `@sorinirimies/stem-mqtt-node` |
 | Go, Dart, Haskell | `ghcr.io/sorinirimies/stem-mqtt-<language>:<version>` (`oras pull`) |
 
-The release workflow stages each package on Linux and macOS, merges the native
-libraries, and publishes once.
+The GitHub release workflow stages each package on Linux, runtime-tests it, and publishes.
+A manual workflow (`.github/workflows/publish-packages.yml`) publishes — or dry-runs — a throw-away
+version such as `0.0.0-rc.1` without cutting a release, to prove the path end to end.
+
+**Gitea instead (or as well):** Gitea ships its own Maven, NuGet, npm and container registries, so the
+same script can publish there:
+
+```sh
+nu scripts/publish_packages.nu publish go 0.4.0 --target gitea --base-url http://192.168.1.44:3000 --owner sorin
+```
+
+The Gitea release workflow does this for every language when the repository secret `PACKAGES_TOKEN`
+(a Gitea token with `write:package`) is set, and skips quietly otherwise.
 
 See [`packaging/README.md`](packaging/README.md) for release artifact layout,
 and [`packaging/python`](packaging/python),
@@ -389,6 +411,8 @@ just test-bindings             # runtime-test every language (or: just test-bind
 just package-verify-all        # compile + pack every publishable package, no upload
 just ci-bindings               # all of the above, strict — what the Gitea CI runs
 just clean-bindings            # remove generated artifacts and scratch dirs
+just check-bindgen-updates     # are the pinned generators behind their upstream? (weekly in CI)
+just ci-image                  # CI image with every toolchain + generator pre-installed
 ```
 
 CI runs on Gitea (`.gitea/workflows/ci.yml`, Linux runner; also mirrored in

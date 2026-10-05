@@ -30,9 +30,9 @@ Release jobs reject empty generated directories before creating binding
 archives. This prevents the zero-byte binding archives produced by older
 releases.
 
-### GitHub Packages
+### GitHub Packages (and Gitea)
 
-`nu scripts/publish_packages.nu stage|publish` builds and publishes per-language
+`nu scripts/publish_packages.nu stage|verify|publish` builds, checks and publishes per-language
 packages: Maven (Java), NuGet (C#), npm (Node) and OCI artifacts on `ghcr.io`
 (Go, Dart, Haskell). Native libraries are shipped for Linux
 x86_64 and macOS arm64; each package carries `native/<platform>/` and the
@@ -77,3 +77,10 @@ Broker image:
 ```sh
 docker build -t stem-mqtt-broker -f packaging/Dockerfile .
 ```
+
+### CI image
+
+`packaging/ci/Dockerfile` bakes every toolchain (Rust, Go, .NET, JDK 22, Dart, Node, Gradle, GHC/cabal,
+Nushell) and every pinned binding generator into one image (`just ci-image`), so CI jobs can skip their
+setup steps and the flaky downloads that come with them. See the file's header for how to use it with
+`container:` in a workflow. Untested in this repository's own CI (the runners have no Docker).
