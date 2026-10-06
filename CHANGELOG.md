@@ -2,6 +2,30 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.2] - 2026-10-06
+### ♻️  Refactor
+- own QoS enum so every binding is self-contained (no cross-crate external types) **[BREAKING]**
+### ✨ Features
+- pull-style delivery, subscription index, shared subscriptions, session expiry, MQTT 5 enhanced auth; fix varint overflow
+- Swift runtime test, generator update checker, Gitea package target, Gitea/GitHub registry endpoints
+- one binding solution per language, client and broker everywhere **[BREAKING]**
+- public registries — Maven Central, Hackage, pub.dev, npmjs, NuGet.org, PyPI, Go modules
+### 🐛 Bug Fixes
+- bound enhanced-auth exchanges, skip event allocation when unpolled; drop rustls-pemfile and update rustls (RUSTSEC-2026-0285); broad unit/CLI tests
+- link the Rust archive with -l so GNU ld resolves it (undefined ffi_*_rust_future_* on Linux)
+### 💄 Style
+- cargo fmt
+### 📚 Documentation
+- Haskell upstream PR, manual GitHub Packages publish workflow, CI image Dockerfile, docs for new features
+- README, packaging and crate docs for new features, Gitea publishing, CI image, fuzzing
+- rewrite README (Rust first, all languages, public registries, crates.io badges); new tapes + examples for shared subscriptions, retained/will and auth
+- preview GIFs one per section instead of a grid
+- detailed per-language guides (docs/languages) with tested quick starts; fix Java jar native loading
+### 🔄 CI
+- Swift runtime job, generator cache, weekly update/audit jobs, Gitea package publishing on release
+- publish Kotlin (JVM) and Python wheels to Gitea registries; document publish coverage
+- retry toolchain setup steps once (runner network to CDNs is flaky: EHOSTUNREACH on setup-java)
+**Full Changelog**: https://github.com/sorinirimies/stem-mqtt/compare/v0.3.1...v0.3.2
 ## [0.3.1] - 2026-10-02
 ### 🐛 Bug Fixes
 - retry rustup and cap parallelism for binding jobs; install aarch64 libc headers for the cross build
