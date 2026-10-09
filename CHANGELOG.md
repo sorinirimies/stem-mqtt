@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.3] - 2026-10-09
+### ✨ Features
+- publish stem-mqtt (client + broker) to npmjs.org with multi-platform prebuilds
+### 🔄 CI
+- dispatchable npm publish workflow; public registries use the GitHub owner, not the Gitea user
+**Full Changelog**: https://github.com/sorinirimies/stem-mqtt/compare/v0.3.2...v0.3.3
 ## [0.3.2] - 2026-10-06
 ### ♻️  Refactor
 - own QoS enum so every binding is self-contained (no cross-crate external types) **[BREAKING]**
