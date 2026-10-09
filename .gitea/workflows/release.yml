@@ -21,6 +21,9 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  # The public registries (Maven Central's io.github.<user> namespace, npm/NuGet metadata, the Go
+  # module path) are keyed to the GitHub account; github.repository_owner is the *Gitea* user.
+  PUBLIC_OWNER: sorinirimies
 
 jobs:
   # ── 0. Validate tag ──────────────────────────────────────────────────────────
@@ -476,7 +479,7 @@ jobs:
           MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
           MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
         run: |
-          gradle publishAllPublicationsToStagingRepository --no-daemon -PgroupId=io.github.${{ github.repository_owner }}.stemmqtt
+          gradle publishAllPublicationsToStagingRepository --no-daemon -PgroupId=io.github.${{ env.PUBLIC_OWNER }}.stemmqtt
           nu ../../scripts/publish_maven_central.nu build/staging-repo stem-mqtt-kotlin-${{ needs.validate.outputs.version }}
 
   # ── Python wheels → Gitea PyPI registry ──────────────────────────────────────
@@ -659,4 +662,4 @@ jobs:
           nu scripts/publish_packages.nu publish ${{ matrix.language }}
           ${{ needs.validate.outputs.version }}
           --target public
-          --owner ${{ github.repository_owner }}
+          --owner ${{ env.PUBLIC_OWNER }}
