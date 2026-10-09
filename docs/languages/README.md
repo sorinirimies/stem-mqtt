@@ -9,7 +9,7 @@ between them. This page holds what is common to all of them.
 | --- | --- | --- | --- | :-: |
 | Rust | [rust.md](rust.md) | `stem-mqtt-client`, `stem-mqtt-broker` (crates.io) | native | ✅ |
 | Python | [python.md](python.md) | `stem-mqtt-client`, `stem-mqtt-broker` (PyPI) | UniFFI (built in) | ✅ |
-| Node.js | [node.md](node.md) | `@sorinirimies/stem-mqtt-node` (npm) | uniffi-bindgen-node-js | ✅ |
+| Node.js | [node.md](node.md) | `stem-mqtt` (npm) | uniffi-bindgen-node-js | ✅ |
 | Kotlin | [kotlin.md](kotlin.md) | `stem-mqtt-kotlin` / `stem-mqtt-android` (Maven) | UniFFI (built in) | ✅ |
 | Java | [java.md](java.md) | `stem-mqtt-java` (Maven) | uniffi-bindgen-java | ✅ |
 | C# | [csharp.md](csharp.md) | `StemMqtt` (NuGet) | uniffi-bindgen-cs | ✅ |

@@ -7,29 +7,33 @@ Read the [shared concepts](README.md) first for the option records and semantics
 ## Install
 
 ```sh
-npm install @sorinirimies/stem-mqtt-node
+npm install stem-mqtt
 ```
 
 ```js
-import * as mqtt from "@sorinirimies/stem-mqtt-node/client";
-import * as brk from "@sorinirimies/stem-mqtt-node/broker";
+import * as mqtt from "stem-mqtt/client";
+import * as brk from "stem-mqtt/broker";
 ```
 
-(This replaces the hand-written napi-rs addon `stem-mqtt-client`, which had no broker.)
+The package is `stem-mqtt` on npmjs.org. On GitHub Packages and the Gitea registry it is published as
+`@<owner>/stem-mqtt-node` (those registries require the scope to match the owner). It replaces the earlier
+hand-written napi-rs addon `stem-mqtt-client`, which had no broker.
 
 ## Requirements
 
 - Node.js 16+ (ESM — use `"type": "module"` or `.mjs`). **Server-side only**; there is no browser build
   (browsers can talk to the broker's WebSocket port with any MQTT.js client instead).
-- The package bundles the native library for the platforms the release built (Linux x86_64 today).
-  Other platforms need the library built from source and placed next to the generated code.
+- The package bundles the native library under `client/prebuilds/<platform>-<arch>[-libc]/` and
+  `broker/prebuilds/…` for the platforms the release built — **Linux x86_64 (glibc) today**. `package.json`
+  lists exactly those platforms in `os` / `cpu`, so `npm install` on another platform fails immediately
+  (`EBADPLATFORM`) instead of at first use. Other platforms: build the library (below) or ask for it to be added.
 - No compiler is needed at install time: `koffi` ships prebuilt binaries.
 
 ## Quick start
 
 ```js
-import * as mqtt from "@sorinirimies/stem-mqtt-node/client";
-import * as brk from "@sorinirimies/stem-mqtt-node/broker";
+import * as mqtt from "stem-mqtt/client";
+import * as brk from "stem-mqtt/broker";
 
 const broker = new brk.MqttBroker({
   bind_address: "127.0.0.1", port: 0, ws_port: undefined, allow_anonymous: true, max_clients: 0,
@@ -145,9 +149,17 @@ const brokerTls = { port: 8883, cert_pem: readFileSync("server.pem"),
 ```sh
 cargo build --release -p stem-mqtt-client -p stem-mqtt-broker
 nu scripts/install_bindgens.nu node
-nu scripts/publish_packages.nu stage node      # dist/node/{client,broker}/ + native libs
+nu scripts/publish_packages.nu stage node      # dist/node/{client,broker,runtime}/ + this host's native libs
 cd dist/node && npm pack
 ```
+
+To ship more platforms in one package, build `stage` on each OS and merge the extra libraries in:
+`nu scripts/publish_packages.nu stage node --add-native /path/to/other-stage/native` (a directory containing
+`<platform>/` folders such as `linux-x86_64/` or `macos-aarch64/`).
+
+The package layout is `client/`, `broker/` and one shared `runtime/` — the generator emits a copy of the runtime
+per component, and two copies cannot be loaded into one process because they register the same named types in
+koffi.
 
 The end-to-end test is [`tests/bindings/node/smoke.mjs`](../../tests/bindings/node/smoke.mjs)
 (`nu scripts/test_bindings.nu node`).
@@ -155,8 +167,11 @@ The end-to-end test is [`tests/bindings/node/smoke.mjs`](../../tests/bindings/no
 ## Troubleshooting
 
 - **`Cannot find module './client/index.js'`** — import the package entry points
-  (`…/stem-mqtt-node/client`), not a path.
-- **`Error: Failed to load shared library`** — no native library for your OS/arch in the package;
-  build from source and copy `libmqtt_client.*` / `libmqtt_broker.*` next to `client/` and `broker/`.
+  (`stem-mqtt/client`), not a path.
+- **`EBADPLATFORM` on install, or `Failed to load shared library`** — the package has no native library for your
+  OS/arch; build from source and copy `libmqtt_client.*` / `libmqtt_broker.*` into
+  `client/prebuilds/<platform>-<arch>/` and `broker/prebuilds/<platform>-<arch>/`.
+- **`Duplicate type name 'RustBuffer'`** — you are using separately generated components; the published
+  package shares one `runtime/` between client and broker precisely to avoid this.
 - **`SyntaxError: Cannot use import statement`** — the file isn't ESM; use `.mjs` or `"type": "module"`.
 - **Hangs at the end** — see "The process may not exit".

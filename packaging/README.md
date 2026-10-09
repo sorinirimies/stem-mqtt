@@ -66,8 +66,9 @@ Not supported: UniFFI 0.29 has no official production Ruby backend. See
 ## Node.js / TypeScript
 
 Node is a UniFFI target like the others (`uniffi-bindgen-node-js`): one npm package,
-`@<owner>/stem-mqtt-node`, with two entry points — `/client` and `/broker` — each a generated
-ESM package next to its native library. (It replaces the hand-written napi-rs client addon.)
+`stem-mqtt` on npmjs.org (`@<owner>/stem-mqtt-node` on GitHub Packages / Gitea), with two entry points —
+`/client` and `/broker` — each a generated ESM package sharing one `runtime/`, with native libraries under
+`prebuilds/<platform>-<arch>/`. (It replaces the hand-written napi-rs client addon.)
 
 ## Docker
 

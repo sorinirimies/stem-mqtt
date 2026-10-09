@@ -25,6 +25,7 @@ use bindings/spec.nu *
 use bindings/source.nu *
 use bindings/hackage.nu *
 use bindings/dart_package.nu *
+use bindings/node_package.nu *
 
 const TESTED = [python swift go csharp java dart node haskell]
 
@@ -185,16 +186,42 @@ def run-node [spec: record, work: string] {
     let stage = ($work | path join "stage")
     rm -rf $stage
     mkdir $stage
-    # Two generated packages (one per component), each next to its own native library.
+    # The published layout: client/ + broker/ sharing one runtime/, libraries under prebuilds/.
+    let pkg = ($stage | path join "stem-mqtt")
+    assemble-node-package ($work | path join "gen" "mqtt-client") ($work | path join "gen" "mqtt-broker") $pkg
+    let koffi = (open ($pkg | path join "client" "package.json") | get dependencies.koffi)
+    {
+        name: "stem-mqtt", version: "0.0.0", type: "module"
+        dependencies: { koffi: $koffi }
+        exports: { "./client": "./client/index.js", "./broker": "./broker/index.js" }
+    } | save --force ($pkg | path join "package.json")
     for component in [{ crate: "mqtt-client", dir: "client" } { crate: "mqtt-broker", dir: "broker" }] {
-        let pkg = ($stage | path join $component.dir)
-        cp -r ($work | path join "gen" $component.crate) $pkg
-        stage-libs $spec $pkg [$component.crate]
-        let install = (do { cd $pkg; ^npm install --silent --no-audit --no-fund } | complete)
-        if $install.exit_code != 0 { return $install }
+        # --bundled-prebuilds: the loader looks in prebuilds/<platform>-<arch>[-libc]/.
+        stage-libs $spec ($pkg | path join $component.dir "prebuilds" (node-prebuild-target (platform-id))) [$component.crate]
     }
-    cp (smoke-src node | path join "smoke.mjs") $stage
-    do { cd $stage; ^node smoke.mjs } | complete
+    let install = (do { cd $pkg; ^npm install --silent --no-audit --no-fund } | complete)
+    if $install.exit_code != 0 { return $install }
+
+    # 1. In-tree: the smoke test imports the two components by path.
+    cp (smoke-src node | path join "smoke.mjs") $pkg
+    let in_tree = (do { cd $pkg; ^node smoke.mjs } | complete)
+    if $in_tree.exit_code != 0 { return $in_tree }
+
+    # 2. As a consumer: `npm pack`, install the tarball into a fresh project and import it by
+    #    package name — what a user of the published package does (one koffi for both components).
+    let packed = (do { cd $pkg; ^npm pack --silent --pack-destination $stage } | complete)
+    if $packed.exit_code != 0 { return $packed }
+    let tarball = ($stage | path join ($packed.stdout | str trim | lines | last))
+    let consumer = ($stage | path join "consumer")
+    mkdir $consumer
+    { name: "consumer", version: "0.0.0", type: "module" } | save --force ($consumer | path join "package.json")
+    let added = (do { cd $consumer; ^npm install --silent --no-audit --no-fund $tarball } | complete)
+    if $added.exit_code != 0 { return $added }
+    open --raw (smoke-src node | path join "smoke.mjs")
+    | str replace --all './client/index.js' 'stem-mqtt/client'
+    | str replace --all './broker/index.js' 'stem-mqtt/broker'
+    | save --force ($consumer | path join "smoke.mjs")
+    do { cd $consumer; ^node smoke.mjs } | complete
 }
 
 def run-haskell [spec: record, work: string] {

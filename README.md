@@ -129,7 +129,7 @@ release has published it to that registry — see [Publishing](#publishing) for 
 | --- | --- | --- |
 | **Rust** | `cargo add stem-mqtt-client stem-mqtt-broker` | `use mqtt_client::…; use mqtt_broker::…;` |
 | Python | `pip install stem-mqtt-client stem-mqtt-broker` | `import mqtt_client, mqtt_broker` |
-| Node.js | `npm i @sorinirimies/stem-mqtt-node` | `@sorinirimies/stem-mqtt-node/client` · `/broker` |
+| Node.js | `npm i stem-mqtt` | `stem-mqtt/client` · `stem-mqtt/broker` |
 | Kotlin (JVM/Android) | `io.github.sorinirimies.stemmqtt:stem-mqtt-kotlin` (Maven Central) | `import uniffi.mqtt_client.*` |
 | Java (JDK 22+) | `io.github.sorinirimies.stemmqtt:stem-mqtt-java` (Maven Central) | `import uniffi.mqtt_client.*;` |
 | C# | `dotnet add package StemMqtt` | `using uniffi.mqtt_client;` |
@@ -327,7 +327,7 @@ its own repository secret and **skips quietly without it**:
 | --- | --- | --- | --- | --- |
 | Rust | crates.io | `stem-mqtt-client`, `stem-mqtt-broker` | `CRATES_IO_TOKEN` | |
 | Python | PyPI | `stem-mqtt-client`, `stem-mqtt-broker` | `PYPI_API_TOKEN` | manylinux_2_28 wheels (zig) |
-| Node.js | npmjs.org | `@<owner>/stem-mqtt-node` | `NPM_TOKEN` | the npm scope must exist |
+| Node.js | npmjs.org | `stem-mqtt` | `NPM_TOKEN` | granular token with *bypass 2FA*; Linux x86_64 prebuild today |
 | C# | NuGet.org | `StemMqtt` | `NUGET_API_KEY` | |
 | Kotlin / Java | Maven Central | `io.github.<owner>.stemmqtt:stem-mqtt-kotlin` / `…-java` | `MAVEN_CENTRAL_USERNAME`, `MAVEN_CENTRAL_PASSWORD`, `SIGNING_KEY`, `SIGNING_PASSWORD` | verify the `io.github.<owner>` namespace first |
 | Haskell | Hackage | `stem-mqtt` | `HACKAGE_TOKEN` | source package, builds the bundled Rust with `cargo` |

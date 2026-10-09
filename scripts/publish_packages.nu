@@ -36,6 +36,7 @@ use bindings/spec.nu *
 use bindings/source.nu *
 use bindings/hackage.nu *
 use bindings/dart_package.nu *
+use bindings/node_package.nu *
 
 def default-stage [language: string]: nothing -> string {
     $"dist/(canonical-language $language)"
@@ -99,13 +100,20 @@ def write-descriptor [language: string, stage: string] {
                 engines: { node: ">=16" }
                 dependencies: { koffi: $koffi }
                 exports: { "./client": "./client/index.js", "./broker": "./broker/index.js" }
-                files: ["client" "broker"]
+                files: ["client" "broker" "runtime" "README.md" "LICENSE"]
+                license: "MIT"
+                author: "Sorin Irimies"
+                keywords: ["mqtt" "mqtt5" "broker" "client" "iot" "rust" "uniffi"]
+                homepage: "https://github.com/OWNER/stem-mqtt#readme"
+                repository: { type: "git", url: "git+https://github.com/OWNER/stem-mqtt.git" }
+                bugs: { url: "https://github.com/OWNER/stem-mqtt/issues" }
                 publishConfig: { registry: "https://npm.pkg.github.com" }
             } | save --force ($stage | path join "package.json")
-            for part in [client broker] {
-                cp -r ($stage | path join "sources" $part) ($stage | path join $part)
+            assemble-node-package ($stage | path join "sources" "client") ($stage | path join "sources" "broker") ($stage | path join "assembled")
+            for part in [client broker runtime] {
+                cp -r ($stage | path join "assembled" $part) ($stage | path join $part)
             }
-            rm -rf ($stage | path join "sources")
+            rm -rf ($stage | path join "sources") ($stage | path join "assembled")
         }
         "nuget" => {
             r#'<Project Sdk="Microsoft.NET.Sdk">
@@ -211,7 +219,7 @@ def registry-readme [language: string, owner: string]: nothing -> string {
 
 # Registry-specific preparation that depends on the final version/owner:
 # retarget descriptors, lay native libraries out the way the registry expects.
-def prepare-package [language: string, version: string, stage: string, owner: string] {
+def prepare-package [language: string, version: string, stage: string, owner: string, npm_name: string = ""] {
     let spec = (spec-for $language)
     let name = (package-name $language)
     # Registry pages show a README: use the language guide, with its repo-relative links made absolute.
@@ -219,15 +227,27 @@ def prepare-package [language: string, version: string, stage: string, owner: st
         registry-readme $language $owner | save --force ($stage | path join "README.md")
     }
     if $spec.registry == "npm" {
-        open ($stage | path join "package.json")
-        | upsert name $"@($owner)/($name)" | upsert version $version
-        | save --force ($stage | path join "package.json")
-        # Each generated package loads `lib<crate>.<ext>` from its own directory.
-        for platform in (ls ($stage | path join "native") | get name) {
+        let package_name = if $npm_name == "" { $"@($owner)/($name)" } else { $npm_name }
+        # The generated loader (--bundled-prebuilds) resolves prebuilds/<platform>-<arch>[-libc]/lib<crate>.<ext>
+        # inside each component, so every platform's library can sit side by side.
+        let platforms = (ls ($stage | path join "native") | where type == dir | get name | path basename)
+        for platform in $platforms {
+            let target = (node-prebuild-target $platform)
             for pair in [{ part: "client", lib: "mqtt_client" } { part: "broker", lib: "mqtt_broker" }] {
-                cp ...(glob ($platform | path join $"*($pair.lib)*")) ($stage | path join $pair.part)
+                let dest = ($stage | path join $pair.part "prebuilds" $target)
+                mkdir $dest
+                cp ...(glob ($stage | path join "native" $platform $"*($pair.lib)*")) $dest
             }
         }
+        # Only claim the platforms that actually ship a library, so `npm install` elsewhere fails
+        # up front (EBADPLATFORM) instead of at first use.
+        let os_cpu = ($platforms | each { |p| npm-os-cpu $p })
+        let manifest = (open ($stage | path join "package.json")
+            | upsert name $package_name | upsert version $version
+            | upsert os ($os_cpu | get os | uniq)
+            | upsert cpu ($os_cpu | get cpu | uniq))
+        $manifest | to json --indent 2 | str replace --all "OWNER" $owner | save --force ($stage | path join "package.json")
+        cp ($env.PWD | path join "LICENSE") $stage
     }
     if $spec.registry == "nuget" {
         let proj = ($stage | path join "StemMqtt.csproj")
@@ -277,7 +297,11 @@ def stage-source-package [language: string, stage: string] {
 }
 
 # Generate bindings + native libs for one language into a stage directory.
-def "main stage" [language: string, --out: string] {
+def "main stage" [
+    language: string
+    --out: string
+    --add-native: string   # directory of extra native/<platform>/ trees (built on other OSes) to merge in
+] {
     let language = (canonical-language $language)
     if $language == "kotlin" {
         error make { msg: "Kotlin is published by packaging/kotlin (Gradle) — see packaging/kotlin/README.md" }
@@ -286,6 +310,12 @@ def "main stage" [language: string, --out: string] {
     mkdir $stage
     stage-sources $language $stage
     stage-native $language $stage
+    if $add_native != null {
+        for platform in (ls ($add_native | path expand) | where type == dir | get name) {
+            cp -r $platform ($stage | path join "native")
+            print $"merged native libraries for ($platform | path basename)"
+        }
+    }
     write-descriptor $language $stage
     stage-source-package $language $stage
     print $"staged ($language) -> ($stage) \(platform: (platform-id)\)"
@@ -300,6 +330,7 @@ def "main publish" [
     --repo: string = "stem-mqtt"
     --target: string = "github"   # github | gitea | public
     --base-url: string = ""       # Gitea instance, e.g. http://192.168.1.44:3000
+    --npm-name: string = ""       # npm package name; default stem-mqtt on npmjs.org, @<owner>/stem-mqtt-node elsewhere
     --dry-run
 ] {
     let language = (canonical-language $language)
@@ -310,7 +341,17 @@ def "main publish" [
     let spec = (spec-for $language)
     let name = (package-name $language)
 
-    prepare-package $language $version $stage $owner
+    let npm_name = if $npm_name != "" { $npm_name } else if $target == "public" { "stem-mqtt" } else { "" }
+    prepare-package $language $version $stage $owner $npm_name
+    # Releases can be re-run (and GitHub and Gitea both release): publishing an npm version
+    # that already exists would fail, so treat "already there" as done.
+    if $target == "public" and $spec.registry == "npm" {
+        let published = (do { ^npm view $"($npm_name)@($version)" version --prefer-online } | complete)
+        if $published.exit_code == 0 and ($published.stdout | str trim) == $version {
+            print $"($npm_name)@($version) is already on npm — nothing to publish."
+            return
+        }
+    }
     if $target == "public" {
         let ep = (registry-endpoints $target $owner $base_url $repo)
         if $spec.registry == "npm" {

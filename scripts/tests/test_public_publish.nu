@@ -11,6 +11,7 @@ use ../publish_maven_central.nu [upload-args missing-files]
 use ../bindings/go_module.nu *
 use ../bindings/hackage.nu *
 use ../bindings/dart_package.nu *
+use ../bindings/node_package.nu *
 
 def "test public: node goes to npmjs as a public package" [] {
     let step = (publish-plan node "1.0.0" "d" "acme" "stem-mqtt" "public" | first)
@@ -126,6 +127,38 @@ def "test public: the java package check runs the smoke test against the package
     assert ($run.args | any { |a| $a | str contains "stem-mqtt-java-1.0.0.jar" })
     # no -Djava.library.path: the jar must find its own native library
     assert (not ($run.args | any { |a| $a | str contains "java.library.path" }))
+}
+
+def "test public: npm prebuild targets match what the generated Node loader resolves" [] {
+    assert equal (node-prebuild-target "linux-x86_64") "linux-x64-gnu"
+    assert equal (node-prebuild-target "macos-aarch64") "darwin-arm64"
+    assert equal (node-prebuild-target "windows-x86_64") "win32-x64"
+    assert equal (npm-os-cpu "linux-x86_64") { os: "linux", cpu: "x64" }
+    assert equal (npm-os-cpu "macos-aarch64") { os: "darwin", cpu: "arm64" }
+    let err = (try { node-prebuild-target "plan9-riscv"; "" } catch { |e| $e.msg })
+    assert ($err | str contains "no Node prebuild target")
+}
+
+def "test public: the Node package shares one runtime between client and broker" [] {
+    let root = (mktemp -d)
+    for part in [client broker] {
+        let rt = ($root | path join "gen" $part "runtime")
+        mkdir $rt
+        "export const x = 1;\n" | save ($rt | path join "ffi-types.js")
+        $"import { x } from \"./runtime/ffi-types.js\";\n" | save ($root | path join "gen" $part $"($part).js")
+    }
+    let out = ($root | path join "pkg")
+    assemble-node-package ($root | path join "gen" "client") ($root | path join "gen" "broker") $out
+    assert ($out | path join "runtime" "ffi-types.js" | path exists)
+    assert (not ($out | path join "broker" "runtime" | path exists))
+    assert ((open --raw ($out | path join "broker" "broker.js")) | str contains "\"../runtime/ffi-types.js\"")
+    # diverging runtimes are refused rather than silently merged
+    let bad = ($root | path join "gen2")
+    cp -r ($root | path join "gen") $bad
+    "export const x = 2;\n" | save --force ($bad | path join "broker" "runtime" "ffi-types.js")
+    let err = (try { assemble-node-package ($bad | path join "client") ($bad | path join "broker") ($root | path join "pkg2"); "" } catch { |e| $e.msg })
+    assert ($err | str contains "differ")
+    rm -rf $root
 }
 
 def main [] { run-tests }

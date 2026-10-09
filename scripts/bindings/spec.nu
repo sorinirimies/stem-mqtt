@@ -159,7 +159,9 @@ export def generator-args [language: string, lib: string, out: string, lib_name:
         "csharp" => ["--library" $lib "--config" ($repo | path join "packaging" "csharp" "uniffi.toml") "--out-dir" $out]
         "java" => ["generate" $lib "--out-dir" $out]
         "dart" => ["--library" $lib "--out-dir" $out]
-        "node" => ["generate" $lib "--crate-name" $lib_name "--out-dir" $out]
+        # --bundled-prebuilds: the generated loader resolves prebuilds/<platform>-<arch>[-libc]/<lib>,
+        # so one package can carry the native library of several platforms side by side.
+        "node" => ["generate" $lib "--crate-name" $lib_name "--out-dir" $out "--bundled-prebuilds"]
         "haskell" => [
             "--library" $lib "--out-dir" $out
             # A ready-to-build Cabal package; consumers add `extra-lib-dirs` for the static library.
@@ -176,6 +178,26 @@ export def generator-args [language: string, lib: string, out: string, lib_name:
 # Identifies the host's native-library flavour, e.g. `macos-aarch64`.
 export def platform-id []: nothing -> string {
     $"($nu.os-info.name)-($nu.os-info.arch)"
+}
+
+# The directory name under `prebuilds/` that the generated Node loader looks in for a platform id
+# (`<process.platform>-<process.arch>`, plus `-gnu`/`-musl` on Linux).
+export def node-prebuild-target [platform: string]: nothing -> string {
+    match $platform {
+        "linux-x86_64" => "linux-x64-gnu"
+        "linux-aarch64" => "linux-arm64-gnu"
+        "macos-x86_64" => "darwin-x64"
+        "macos-aarch64" => "darwin-arm64"
+        "windows-x86_64" => "win32-x64"
+        "windows-aarch64" => "win32-arm64"
+        $other => { error make { msg: $"no Node prebuild target for platform '($other)'" } }
+    }
+}
+
+# npm `os` / `cpu` values (process.platform / process.arch) for a platform id.
+export def npm-os-cpu [platform: string]: nothing -> record<os: string, cpu: string> {
+    let target = (node-prebuild-target $platform | split row "-")
+    { os: ($target | first), cpu: ($target | get 1) }
 }
 
 # .NET runtime identifier for a platform id (NuGet `runtimes/<rid>/native/`).

@@ -551,7 +551,7 @@ jobs:
   # ── Public registries ────────────────────────────────────────────────────────
   # npmjs.org, NuGet.org, Maven Central (Java), Hackage and the Go module repository. Each
   # language needs its own secret and is skipped quietly without it:
-  #   node     NPM_TOKEN (automation token for the @<owner> scope)
+  #   node     NPM_TOKEN (npm granular access token, publish rights, "bypass 2FA") — package `stem-mqtt`
   #   csharp   NUGET_API_KEY
   #   java     MAVEN_CENTRAL_USERNAME / MAVEN_CENTRAL_PASSWORD / SIGNING_KEY / SIGNING_PASSWORD
   #   haskell  HACKAGE_TOKEN
