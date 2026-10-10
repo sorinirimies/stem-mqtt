@@ -18,7 +18,7 @@ broker in CI.
 
 - [Quick start](#quick-start-rust) · [Installation](#installation) · [Features](#features) ·
   [Running the broker](#running-the-broker) · [Other languages](#generating-foreign-language-bindings) ·
-  [Publishing](#publishing) · [Development](#development)
+  [Development](#development)
 
 ## Quick start (Rust)
 
@@ -123,7 +123,7 @@ Recorded with [VHS](https://github.com/charmbracelet/vhs): `just vhs-tape <name>
 
 Every published package is prefixed `stem-mqtt-` (`mqtt-client` / `mqtt-broker` are taken by unrelated
 projects on crates.io and PyPI); import names in code are unchanged. A package is available once a
-release has published it to that registry — see [Publishing](#publishing) for what goes where.
+release has published it to that registry.
 
 | Language | Install | Import |
 | --- | --- | --- |
@@ -310,44 +310,6 @@ header of each test). Verdicts: `PASS`, `FAIL`, `SKIP` (toolchain missing). CI (
 `.github/workflows/ci.yml`) runs the same command per language (`test-bindings-runtime`), builds each
 package (`test-packaging`: `dotnet pack`, `gradle build`, `npm pack`, OCI bundle) and runs the Kotlin
 Gradle test; the release workflow runs the runtime test before packaging each language.
-
-## Publishing
-
-```sh
-nu scripts/publish_packages.nu stage <language>                       # bindings + native libs -> dist/<language>
-nu scripts/publish_packages.nu publish <language> <version> --dry-run  # print the plan; --target github|gitea|public
-```
-
-### Public registries
-
-The Gitea release workflow publishes to the indexes people install from (`--target public`). Each job needs
-its own repository secret and **skips quietly without it**:
-
-| Language | Registry | Package | Secret(s) | Notes |
-| --- | --- | --- | --- | --- |
-| Rust | crates.io | `stem-mqtt-client`, `stem-mqtt-broker` | `CRATES_IO_TOKEN` | |
-| Python | PyPI | `stem-mqtt-client`, `stem-mqtt-broker` | `PYPI_API_TOKEN` | manylinux_2_28 wheels (zig) |
-| Node.js | npmjs.org | `stem-mqtt` | `NPM_TOKEN` | granular token with *bypass 2FA*; Linux x86_64 prebuild today |
-| C# | NuGet.org | `StemMqtt` | `NUGET_API_KEY` | |
-| Kotlin / Java | Maven Central | `io.github.<owner>.stemmqtt:stem-mqtt-kotlin` / `…-java` | `MAVEN_CENTRAL_USERNAME`, `MAVEN_CENTRAL_PASSWORD`, `SIGNING_KEY`, `SIGNING_PASSWORD` | verify the `io.github.<owner>` namespace first |
-| Haskell | Hackage | `stem-mqtt` | `HACKAGE_TOKEN` | source package, builds the bundled Rust with `cargo` |
-| Dart | pub.dev | `stem_mqtt` | — (OIDC) | from GitHub Actions (`publish-pubdev.yml`); first release by hand |
-| Go | Go modules | `github.com/<owner>/stem-mqtt-go` | `GO_MODULE_TOKEN` | pushes the module to its own repo and tags it |
-| Swift | — | release asset (XCFrameworks) | — | needs macOS |
-
-The Haskell and Dart packages are exactly what their runtime tests exercise. The Node, C#, Java, Kotlin and
-Go packages bundle or expect native libraries only for the platforms the release runner builds (Linux x86_64
-today); other platforms use the release assets or a source build. Maven Central and Hackage releases cannot
-be deleted — read the job logs of the first release.
-
-### Project registries
-
-Besides the public indexes, every language also goes to GitHub Packages (Maven, npm, NuGet, and OCI bundles
-on `ghcr.io` for Go, Dart and Haskell) and/or your Gitea instance's own registries
-(`--target gitea --base-url http://host:3000`, secret `PACKAGES_TOKEN` with `write:package`). Kotlin's Android AAR
-and the Swift XCFrameworks need the GitHub workflow (NDK / macOS). A manual workflow
-(`.github/workflows/publish-packages.yml`) dry-runs or publishes a throw-away version such as `0.0.0-rc.1`
-without cutting a release. See [`packaging/README.md`](packaging/README.md) for the artifact layout.
 
 ## Development
 
