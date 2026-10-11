@@ -118,7 +118,7 @@ impl Properties {
     }
 
     fn body_len(&self) -> usize {
-        self.0.iter().map(|p| p.encoded_len()).sum()
+        self.0.iter().map(Property::encoded_len).sum()
     }
 
     /// Encode `Property Length` + all properties into `out`.

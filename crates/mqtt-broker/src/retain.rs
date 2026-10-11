@@ -7,10 +7,11 @@
 //! [`crate::registry::SessionRegistry`]'s job.
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::RwLock;
 
 use bytes::Bytes;
 use mqtt_client::protocol::publish::PublishPacket;
+use mqtt_client::support::RwLockExt;
 use mqtt_client::QoS;
 
 use crate::topic::topic_matches;
@@ -24,14 +25,14 @@ pub struct RetainedMessage {
 
 /// Thread-safe store of retained messages, one per topic.
 pub struct RetainStore {
-    retained: Mutex<HashMap<String, RetainedMessage>>,
+    retained: RwLock<HashMap<String, RetainedMessage>>,
     max_retained_messages: u32,
 }
 
 impl RetainStore {
     pub fn new(max_retained_messages: u32) -> Self {
         RetainStore {
-            retained: Mutex::new(HashMap::new()),
+            retained: RwLock::new(HashMap::new()),
             max_retained_messages,
         }
     }
@@ -40,13 +41,13 @@ impl RetainStore {
     /// retained message (MQTT-3.3.1-10); otherwise it's stored, unless
     /// we're at capacity and this would be a new topic (silently dropped).
     pub fn update(&self, publish: &PublishPacket) {
-        let mut retained = self.retained.lock().unwrap();
+        let mut retained = self.retained.write_safe();
         if publish.payload.is_empty() {
             retained.remove(&publish.topic);
             return;
         }
         if self.max_retained_messages > 0
-            && retained.len() as u32 >= self.max_retained_messages
+            && retained.len() >= self.max_retained_messages as usize
             && !retained.contains_key(&publish.topic)
         {
             return; // at capacity; silently drop new retained topics
@@ -63,7 +64,14 @@ impl RetainStore {
     /// Every retained message whose topic matches `filter`, as owned
     /// clones (cheap: `Bytes` is refcounted).
     pub fn matching(&self, filter: &str) -> Vec<(String, RetainedMessage)> {
-        let retained = self.retained.lock().unwrap();
+        let retained = self.retained.read_safe();
+        // A wildcard-free filter names one topic: O(1) lookup, no scan.
+        if !filter.contains(['+', '#']) {
+            return retained
+                .get(filter)
+                .map(|m| vec![(filter.to_string(), m.clone())])
+                .unwrap_or_default();
+        }
         retained
             .iter()
             .filter(|(topic, _)| topic_matches(filter, topic))

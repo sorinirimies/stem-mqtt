@@ -8,6 +8,7 @@
 //! number of *matching* subscriptions.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use mqtt_client::protocol::topic::{classify_filter, FilterKind};
 
@@ -48,9 +49,9 @@ struct Node {
     /// The `+` child.
     plus: Option<Box<Node>>,
     /// Subscriptions whose filter ends exactly at this node.
-    exact: Vec<IndexEntry>,
+    exact: Vec<Arc<IndexEntry>>,
     /// Subscriptions whose filter is `<path to here>/#`.
-    multi: Vec<IndexEntry>,
+    multi: Vec<Arc<IndexEntry>>,
 }
 
 impl Node {
@@ -70,12 +71,12 @@ pub struct SubscriptionIndex {
 
 impl SubscriptionIndex {
     pub fn insert(&mut self, entry: IndexEntry) {
-        let filter = entry.filter.clone();
+        let entry = Arc::new(entry);
         let mut node = &mut self.root;
-        for level in filter.split('/') {
+        for level in entry.filter.split('/') {
             match level {
                 "#" => {
-                    node.multi.push(entry);
+                    node.multi.push(Arc::clone(&entry));
                     return;
                 }
                 "+" => node = node.plus.get_or_insert_with(Default::default),
@@ -96,7 +97,7 @@ impl SubscriptionIndex {
     }
 
     fn remove_at(node: &mut Node, levels: &[&str], entry: &IndexEntry) {
-        let same = |e: &IndexEntry| e.client_id == entry.client_id && e.key == entry.key;
+        let same = |e: &Arc<IndexEntry>| e.client_id == entry.client_id && e.key == entry.key;
         match levels.split_first() {
             None => node.exact.retain(|e| !same(e)),
             Some((&"#", _)) => node.multi.retain(|e| !same(e)),
@@ -122,7 +123,7 @@ impl SubscriptionIndex {
     /// Every subscription whose filter matches the concrete `topic`
     /// (MQTT-4.7: `+`, `#`, and the rule that a `$`-prefixed topic is never
     /// matched by a filter starting with a wildcard).
-    pub fn matching(&self, topic: &str) -> Vec<IndexEntry> {
+    pub fn matching(&self, topic: &str) -> Vec<Arc<IndexEntry>> {
         let levels: Vec<&str> = topic.split('/').collect();
         let dollar = topic.starts_with('$');
         let mut out = Vec::new();
@@ -135,7 +136,7 @@ impl SubscriptionIndex {
         levels: &[&str],
         depth: usize,
         dollar: bool,
-        out: &mut Vec<IndexEntry>,
+        out: &mut Vec<Arc<IndexEntry>>,
     ) {
         let wildcard_allowed = !(dollar && depth == 0);
         if wildcard_allowed {
@@ -174,7 +175,7 @@ mod tests {
         let mut v: Vec<String> = index
             .matching(topic)
             .into_iter()
-            .map(|e| e.client_id)
+            .map(|e| e.client_id.clone())
             .collect();
         v.sort();
         v

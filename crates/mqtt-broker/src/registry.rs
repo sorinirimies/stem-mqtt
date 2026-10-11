@@ -427,13 +427,17 @@ impl SessionRegistry {
             return;
         }
 
-        let mut targets: HashMap<String, Vec<String>> = HashMap::new();
-        let mut groups: HashMap<(String, String), Vec<IndexEntry>> = HashMap::new();
-        for entry in matches {
-            match &entry.group {
-                None => targets.entry(entry.client_id).or_default().push(entry.key),
+        // Borrow from `matches` (refcounted entries) — no per-publish string clones.
+        let mut targets: HashMap<&str, Vec<&str>> = HashMap::with_capacity(matches.len());
+        let mut groups: HashMap<(&str, &str), Vec<&IndexEntry>> = HashMap::new();
+        for entry in &matches {
+            match entry.group.as_deref() {
+                None => targets
+                    .entry(&entry.client_id)
+                    .or_default()
+                    .push(&entry.key),
                 Some(group) => groups
-                    .entry((group.clone(), entry.filter.clone()))
+                    .entry((group, &entry.filter))
                     .or_default()
                     .push(entry),
             }
@@ -442,29 +446,25 @@ impl SessionRegistry {
         let sessions = self.sessions.read_safe();
         for members in groups.into_values() {
             let start = self.shared_cursor.fetch_add(1, Ordering::Relaxed) % members.len();
-            let rotated = (0..members.len()).map(|i| &members[(start + i) % members.len()]);
-            let pick = rotated
-                .clone()
+            let pick = (0..members.len())
+                .map(|i| members[(start + i) % members.len()])
                 .find(|m| {
                     sessions
                         .get(&m.client_id)
                         .is_some_and(|s| s.lock_safe().is_connected())
                 })
-                .unwrap_or(&members[start]);
-            targets
-                .entry(pick.client_id.clone())
-                .or_default()
-                .push(pick.key.clone());
+                .unwrap_or(members[start]);
+            targets.entry(&pick.client_id).or_default().push(&pick.key);
         }
 
         for (client_id, keys) in targets {
-            let Some(session) = sessions.get(&client_id) else {
+            let Some(session) = sessions.get(client_id) else {
                 continue; // dropped since the index was read
             };
             let mut guard = session.lock_safe();
             let best = keys
                 .iter()
-                .filter_map(|key| guard.subscriptions.get(key))
+                .filter_map(|key| guard.subscriptions.get(*key))
                 .filter(|sub| !(client_id == publisher_id && sub.no_local))
                 .max_by_key(|sub| sub.qos)
                 .cloned();
@@ -501,7 +501,14 @@ mod tests {
     /// `send_to` report the connection as gone.
     struct Peer {
         shutdown_rx: oneshot::Receiver<ShutdownReason>,
-        _writer_rx: mpsc::Receiver<Bytes>,
+        writer_rx: mpsc::Receiver<Bytes>,
+    }
+
+    impl Peer {
+        /// Frames delivered to this connection so far.
+        fn received(&mut self) -> usize {
+            std::iter::from_fn(|| self.writer_rx.try_recv().ok()).count()
+        }
     }
 
     fn request(client_id: &str, clean_start: bool, max_clients: u32) -> (AttachRequest, Peer) {
@@ -520,7 +527,7 @@ mod tests {
             },
             Peer {
                 shutdown_rx,
-                _writer_rx: writer_rx,
+                writer_rx,
             },
         )
     }
@@ -670,5 +677,89 @@ mod tests {
         let next = s.alloc_packet_id();
         assert_ne!(next, first.wrapping_add(1));
         assert_ne!(next, 0);
+    }
+
+    fn sub(qos: QoS, no_local: bool) -> Subscription {
+        Subscription {
+            qos,
+            no_local,
+            retain_as_published: false,
+        }
+    }
+
+    fn connect(registry: &SessionRegistry, id: &str) -> Peer {
+        let (req, peer) = request(id, true, 0);
+        registry.attach(req).unwrap();
+        peer
+    }
+
+    fn message(topic: &str, qos: QoS) -> QueuedMessage {
+        QueuedMessage {
+            topic: topic.into(),
+            payload: Bytes::from_static(b"x"),
+            qos,
+            retain: false,
+        }
+    }
+
+    #[test]
+    fn fan_out_delivers_once_per_client_across_overlapping_filters() {
+        let registry = SessionRegistry::new();
+        let mut peer = connect(&registry, "c");
+        registry.add_subscription("c", "a/+", sub(QoS::AtMostOnce, false));
+        registry.add_subscription("c", "a/#", sub(QoS::AtLeastOnce, false));
+        registry.fan_out("other", &message("a/b", QoS::ExactlyOnce));
+        assert_eq!(peer.received(), 1, "one copy despite two matching filters");
+        // Highest matching QoS (1) wins, so a pending QoS 1 redelivery exists.
+        let pending = registry.with_session("c", |s| s.pending_redelivery.len());
+        assert_eq!(pending, Some(1));
+    }
+
+    #[test]
+    fn fan_out_honours_no_local() {
+        let registry = SessionRegistry::new();
+        let mut me = connect(&registry, "me");
+        let mut you = connect(&registry, "you");
+        registry.add_subscription("me", "t", sub(QoS::AtMostOnce, true));
+        registry.add_subscription("you", "t", sub(QoS::AtMostOnce, true));
+        registry.fan_out("me", &message("t", QoS::AtMostOnce));
+        assert_eq!(me.received(), 0, "no_local suppresses the publisher's echo");
+        assert_eq!(you.received(), 1);
+    }
+
+    #[test]
+    fn fan_out_shared_group_picks_one_member_round_robin() {
+        let registry = SessionRegistry::new();
+        let mut a = connect(&registry, "a");
+        let mut b = connect(&registry, "b");
+        for id in ["a", "b"] {
+            registry.add_subscription(id, "$share/g/jobs", sub(QoS::AtMostOnce, false));
+        }
+        for _ in 0..4 {
+            registry.fan_out("p", &message("jobs", QoS::AtMostOnce));
+        }
+        let (ra, rb) = (a.received(), b.received());
+        assert_eq!(ra + rb, 4, "each message goes to exactly one member");
+        assert_eq!((ra, rb), (2, 2), "members take turns");
+    }
+
+    #[test]
+    fn fan_out_queues_for_offline_persistent_sessions_only() {
+        let registry = SessionRegistry::new();
+        let (req, _peer) = request("p", false, 0);
+        let conn = registry.attach(req).unwrap();
+        registry.add_subscription("p", "t", sub(QoS::AtLeastOnce, false));
+        registry.detach("p", conn.conn_id, true);
+        registry.fan_out("x", &message("t", QoS::AtLeastOnce));
+        assert_eq!(registry.with_session("p", |s| s.queued.len()), Some(1));
+    }
+
+    #[test]
+    fn fan_out_ignores_unmatched_topics() {
+        let registry = SessionRegistry::new();
+        let mut peer = connect(&registry, "c");
+        registry.add_subscription("c", "a/b", sub(QoS::AtMostOnce, false));
+        registry.fan_out("x", &message("a/c", QoS::AtMostOnce));
+        assert_eq!(peer.received(), 0);
     }
 }
