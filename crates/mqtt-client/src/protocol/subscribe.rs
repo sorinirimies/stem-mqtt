@@ -203,7 +203,14 @@ impl SubAckPacket {
         };
         let mut reason_codes = Vec::new();
         while buf.has_remaining() {
-            reason_codes.push(SubAckReasonCode(buf.get_u8()));
+            let code = buf.get_u8();
+            // MQTT-3.9.3: a 3.1.1 SUBACK carries only 0x00-0x02 or 0x80.
+            if !version.is_v5() && code > 0x02 && code != SubAckReasonCode::FAILURE.0 {
+                return Err(MqttError::MalformedPacket(format!(
+                    "invalid MQTT 3.1.1 SUBACK return code {code:#04x}"
+                )));
+            }
+            reason_codes.push(SubAckReasonCode(code));
         }
         Ok(SubAckPacket {
             packet_id,
@@ -403,5 +410,18 @@ mod tests {
         ack.encode_body(MqttVersion::V5, &mut out).unwrap();
         let decoded = UnsubAckPacket::decode_body(MqttVersion::V5, out.freeze()).unwrap();
         assert_eq!(decoded, ack);
+    }
+
+    #[test]
+    fn v311_suback_rejects_codes_outside_the_spec_set() {
+        // Found by fuzzing: decode accepted 3.1.1 codes the encoder can't emit.
+        let body = |codes: &[u8]| {
+            let mut v = vec![0x00, 0x01];
+            v.extend_from_slice(codes);
+            Bytes::from(v)
+        };
+        assert!(SubAckPacket::decode_body(MqttVersion::V311, body(&[0, 1, 2, 0x80])).is_ok());
+        assert!(SubAckPacket::decode_body(MqttVersion::V311, body(&[0x03])).is_err());
+        assert!(SubAckPacket::decode_body(MqttVersion::V311, body(&[0xF7])).is_err());
     }
 }

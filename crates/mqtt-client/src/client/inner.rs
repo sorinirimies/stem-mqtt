@@ -230,3 +230,131 @@ pub(super) fn finish_disconnected(inner: &Arc<Inner>, reason: String) {
         guard_callback("on_disconnected", || listener.on_disconnected(reason));
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::QoS;
+    use std::sync::atomic::AtomicUsize;
+
+    fn inner(timeout: Duration) -> (Arc<Inner>, ListenerSlot) {
+        let (a, _b) = tokio::io::duplex(64);
+        let transport: Box<dyn Transport> = Box::new(a);
+        let (_r, w) = tokio::io::split(transport);
+        let slot: ListenerSlot = Arc::default();
+        (
+            Arc::new(Inner::new(MqttVersion::V5, w, slot.clone(), timeout)),
+            slot,
+        )
+    }
+
+    #[derive(Default)]
+    struct Recorder {
+        messages: AtomicUsize,
+        disconnects: Mutex<Vec<String>>,
+    }
+    impl MqttMessageListener for Recorder {
+        fn on_message(&self, _: MqttMessage) {
+            self.messages.fetch_add(1, Ordering::Relaxed);
+        }
+        fn on_disconnected(&self, reason: String) {
+            self.disconnects.lock_safe().push(reason);
+        }
+    }
+
+    fn message() -> MqttMessage {
+        MqttMessage {
+            topic: "t".into(),
+            payload: vec![1],
+            qos: QoS::AtMostOnce,
+            retain: false,
+        }
+    }
+
+    #[tokio::test]
+    async fn packet_ids_are_nonzero_and_skip_in_flight() {
+        let (inner, _) = inner(Duration::from_secs(1));
+        let _rx = register_pending(&inner, 2);
+        let ids: Vec<u16> = (0..4).map(|_| inner.alloc_packet_id()).collect();
+        assert!(ids.iter().all(|&i| i != 0));
+        assert!(!ids.contains(&2), "in-flight id must not be reused");
+    }
+
+    #[tokio::test]
+    async fn packet_ids_wrap_past_zero() {
+        let (inner, _) = inner(Duration::from_secs(1));
+        inner.next_packet_id.store(u16::MAX, Ordering::Relaxed);
+        assert_eq!(inner.alloc_packet_id(), u16::MAX);
+        assert_eq!(inner.alloc_packet_id(), 1, "0 is skipped on wrap");
+    }
+
+    #[tokio::test]
+    async fn resolve_completes_the_waiter() {
+        let (inner, _) = inner(Duration::from_secs(1));
+        let rx = register_pending(&inner, 7);
+        resolve_pending(&inner, 7, Packet::PingResp);
+        assert!(matches!(
+            wait_for(&inner, 7, rx).await,
+            Ok(Packet::PingResp)
+        ));
+        resolve_pending(&inner, 7, Packet::PingResp); // duplicate ack: no-op
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn wait_times_out_and_forgets_the_id() {
+        let (inner, _) = inner(Duration::from_millis(50));
+        let rx = register_pending(&inner, 9);
+        assert!(matches!(
+            wait_for(&inner, 9, rx).await,
+            Err(MqttError::Timeout)
+        ));
+        assert!(inner.pending.lock_safe().is_empty());
+    }
+
+    #[tokio::test]
+    async fn disconnect_fails_waiters_and_notifies_exactly_once() {
+        let (inner, slot) = inner(Duration::from_secs(5));
+        let recorder = Arc::new(Recorder::default());
+        *slot.listener.lock_safe() = Some(recorder.clone());
+        let rx = register_pending(&inner, 3);
+
+        finish_disconnected(&inner, "lost".into());
+        finish_disconnected(&inner, "again".into());
+
+        assert!(matches!(
+            wait_for(&inner, 3, rx).await,
+            Err(MqttError::Session(_))
+        ));
+        assert!(!inner.is_connected());
+        assert_eq!(*recorder.disconnects.lock_safe(), ["lost"]);
+        assert_eq!(slot.last_disconnect.lock_safe().as_deref(), Some("lost"));
+    }
+
+    #[tokio::test]
+    async fn deliver_reaches_listener_and_pull_queue() {
+        let (inner, slot) = inner(Duration::from_secs(1));
+        let recorder = Arc::new(Recorder::default());
+        *slot.listener.lock_safe() = Some(recorder.clone());
+        slot.queue.enable(4);
+        deliver(&inner, message());
+        assert_eq!(recorder.messages.load(Ordering::Relaxed), 1);
+        assert!(slot.queue.is_enabled());
+    }
+
+    #[tokio::test]
+    async fn shutdown_marks_disconnected_and_drops_writer() {
+        let (inner, _) = inner(Duration::from_secs(1));
+        inner.shutdown().await;
+        assert!(!inner.is_connected());
+        assert!(inner.writer.lock().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn idle_time_resets_on_touch() {
+        let (inner, _) = inner(Duration::from_secs(1));
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert!(inner.idle_for() >= Duration::from_millis(20));
+        inner.touch();
+        assert!(inner.idle_for() < Duration::from_millis(20));
+    }
+}

@@ -126,3 +126,87 @@ where
 fn to_io_err(e: tokio_tungstenite::tungstenite::Error) -> std::io::Error {
     std::io::Error::other(e)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures_util::SinkExt;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio_tungstenite::tungstenite::protocol::Role;
+
+    /// A server-side `WsByteStream` wired to a raw client-side websocket.
+    async fn pair() -> (
+        WsByteStream<tokio::io::DuplexStream>,
+        WebSocketStream<tokio::io::DuplexStream>,
+    ) {
+        let (a, b) = tokio::io::duplex(4096);
+        let server = WebSocketStream::from_raw_socket(a, Role::Server, None).await;
+        let client = WebSocketStream::from_raw_socket(b, Role::Client, None).await;
+        (WsByteStream::new(server), client)
+    }
+
+    #[tokio::test]
+    async fn binary_messages_concatenate_into_one_byte_stream() {
+        let (mut server, mut client) = pair().await;
+        client.send(Message::Binary(vec![1, 2])).await.unwrap();
+        client.send(Message::Binary(vec![3, 4, 5])).await.unwrap();
+        let mut buf = [0u8; 2];
+        server.read_exact(&mut buf).await.unwrap();
+        assert_eq!(buf, [1, 2]);
+        let mut rest = [0u8; 3];
+        server.read_exact(&mut rest).await.unwrap();
+        assert_eq!(rest, [3, 4, 5]);
+    }
+
+    #[tokio::test]
+    async fn oversized_message_is_served_across_reads() {
+        let (mut server, mut client) = pair().await;
+        client
+            .send(Message::Binary((0..10).collect()))
+            .await
+            .unwrap();
+        let mut got = Vec::new();
+        let mut chunk = [0u8; 4];
+        while got.len() < 10 {
+            let n = server.read(&mut chunk).await.unwrap();
+            assert!(n > 0 && n <= 4);
+            got.extend_from_slice(&chunk[..n]);
+        }
+        assert_eq!(got, (0..10).collect::<Vec<u8>>());
+    }
+
+    #[tokio::test]
+    async fn text_and_empty_frames_are_ignored() {
+        let (mut server, mut client) = pair().await;
+        client.send(Message::Text("hi".into())).await.unwrap();
+        client.send(Message::Binary(vec![])).await.unwrap();
+        client.send(Message::Binary(vec![9])).await.unwrap();
+        let mut b = [0u8; 1];
+        server.read_exact(&mut b).await.unwrap();
+        assert_eq!(b, [9]);
+    }
+
+    #[tokio::test]
+    async fn close_frame_reads_as_eof() {
+        let (mut server, mut client) = pair().await;
+        client.send(Message::Close(None)).await.unwrap();
+        let mut b = [0u8; 1];
+        assert_eq!(server.read(&mut b).await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn each_write_is_one_binary_message() {
+        use futures_util::StreamExt;
+        let (mut server, mut client) = pair().await;
+        server.write_all(&[1, 2, 3]).await.unwrap();
+        server.write_all(&[4]).await.unwrap();
+        assert_eq!(
+            client.next().await.unwrap().unwrap(),
+            Message::Binary(vec![1, 2, 3])
+        );
+        assert_eq!(
+            client.next().await.unwrap().unwrap(),
+            Message::Binary(vec![4])
+        );
+    }
+}

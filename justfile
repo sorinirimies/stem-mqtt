@@ -210,6 +210,23 @@ clean-bindings:
 audit:
     cargo audit
 
+# Fuzz targets (needs `cargo install cargo-fuzz` + nightly)
+fuzz_targets := "decode roundtrip chunked varint publish topics"
+
+# Run one fuzz target for N seconds: `just fuzz roundtrip 60`
+fuzz target="decode" seconds="60":
+    cd fuzz && cargo +nightly fuzz run {{target}} -- -max_total_time={{seconds}}
+
+# Smoke-run every fuzz target for N seconds each
+fuzz-all seconds="30":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd fuzz
+    for t in {{fuzz_targets}}; do
+        echo "== $t"
+        cargo +nightly fuzz run "$t" -- -max_total_time={{seconds}}
+    done
+
 # Compare the pinned binding generators with their newest upstream releases
 check-bindgen-updates:
     nu scripts/check_bindgen_updates.nu

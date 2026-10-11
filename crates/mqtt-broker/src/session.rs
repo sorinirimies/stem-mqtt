@@ -21,6 +21,19 @@ pub struct Subscription {
     pub retain_as_published: bool,
 }
 
+/// Encoded QoS 0 PUBLISH frames shared by every subscriber of one fan-out.
+/// A QoS 0 frame has no packet id, so it depends only on the protocol
+/// version and the retain flag; encoding it once per combination instead of
+/// once per subscriber makes large fan-out much cheaper.
+#[derive(Default)]
+pub struct Qos0Frames([Option<Bytes>; 4]);
+
+impl Qos0Frames {
+    fn slot(version: MqttVersion, retain: bool) -> usize {
+        usize::from(version.is_v5()) * 2 + usize::from(retain)
+    }
+}
+
 /// A queued message waiting for an offline (`clean_start = false`) session
 /// to reconnect.
 #[derive(Debug, Clone)]
@@ -211,6 +224,44 @@ impl Session {
         }
     }
 
+    /// Like [`Self::deliver`] for a message that is `base` with `qos`/`retain`
+    /// overridden, sharing the encoded frame through `frames` when QoS 0.
+    /// Only allocates a new [`QueuedMessage`] when the message must be
+    /// tracked for redelivery (QoS 1/2).
+    pub fn deliver_adjusted(
+        &mut self,
+        base: &QueuedMessage,
+        qos: mqtt_client::QoS,
+        retain: bool,
+        frames: &mut Qos0Frames,
+    ) {
+        if qos != mqtt_client::QoS::AtMostOnce {
+            self.deliver(QueuedMessage {
+                topic: base.topic.clone(),
+                payload: base.payload.clone(),
+                qos,
+                retain,
+            });
+            return;
+        }
+        let slot = &mut frames.0[Qos0Frames::slot(self.version, retain)];
+        if slot.is_none() {
+            let message = QueuedMessage {
+                topic: base.topic.clone(),
+                payload: base.payload.clone(),
+                qos,
+                retain,
+            };
+            match Packet::Publish(message.to_publish(None, false)).encode(self.version) {
+                Ok(bytes) => *slot = Some(bytes.freeze()),
+                Err(_) => return,
+            }
+        }
+        if let Some(bytes) = slot.clone() {
+            self.send_raw(bytes);
+        }
+    }
+
     /// Deliver `message` (whose QoS/retain have already been adjusted for
     /// this subscriber) to the live connection, and — for QoS 1/2 — start
     /// tracking it for timed redelivery. The single place a PUBLISH to a
@@ -256,6 +307,36 @@ mod tests {
             shutdown: None,
         });
         (s, rx)
+    }
+
+    #[test]
+    fn shared_qos0_frame_is_encoded_once_and_identical() {
+        let (mut a, mut rx_a) = connected(4);
+        let (mut b, mut rx_b) = connected(4);
+        let mut frames = Qos0Frames::default();
+        let base = msg(QoS::ExactlyOnce);
+        a.deliver_adjusted(&base, QoS::AtMostOnce, false, &mut frames);
+        b.deliver_adjusted(&base, QoS::AtMostOnce, false, &mut frames);
+        let (fa, fb) = (rx_a.try_recv().unwrap(), rx_b.try_recv().unwrap());
+        assert_eq!(fa, fb);
+        assert!(a.pending_redelivery.is_empty(), "QoS 0 is never retried");
+        // Same bytes as the plain path.
+        let (mut c, mut rx_c) = connected(4);
+        c.deliver(msg(QoS::AtMostOnce));
+        assert_eq!(rx_c.try_recv().unwrap(), fa);
+    }
+
+    #[test]
+    fn adjusted_qos1_delivery_is_tracked() {
+        let (mut s, mut rx) = connected(4);
+        s.deliver_adjusted(
+            &msg(QoS::AtLeastOnce),
+            QoS::AtLeastOnce,
+            true,
+            &mut Qos0Frames::default(),
+        );
+        assert!(rx.try_recv().is_ok());
+        assert_eq!(s.pending_redelivery.len(), 1);
     }
 
     #[test]

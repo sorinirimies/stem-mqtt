@@ -90,6 +90,11 @@ pub fn encode_utf8_string(s: &str, out: &mut BytesMut) -> MqttResult<()> {
             "string too long for MQTT encoding".into(),
         ));
     }
+    // MQTT-1.5.4-2: must not include U+0000 (the decoder rejects it, so
+    // encoding one would produce a packet no peer of ours could read back).
+    if s.contains('\0') {
+        return Err(MqttError::Protocol("UTF-8 string contains U+0000".into()));
+    }
     out.put_u16(s.len() as u16);
     out.put_slice(s.as_bytes());
     Ok(())
@@ -200,9 +205,10 @@ mod tests {
 
     #[test]
     fn utf8_string_rejects_nul() {
-        let mut out = BytesMut::new();
-        encode_utf8_string("a\0b", &mut out).unwrap();
-        assert!(decode_utf8_string(&mut out.freeze()).is_err());
+        // Neither direction may carry U+0000 (MQTT-1.5.4-2).
+        assert!(encode_utf8_string("a\0b", &mut BytesMut::new()).is_err());
+        let raw = Bytes::from_static(&[0, 3, b'a', 0, b'b']);
+        assert!(decode_utf8_string(&mut raw.clone()).is_err());
     }
 
     #[test]

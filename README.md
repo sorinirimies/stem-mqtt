@@ -240,7 +240,7 @@ has a one-Pod and a Deployment + Service Kubernetes demo.
 | [`tests/bindings`](tests/bindings) | One end-to-end smoke test per language, run by `scripts/test_bindings.nu`. |
 | [`packaging/`](packaging) | Per-language package templates, Dockerfile and Kubernetes manifests. |
 | [`scripts/`](scripts) | Nushell scripts for bindings, packaging, publishing and releases (tested in `scripts/tests`). |
-| [`fuzz/`](fuzz) | `cargo-fuzz` targets for the packet decoder and topic matching. |
+| [`fuzz/`](fuzz) | `cargo-fuzz` targets: packet decoder, encode/decode round-trip, chunked reads, varint/strings, PUBLISH, topic matching (`just fuzz <target>`). |
 
 There is deliberately no separate "core" crate: `mqtt-client::protocol` is a pure, synchronous codec with
 no networking or async dependencies, so it is the shared foundation for both client and broker.

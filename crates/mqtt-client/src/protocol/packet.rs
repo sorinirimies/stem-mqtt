@@ -237,19 +237,25 @@ impl Packet {
     /// Encode this packet (fixed header + body) as a standalone buffer
     /// ready to write to a socket.
     pub fn encode(&self, version: MqttVersion) -> MqttResult<BytesMut> {
-        let mut body = BytesMut::new();
-        self.encode_body(version, &mut body)?;
-        if body.len() as u32 > MAX_VARINT {
-            return Err(MqttError::Protocol(
-                "packet body exceeds maximum size".into(),
-            ));
-        }
-
-        let mut out = BytesMut::with_capacity(body.len() + 5);
-        let type_byte = ((self.packet_type() as u8) << 4) | (self.header_flags() & 0x0F);
-        out.put_u8(type_byte);
-        encode_varint(body.len() as u32, &mut out)?;
-        out.extend_from_slice(&body);
+        // Encode the body straight into the output buffer behind a reserved
+        // 5-byte header gap (1 type byte + up to 4 length bytes), then write
+        // the real header right-aligned against the body — one allocation,
+        // no body copy.
+        const GAP: usize = 5;
+        let mut out = BytesMut::with_capacity(64);
+        out.put_bytes(0, GAP);
+        self.encode_body(version, &mut out)?;
+        let body_len = out.len() - GAP;
+        let body_len = u32::try_from(body_len)
+            .ok()
+            .filter(|&n| n <= MAX_VARINT)
+            .ok_or_else(|| MqttError::Protocol("packet body exceeds maximum size".into()))?;
+        let mut len_bytes = BytesMut::with_capacity(4);
+        encode_varint(body_len, &mut len_bytes)?;
+        let start = GAP - 1 - len_bytes.len();
+        out[start] = ((self.packet_type() as u8) << 4) | (self.header_flags() & 0x0F);
+        out[start + 1..GAP].copy_from_slice(&len_bytes);
+        let _ = out.split_to(start);
         Ok(out)
     }
 
@@ -342,6 +348,43 @@ impl Packet {
 mod tests {
     use super::*;
     use crate::protocol::QoS;
+
+    /// The header is written right-aligned behind a reserved gap, so every
+    /// remaining-length width (1–4 bytes) must come out contiguous and valid.
+    #[test]
+    fn header_is_correct_for_every_length_width() {
+        for payload_len in [0usize, 100, 126, 127, 200, 16_000, 16_400, 2_100_000] {
+            let packet = Packet::Publish(PublishPacket {
+                dup: false,
+                qos: QoS::AtMostOnce,
+                retain: false,
+                topic: "t".into(),
+                packet_id: None,
+                payload: Bytes::from(vec![0xAB; payload_len]),
+                properties: Properties::new(),
+            });
+            let out = packet.encode(MqttVersion::V5).unwrap();
+            assert_eq!(out[0], 0x30, "payload {payload_len}");
+            let mut buf = BytesMut::from(&out[..]);
+            let decoded = Packet::decode(&mut buf, MqttVersion::V5).unwrap().unwrap();
+            assert_eq!(decoded, packet, "payload {payload_len}");
+            assert!(buf.is_empty(), "no trailing bytes for {payload_len}");
+        }
+    }
+
+    #[test]
+    fn oversized_body_is_rejected() {
+        let packet = Packet::Publish(PublishPacket {
+            dup: false,
+            qos: QoS::AtMostOnce,
+            retain: false,
+            topic: "t".into(),
+            packet_id: None,
+            payload: Bytes::from(vec![0; MAX_VARINT as usize + 1]),
+            properties: Properties::new(),
+        });
+        assert!(packet.encode(MqttVersion::V5).is_err());
+    }
 
     #[test]
     fn ping_roundtrip() {

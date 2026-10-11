@@ -26,3 +26,27 @@ name = "topics"
 path = "fuzz_targets/topics.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "roundtrip"
+path = "fuzz_targets/roundtrip.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "chunked"
+path = "fuzz_targets/chunked.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "varint"
+path = "fuzz_targets/varint.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "publish"
+path = "fuzz_targets/publish.rs"
+test = false
+doc = false

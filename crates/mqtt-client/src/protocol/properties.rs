@@ -123,7 +123,8 @@ impl Properties {
 
     /// Encode `Property Length` + all properties into `out`.
     pub fn encode(&self, out: &mut BytesMut) -> MqttResult<()> {
-        let len = self.body_len() as u32;
+        let len = u32::try_from(self.body_len())
+            .map_err(|_| MqttError::Protocol("properties too long".into()))?;
         encode_varint(len, out)?;
         for prop in &self.0 {
             prop.encode(out)?;

@@ -22,7 +22,7 @@ use tokio::sync::{mpsc, oneshot};
 
 use crate::index::{IndexEntry, SubscriptionIndex};
 use crate::session::{
-    LiveConn, PendingRedelivery, QueuedMessage, Session, ShutdownReason, Subscription,
+    LiveConn, PendingRedelivery, Qos0Frames, QueuedMessage, Session, ShutdownReason, Subscription,
 };
 
 /// How often [`SessionRegistry::retry_pending`] sweeps for unacked
@@ -457,6 +457,7 @@ impl SessionRegistry {
             targets.entry(&pick.client_id).or_default().push(&pick.key);
         }
 
+        let mut frames = Qos0Frames::default();
         for (client_id, keys) in targets {
             let Some(session) = sessions.get(client_id) else {
                 continue; // dropped since the index was read
@@ -470,16 +471,17 @@ impl SessionRegistry {
                 .cloned();
             let Some(sub) = best else { continue };
 
-            let outgoing = QueuedMessage {
-                topic: message.topic.clone(),
-                payload: message.payload.clone(),
-                qos: message.qos.min(sub.qos),
-                retain: message.retain && sub.retain_as_published,
-            };
+            let qos = message.qos.min(sub.qos);
+            let retain = message.retain && sub.retain_as_published;
             if guard.is_connected() {
-                guard.deliver(outgoing);
+                guard.deliver_adjusted(message, qos, retain, &mut frames);
             } else if !guard.clean_start {
-                guard.enqueue_offline(outgoing);
+                guard.enqueue_offline(QueuedMessage {
+                    topic: message.topic.clone(),
+                    payload: message.payload.clone(),
+                    qos,
+                    retain,
+                });
             }
         }
     }
