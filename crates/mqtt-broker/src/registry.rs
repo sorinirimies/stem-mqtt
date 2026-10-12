@@ -7,7 +7,7 @@
 //! composes alongside this registry rather than folding into it.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
@@ -22,8 +22,9 @@ use tokio::sync::{mpsc, oneshot};
 
 use crate::index::{IndexEntry, SubscriptionIndex};
 use crate::session::{
-    LiveConn, PendingRedelivery, Qos0Frames, QueuedMessage, Session, ShutdownReason, Subscription,
-    MAX_INCOMING_QOS2, MAX_INCOMING_QOS2_BYTES, MAX_SUBSCRIPTIONS_PER_SESSION,
+    LiveConn, OutboundBudget, PendingRedelivery, Qos0Frames, QueuedMessage, Session,
+    ShutdownReason, Subscription, MAX_INCOMING_QOS2, MAX_INCOMING_QOS2_BYTES,
+    MAX_SUBSCRIPTIONS_PER_SESSION,
 };
 
 /// How often [`SessionRegistry::retry_pending`] sweeps for unacked
@@ -48,6 +49,8 @@ pub struct AttachRequest {
     pub max_clients: u32,
     /// Writer-task channel for this connection.
     pub sender: mpsc::Sender<Bytes>,
+    /// Byte budget for that channel (shared with the writer task).
+    pub budget: OutboundBudget,
     /// Lets the registry (eviction, broker stop) shut this connection down.
     pub shutdown: oneshot::Sender<ShutdownReason>,
 }
@@ -57,6 +60,8 @@ pub struct AttachRequest {
 pub enum AttachError {
     /// `max_clients` simultaneous connections are already live.
     QuotaExceeded,
+    /// The broker is stopping (or stopped); no new connections are taken.
+    Stopped,
 }
 
 /// Result of [`SessionRegistry::add_subscription`].
@@ -95,6 +100,9 @@ pub struct SessionRegistry {
     index: RwLock<SubscriptionIndex>,
     /// Round-robin cursor for shared-subscription groups.
     shared_cursor: AtomicUsize,
+    /// Set by [`Self::shutdown_all`]; makes [`Self::attach`] refuse, so a
+    /// connection that finishes its handshake after `stop()` can't slip in.
+    closed: AtomicBool,
 }
 
 impl SessionRegistry {
@@ -105,6 +113,7 @@ impl SessionRegistry {
             next_conn_id: AtomicU64::new(1),
             index: RwLock::new(SubscriptionIndex::default()),
             shared_cursor: AtomicUsize::new(0),
+            closed: AtomicBool::new(false),
         }
     }
 
@@ -114,6 +123,11 @@ impl SessionRegistry {
         for key in session.subscriptions.keys() {
             index.remove(client_id, key);
         }
+    }
+
+    /// Accept connections again (the broker was restarted).
+    pub fn reopen(&self) {
+        self.closed.store(false, Ordering::Release);
     }
 
     pub fn client_count(&self) -> u32 {
@@ -138,6 +152,9 @@ impl SessionRegistry {
     /// CONNECT can interleave.
     pub fn attach(&self, req: AttachRequest) -> Result<Attached, AttachError> {
         let mut sessions = self.sessions.write_safe();
+        if self.closed.load(Ordering::Acquire) {
+            return Err(AttachError::Stopped);
+        }
         let existing = sessions.get(&req.client_id).cloned();
 
         let was_connected = existing
@@ -190,6 +207,7 @@ impl SessionRegistry {
             guard.conn = Some(LiveConn {
                 id: conn_id,
                 sender: req.sender,
+                budget: req.budget,
                 shutdown: Some(req.shutdown),
             });
         }
@@ -241,6 +259,9 @@ impl SessionRegistry {
     /// Ask every live connection to shut down (broker stop). Sessions and
     /// their queued state are left intact.
     pub fn shutdown_all(&self) {
+        // Flag first: an `attach` that runs after this sees it and refuses; one
+        // that already ran is in the map and gets signalled below.
+        self.closed.store(true, Ordering::Release);
         let sessions = self.sessions.read_safe();
         for session in sessions.values() {
             if let Some(conn) = session.lock_safe().conn.as_mut() {
@@ -576,6 +597,7 @@ mod tests {
                 max_queued: 10,
                 max_clients,
                 sender,
+                budget: OutboundBudget::new(1 << 20),
                 shutdown,
             },
             Peer {
@@ -880,5 +902,17 @@ mod tests {
             registry.store_incoming_qos2("big", 2, qos2_publish(2, 1)),
             "bytes released"
         );
+    }
+
+    #[test]
+    fn attach_is_refused_after_shutdown_until_reopened() {
+        let registry = SessionRegistry::new();
+        registry.shutdown_all();
+        let (req, _peer) = request("late", true, 0);
+        assert_eq!(registry.attach(req).unwrap_err(), AttachError::Stopped);
+        assert_eq!(registry.client_count(), 0);
+        registry.reopen();
+        let (req, _peer) = request("late", true, 0);
+        assert!(registry.attach(req).is_ok());
     }
 }

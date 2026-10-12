@@ -62,6 +62,11 @@ pub(super) struct Inner {
     /// When the last packet of *any* kind arrived from the broker; the
     /// keep-alive loop uses it to detect a half-open connection.
     last_rx: Mutex<Instant>,
+    /// `true` while the read loop is inside [`super::io::handle_incoming`]
+    /// (which runs foreign listener callbacks). A slow callback stalls
+    /// reading, which is not the broker going quiet, so the keep-alive loop
+    /// must not count that time as silence.
+    busy: AtomicBool,
 }
 
 impl Inner {
@@ -83,6 +88,7 @@ impl Inner {
             keepalive_task: AsyncMutex::new(None),
             operation_timeout,
             last_rx: Mutex::new(Instant::now()),
+            busy: AtomicBool::new(false),
         }
     }
 
@@ -112,6 +118,14 @@ impl Inner {
     /// Record that the broker just sent us something.
     pub fn touch(&self) {
         *self.last_rx.lock_safe() = Instant::now();
+    }
+
+    pub fn set_busy(&self, busy: bool) {
+        self.busy.store(busy, Ordering::Relaxed);
+    }
+
+    pub fn is_busy(&self) -> bool {
+        self.busy.load(Ordering::Relaxed)
     }
 
     /// How long since the broker last sent us anything.

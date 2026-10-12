@@ -1502,3 +1502,57 @@ async fn absurdly_deep_filter_is_rejected_not_fatal() {
     c.connect().await.unwrap();
     broker.stop().await.unwrap();
 }
+
+#[tokio::test]
+async fn without_a_provider_a_username_grants_nothing() {
+    let (broker, port) = start_broker(|c| c.allow_anonymous = false).await;
+    let mut opts = ConnectOptions::new("127.0.0.1", port, "guesser", MqttVersion::V5);
+    opts.username = Some("anyone".into());
+    opts.password = Some(b"anything".to_vec());
+    let with_name = MqttClient::new(opts).connect().await;
+    assert!(
+        matches!(with_name, Err(mqtt_client::MqttError::ConnectionRefused(_))),
+        "{with_name:?}"
+    );
+    let anon = client(port, "anon").connect().await;
+    assert!(anon.is_err(), "anonymous is off too");
+    assert_eq!(broker.client_count(), 0);
+    broker.stop().await.unwrap();
+}
+
+#[tokio::test]
+async fn clients_cannot_publish_to_reserved_dollar_topics() {
+    let (broker, port) = start_broker(|_| {}).await;
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let observer = client(port, "observer");
+    observer.set_message_listener(Arc::new(ChannelListener { tx }));
+    observer.connect().await.unwrap();
+    observer
+        .subscribe("$SYS/#".into(), QoS::AtLeastOnce)
+        .await
+        .unwrap();
+
+    let publisher = client(port, "spoofer");
+    publisher.connect().await.unwrap();
+    // Still acknowledged (so the sender isn't left retrying)...
+    publisher
+        .publish(
+            "$SYS/broker/uptime".into(),
+            b"0".to_vec(),
+            QoS::AtLeastOnce,
+            true,
+        )
+        .await
+        .unwrap();
+    // ...but neither delivered nor retained.
+    assert_no_message(&mut rx).await;
+    let late = client(port, "late");
+    let (tx2, mut rx2) = mpsc::unbounded_channel();
+    late.set_message_listener(Arc::new(ChannelListener { tx: tx2 }));
+    late.connect().await.unwrap();
+    late.subscribe("$SYS/#".into(), QoS::AtLeastOnce)
+        .await
+        .unwrap();
+    assert_no_message(&mut rx2).await;
+    broker.stop().await.unwrap();
+}

@@ -694,7 +694,9 @@ jobs:
         if: matrix.language != 'java' && matrix.language != 'csharp' && matrix.language != 'node'
       - name: Log in to ghcr.io
         if: matrix.language != 'java' && matrix.language != 'csharp' && matrix.language != 'node'
-        run: echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin
+        env:
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "$REGISTRY_TOKEN" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin
 
       - name: Publish ${{ matrix.language }}
         env:

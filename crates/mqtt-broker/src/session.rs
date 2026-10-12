@@ -3,6 +3,8 @@
 //! redelivery tracking.
 
 use std::collections::{HashMap, VecDeque};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::time::Instant;
 
 use bytes::Bytes;
@@ -114,6 +116,48 @@ pub enum ShutdownReason {
     BrokerStopped,
 }
 
+/// Byte budget for the encoded packets waiting in one connection's outbound
+/// channel. The channel is bounded by packet *count*; this bounds it by
+/// *size* too, so a client that stops reading can't make the broker buffer
+/// `capacity x max packet size`. Cloned into the writer task, which releases
+/// each packet's bytes once it has been written.
+#[derive(Clone)]
+pub struct OutboundBudget {
+    used: Arc<AtomicUsize>,
+    limit: usize,
+}
+
+impl OutboundBudget {
+    pub fn new(limit: usize) -> Self {
+        OutboundBudget {
+            used: Arc::new(AtomicUsize::new(0)),
+            limit,
+        }
+    }
+
+    /// Reserve `n` bytes; `false` (nothing reserved) if that would exceed the limit.
+    fn try_reserve(&self, n: usize) -> bool {
+        let mut used = self.used.load(Ordering::Acquire);
+        loop {
+            let Some(total) = used.checked_add(n).filter(|t| *t <= self.limit) else {
+                return false;
+            };
+            match self
+                .used
+                .compare_exchange_weak(used, total, Ordering::AcqRel, Ordering::Acquire)
+            {
+                Ok(_) => return true,
+                Err(current) => used = current,
+            }
+        }
+    }
+
+    /// Give back `n` bytes (a packet was written, or never queued).
+    pub fn release(&self, n: usize) {
+        self.used.fetch_sub(n, Ordering::AcqRel);
+    }
+}
+
 /// The live network connection currently attached to a [`Session`].
 pub struct LiveConn {
     /// Unique per accepted connection. Lets a connection task tell, at
@@ -124,6 +168,8 @@ pub struct LiveConn {
     pub id: u64,
     /// Bounded channel of encoded packets to the connection's writer task.
     pub sender: mpsc::Sender<Bytes>,
+    /// Byte budget shared with the writer task.
+    pub budget: OutboundBudget,
     /// Fires to tell the connection task to shut down.
     pub shutdown: Option<oneshot::Sender<ShutdownReason>>,
 }
@@ -218,13 +264,22 @@ impl Session {
         let Some(conn) = &self.conn else {
             return false;
         };
+        let len = bytes.len();
+        if !conn.budget.try_reserve(len) {
+            tracing::debug!(client_id = %self.client_id, "outbound byte budget spent; dropping packet");
+            return false;
+        }
         match conn.sender.try_send(bytes) {
             Ok(()) => true,
             Err(mpsc::error::TrySendError::Full(_)) => {
+                conn.budget.release(len);
                 tracing::debug!(client_id = %self.client_id, "outbound queue full; dropping packet");
                 false
             }
-            Err(mpsc::error::TrySendError::Closed(_)) => false,
+            Err(mpsc::error::TrySendError::Closed(_)) => {
+                conn.budget.release(len);
+                false
+            }
         }
     }
 
@@ -316,6 +371,7 @@ mod tests {
         s.conn = Some(LiveConn {
             id: 1,
             sender: tx,
+            budget: OutboundBudget::new(1 << 20),
             shutdown: None,
         });
         (s, rx)
@@ -349,6 +405,29 @@ mod tests {
         );
         assert!(rx.try_recv().is_ok());
         assert_eq!(s.pending_redelivery.len(), 1);
+    }
+
+    #[test]
+    fn byte_budget_drops_what_does_not_fit_and_recovers() {
+        let mut s = Session::new("c".into(), MqttVersion::V5, true, 2);
+        let (tx, mut rx) = mpsc::channel(64);
+        let budget = OutboundBudget::new(10);
+        s.conn = Some(LiveConn {
+            id: 1,
+            sender: tx,
+            budget: budget.clone(),
+            shutdown: None,
+        });
+        assert!(s.send_raw(Bytes::from_static(&[0; 6])));
+        assert!(!s.send_raw(Bytes::from_static(&[0; 6])), "6 + 6 > 10");
+        assert!(
+            s.send_raw(Bytes::from_static(&[0; 4])),
+            "6 + 4 fits exactly"
+        );
+        // The writer task releases bytes as it drains; room reopens.
+        let first = rx.try_recv().unwrap();
+        budget.release(first.len());
+        assert!(s.send_raw(Bytes::from_static(&[0; 6])));
     }
 
     #[test]

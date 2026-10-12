@@ -213,11 +213,12 @@ jobs:
           find . -empty -type d -delete 2>/dev/null || true
 
       - name: Create Gitea Release
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${{ needs.validate.outputs.tag }}"
           GITEA_URL="${{ github.server_url }}"
           REPO="${{ github.repository }}"
-          TOKEN="${{ secrets.GITHUB_TOKEN }}"
 
           RELEASE_BODY=$(python3 -c 'import sys,json; print(json.dumps(open("RELEASE_NOTES.md").read()))')
           RESPONSE=$(curl -s -X POST \
@@ -382,9 +383,11 @@ jobs:
 
       - name: Log in to the container registry
         if: env.HAS_TOKEN == 'true' && (matrix.language == 'go' || matrix.language == 'dart' || matrix.language == 'haskell')
+        env:
+          REGISTRY_TOKEN: ${{ secrets.PACKAGES_TOKEN }}
         run: |
           host="$(echo '${{ github.server_url }}' | sed -E 's#^https?://##')"
-          echo "${{ secrets.PACKAGES_TOKEN }}" | oras login "$host" -u "${{ github.repository_owner }}" --password-stdin --plain-http
+          echo "$REGISTRY_TOKEN" | oras login "$host" -u "${{ github.repository_owner }}" --password-stdin --plain-http
 
       - name: Publish ${{ matrix.language }} to Gitea packages
         if: env.HAS_TOKEN == 'true'

@@ -28,6 +28,10 @@ use super::types::{ConnectOptions, MqttMessage};
 use crate::protocol::QoS;
 use crate::support::LockExt;
 
+/// Most inbound QoS 2 PUBLISHes (awaiting PUBREL) held at once. A broker that
+/// never sends PUBREL would otherwise grow this map without bound.
+const MAX_INCOMING_QOS2: usize = 1024;
+
 /// Build the CONNECT packet body for a [`ConnectOptions`].
 pub(super) fn build_connect_packet(options: &ConnectOptions) -> ConnectPacket {
     let will = options.will.as_ref().map(|w| Will {
@@ -171,7 +175,11 @@ pub(super) async fn read_loop(
         match Packet::decode_with_limit(&mut buf, inner.version, max_packet_size) {
             Ok(Some(packet)) => {
                 inner.touch();
-                if !handle_incoming(&inner, packet).await {
+                inner.set_busy(true);
+                let keep_going = handle_incoming(&inner, packet).await;
+                inner.set_busy(false);
+                inner.touch(); // time spent in callbacks isn't broker silence
+                if !keep_going {
                     return;
                 }
             }
@@ -217,7 +225,18 @@ pub(super) async fn handle_incoming(inner: &Arc<Inner>, packet: Packet) -> bool 
                     let _ = send_packet(inner, &Packet::PubAck(SimpleAck::success(id))).await;
                 }
                 (QoS::ExactlyOnce, Some(id)) => {
-                    inner.incoming_qos2.lock_safe().insert(id, message);
+                    {
+                        let mut held = inner.incoming_qos2.lock_safe();
+                        if held.len() >= MAX_INCOMING_QOS2 && !held.contains_key(&id) {
+                            drop(held);
+                            finish_disconnected(
+                                inner,
+                                "broker exceeded the inbound QoS 2 limit".into(),
+                            );
+                            return false;
+                        }
+                        held.insert(id, message);
+                    }
                     let _ = send_packet(inner, &Packet::PubRec(SimpleAck::success(id))).await;
                 }
                 // QoS > 0 without a packet id is rejected by the decoder.
@@ -267,7 +286,7 @@ pub(super) async fn keepalive_loop(inner: Arc<Inner>, keep_alive_secs: u16) {
         if !inner.is_connected() {
             return;
         }
-        if inner.idle_for() > dead_after {
+        if !inner.is_busy() && inner.idle_for() > dead_after {
             finish_disconnected(&inner, "keep-alive timeout: no data from broker".into());
             // The read loop is likely parked on a dead socket; stop it so
             // the socket is released instead of lingering until the OS
@@ -281,5 +300,56 @@ pub(super) async fn keepalive_loop(inner: Arc<Inner>, keep_alive_secs: u16) {
             // `send_packet` already reported the loss.
             return;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::client::inner::ListenerSlot;
+    use crate::protocol::publish::PublishPacket;
+    use crate::protocol::MqttVersion;
+
+    fn inner() -> Arc<Inner> {
+        let (a, _b) = tokio::io::duplex(1 << 16);
+        let transport: Box<dyn Transport> = Box::new(a);
+        let (_r, w) = tokio::io::split(transport);
+        let slot: ListenerSlot = Arc::default();
+        Arc::new(Inner::new(MqttVersion::V5, w, slot, Duration::from_secs(1)))
+    }
+
+    fn qos2(id: u16) -> Packet {
+        Packet::Publish(PublishPacket {
+            dup: false,
+            qos: QoS::ExactlyOnce,
+            retain: false,
+            topic: "t".into(),
+            packet_id: Some(id),
+            payload: Bytes::from_static(b"x"),
+            properties: Properties::new(),
+        })
+    }
+
+    #[tokio::test]
+    async fn inbound_qos2_is_bounded() {
+        let inner = inner();
+        for id in 1..=MAX_INCOMING_QOS2 as u16 {
+            assert!(handle_incoming(&inner, qos2(id)).await);
+        }
+        // A retransmitted id is fine; a new one past the cap is a violation.
+        assert!(handle_incoming(&inner, qos2(1)).await);
+        let over = MAX_INCOMING_QOS2 as u16 + 1;
+        assert!(!handle_incoming(&inner, qos2(over)).await);
+        assert!(!inner.is_connected());
+    }
+
+    #[tokio::test]
+    async fn pubrel_releases_a_held_qos2_slot() {
+        let inner = inner();
+        assert!(handle_incoming(&inner, qos2(5)).await);
+        assert_eq!(inner.incoming_qos2.lock_safe().len(), 1);
+        let rel = Packet::PubRel(SimpleAck::success(5));
+        assert!(handle_incoming(&inner, rel).await);
+        assert!(inner.incoming_qos2.lock_safe().is_empty());
     }
 }

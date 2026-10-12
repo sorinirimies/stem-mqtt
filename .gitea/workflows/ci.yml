@@ -196,11 +196,11 @@ jobs:
         continue-on-error: true
         if: matrix.language == 'go'
         with:
-          go-version: stable
+          go-version: "1.24.x"
       - uses: actions/setup-go@v5
         if: steps.setup_try_1.outcome == 'failure'
         with:
-          go-version: stable
+          go-version: "1.24.x"
       # (retried once: the runner's network to the toolchain CDNs is flaky)
       - uses: actions/setup-dotnet@v4
         id: setup_try_2

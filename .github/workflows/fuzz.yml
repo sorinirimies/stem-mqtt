@@ -9,6 +9,9 @@ on:
         description: "Seconds per target"
         default: "120"
 
+permissions:
+  contents: read
+
 jobs:
   fuzz:
     name: cargo-fuzz (${{ matrix.target }})

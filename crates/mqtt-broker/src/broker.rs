@@ -13,6 +13,7 @@ use std::time::Duration;
 use mqtt_client::support::LockExt;
 use mqtt_client::QoS;
 use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::task::JoinHandle;
 
 use crate::config::{
@@ -41,6 +42,9 @@ pub(crate) struct BrokerState {
     pub auth_provider: Mutex<Option<SharedAuthProvider>>,
     pub enhanced_auth: Mutex<Option<SharedEnhancedAuth>>,
     pub events: EventHub,
+    /// Bounds sockets that haven't completed CONNECT yet (see
+    /// [`MAX_UNAUTHENTICATED_CONNECTIONS`]).
+    pub handshakes: Arc<Semaphore>,
 }
 
 impl BrokerState {
@@ -53,6 +57,7 @@ impl BrokerState {
             auth_provider: Mutex::new(None),
             enhanced_auth: Mutex::new(None),
             events: EventHub::new(),
+            handshakes: Arc::new(Semaphore::new(MAX_UNAUTHENTICATED_CONNECTIONS)),
         }
     }
 
@@ -99,6 +104,16 @@ impl BrokerState {
         self.sessions.fan_out(client_id, &message);
     }
 }
+
+/// Most sockets that may be open at once *before* they have completed CONNECT
+/// (TCP, TLS or WebSocket handshake included). `max_clients` only counts
+/// attached sessions, so without this a flood of silent connections could
+/// exhaust file descriptors and tasks. A connection gives its slot back the
+/// moment it attaches; excess sockets are closed immediately.
+pub const MAX_UNAUTHENTICATED_CONNECTIONS: usize = 1024;
+
+/// Held by a connection until it has attached a session.
+pub(crate) type HandshakePermit = OwnedSemaphorePermit;
 
 /// How long a peer gets to finish a TLS / WebSocket handshake before it's
 /// dropped. Without a bound, a client that opens a socket and goes silent
@@ -204,6 +219,19 @@ impl MqttBroker {
             return Err(MqttBrokerError::AlreadyRunning);
         }
         let config = &self.state.config;
+        self.state.sessions.reopen();
+        if config.allow_anonymous
+            && self.state.auth_provider.lock_safe().is_none()
+            && self.state.enhanced_auth.lock_safe().is_none()
+            && config.tls.is_none()
+            && !is_loopback(&config.bind_address)
+        {
+            tracing::warn!(
+                bind = %config.bind_address,
+                "broker is open to anonymous, unencrypted clients on a non-loopback address; \
+                 set allow_anonymous = false with an auth provider, or enable TLS"
+            );
+        }
 
         // ── Bind everything first ────────────────────────────────────────
         let tls = match &config.tls {
@@ -229,28 +257,36 @@ impl MqttBroker {
 
         // ── Then start accepting ─────────────────────────────────────────
         let state = self.state.clone();
-        running
-            .tasks
-            .push(spawn_accept_loop(tcp, "tcp", move |stream, peer| {
-                handle_connection(state.clone(), stream, peer)
-            }));
+        let limiter = self.state.handshakes.clone();
+        running.tasks.push(spawn_accept_loop(
+            tcp,
+            "tcp",
+            limiter.clone(),
+            move |stream, peer, permit| handle_connection(state.clone(), stream, peer, permit),
+        ));
 
         if let Some(listener) = ws {
             let state = self.state.clone();
-            running
-                .tasks
-                .push(spawn_accept_loop(listener, "ws", move |stream, peer| {
-                    accept_ws_connection(state.clone(), stream, peer)
-                }));
+            running.tasks.push(spawn_accept_loop(
+                listener,
+                "ws",
+                limiter.clone(),
+                move |stream, peer, permit| {
+                    accept_ws_connection(state.clone(), stream, peer, permit)
+                },
+            ));
         }
 
         if let Some((acceptor, listener)) = tls {
             let state = self.state.clone();
-            running
-                .tasks
-                .push(spawn_accept_loop(listener, "tls", move |stream, peer| {
-                    accept_tls_connection(state.clone(), acceptor.clone(), stream, peer)
-                }));
+            running.tasks.push(spawn_accept_loop(
+                listener,
+                "tls",
+                limiter.clone(),
+                move |stream, peer, permit| {
+                    accept_tls_connection(state.clone(), acceptor.clone(), stream, peer, permit)
+                },
+            ));
         }
 
         let state = self.state.clone();
@@ -330,6 +366,14 @@ impl Drop for MqttBroker {
     }
 }
 
+/// Whether `address` is a loopback literal (or `localhost`).
+fn is_loopback(address: &str) -> bool {
+    address.eq_ignore_ascii_case("localhost")
+        || address
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback())
+}
+
 async fn bind(address: &str, port: u16) -> MqttBrokerResult<TcpListener> {
     Ok(TcpListener::bind((address, port)).await?)
 }
@@ -352,18 +396,23 @@ fn local_port(listener: &TcpListener, fallback: u16) -> u16 {
 fn spawn_accept_loop<F, Fut>(
     listener: TcpListener,
     transport: &'static str,
+    limiter: Arc<Semaphore>,
     mut on_connection: F,
 ) -> JoinHandle<()>
 where
-    F: FnMut(TcpStream, String) -> Fut + Send + 'static,
+    F: FnMut(TcpStream, String, HandshakePermit) -> Fut + Send + 'static,
     Fut: Future<Output = ()> + Send + 'static,
 {
     tokio::spawn(async move {
         loop {
             match listener.accept().await {
                 Ok((stream, peer)) => {
+                    let Ok(permit) = limiter.clone().try_acquire_owned() else {
+                        tracing::warn!(%peer, transport, "too many unauthenticated connections; dropping");
+                        continue; // `stream` drops, closing the socket
+                    };
                     stream.set_nodelay(true).ok();
-                    tokio::spawn(on_connection(stream, peer.to_string()));
+                    tokio::spawn(on_connection(stream, peer.to_string(), permit));
                 }
                 Err(e) => {
                     tracing::warn!(error = %e, transport, "accept() failed; retrying");
@@ -383,9 +432,10 @@ async fn accept_tls_connection(
     acceptor: tokio_rustls::TlsAcceptor,
     stream: TcpStream,
     peer: String,
+    permit: HandshakePermit,
 ) {
     match tokio::time::timeout(HANDSHAKE_TIMEOUT, acceptor.accept(stream)).await {
-        Ok(Ok(tls_stream)) => handle_connection(state, tls_stream, peer).await,
+        Ok(Ok(tls_stream)) => handle_connection(state, tls_stream, peer, permit).await,
         Ok(Err(e)) => tracing::debug!(%peer, error = %e, "TLS handshake failed"),
         Err(_) => tracing::debug!(%peer, "TLS handshake timed out"),
     }
@@ -394,7 +444,12 @@ async fn accept_tls_connection(
 /// Complete the WebSocket upgrade handshake (negotiating the `mqtt`
 /// subprotocol per MQTT-5.0 §6.4.1), then hand off to the same
 /// [`handle_connection`] every raw-TCP connection goes through.
-async fn accept_ws_connection(state: Arc<BrokerState>, stream: TcpStream, peer: String) {
+async fn accept_ws_connection(
+    state: Arc<BrokerState>,
+    stream: TcpStream,
+    peer: String,
+    permit: HandshakePermit,
+) {
     // Cap a single WebSocket message/frame at the MQTT packet limit (plus
     // slack for framing), so the transport can't be used to buffer more than
     // the packet decoder itself would ever accept.
@@ -449,5 +504,48 @@ async fn accept_ws_connection(state: Arc<BrokerState>, stream: TcpStream, peer: 
         }
     };
 
-    handle_connection(state, WsByteStream::new(ws_stream), peer).await;
+    handle_connection(state, WsByteStream::new(ws_stream), peer, permit).await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::AsyncReadExt;
+
+    #[tokio::test]
+    async fn sockets_beyond_the_unauthenticated_limit_are_closed() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let limiter = Arc::new(Semaphore::new(2));
+        // Handlers hold their permit forever, like silent pre-CONNECT peers.
+        let task = spawn_accept_loop(
+            listener,
+            "test",
+            limiter,
+            |_stream, _peer, permit| async move {
+                let _keep = permit;
+                let _stream = _stream;
+                std::future::pending::<()>().await;
+            },
+        );
+
+        let a = TcpStream::connect(addr).await.unwrap();
+        let b = TcpStream::connect(addr).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let mut c = TcpStream::connect(addr).await.unwrap();
+        let mut byte = [0u8; 1];
+        let n = tokio::time::timeout(Duration::from_secs(2), c.read(&mut byte))
+            .await
+            .expect("excess socket should be closed promptly")
+            .unwrap_or(0);
+        assert_eq!(n, 0, "third socket is dropped by the broker");
+        drop((a, b));
+        task.abort();
+    }
+
+    #[test]
+    fn loopback_detection() {
+        assert!(is_loopback("127.0.0.1") && is_loopback("::1") && is_loopback("localhost"));
+        assert!(!is_loopback("0.0.0.0") && !is_loopback("::") && !is_loopback("192.168.1.2"));
+    }
 }

@@ -20,10 +20,10 @@ use mqtt_client::{MqttError, MqttVersion, QoS};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::{mpsc, oneshot};
 
-use crate::broker::BrokerState;
+use crate::broker::{BrokerState, HandshakePermit};
 use crate::config::{EnhancedAuthOutcome, EnhancedAuthStep};
 use crate::registry::{AttachError, AttachRequest, SubscribeOutcome};
-use crate::session::{QueuedMessage, ShutdownReason, Subscription};
+use crate::session::{OutboundBudget, QueuedMessage, ShutdownReason, Subscription};
 use crate::topic::{is_valid_filter, is_valid_topic_name};
 use mqtt_client::protocol::topic::{classify_filter, FilterKind};
 
@@ -44,8 +44,12 @@ const UNSUB_NO_SUBSCRIPTION: u8 = 0x11;
 /// transport so the exact same logic drives both raw TCP
 /// ([`crate::broker::MqttBroker::start`]) and MQTT-over-WebSocket
 /// ([`crate::ws::WsByteStream`]) connections.
-pub(crate) async fn handle_connection<S>(state: Arc<BrokerState>, stream: S, peer: String)
-where
+pub(crate) async fn handle_connection<S>(
+    state: Arc<BrokerState>,
+    stream: S,
+    peer: String,
+    handshake: HandshakePermit,
+) where
     S: AsyncRead + AsyncWrite + Send + Unpin + 'static,
 {
     let (mut reader, mut writer) = tokio::io::split(stream);
@@ -65,7 +69,7 @@ where
     // MQTT-3.1.3-2: the will topic is a Topic Name — never a wildcard
     // filter. Unchecked, it would be published (and retained) verbatim.
     if let Some(will) = &connect.will {
-        if !is_valid_topic_name(&will.topic) {
+        if !is_valid_topic_name(&will.topic) || will.topic.starts_with('$') {
             reject(&mut writer, version, ConnectReasonCode::TOPIC_NAME_INVALID).await;
             return;
         }
@@ -130,6 +134,7 @@ where
     // ── Take over / create the session ───────────────────────────────────
     let (tx, mut rx) = mpsc::channel::<Bytes>(state.config.outbound_queue_capacity());
     let (shutdown_tx, mut shutdown_rx) = oneshot::channel::<ShutdownReason>();
+    let budget = OutboundBudget::new(state.config.outbound_queue_bytes());
     let attached = match state.sessions.attach(AttachRequest {
         client_id: client_id.clone(),
         version,
@@ -138,6 +143,7 @@ where
         max_queued: state.config.max_queued_per_client as usize,
         max_clients: state.config.max_clients,
         sender: tx,
+        budget: budget.clone(),
         shutdown: shutdown_tx,
     }) {
         Ok(attached) => attached,
@@ -145,13 +151,21 @@ where
             reject(&mut writer, version, ConnectReasonCode::QUOTA_EXCEEDED).await;
             return;
         }
+        Err(AttachError::Stopped) => {
+            reject(&mut writer, version, ConnectReasonCode::SERVER_UNAVAILABLE).await;
+            return;
+        }
     };
     let conn_id = attached.conn_id;
+    drop(handshake); // authenticated and attached: no longer a pending socket
 
     // Writer task: drains the channel to the socket.
     let writer_task = tokio::spawn(async move {
         while let Some(bytes) = rx.recv().await {
-            if writer.write_all(&bytes).await.is_err() {
+            let len = bytes.len();
+            let written = writer.write_all(&bytes).await;
+            budget.release(len);
+            if written.is_err() {
                 break;
             }
         }
@@ -227,7 +241,8 @@ where
 
 /// Decide whether `connect` may proceed: the registered
 /// [`MqttAuthProvider`](crate::config::MqttAuthProvider) has the final say;
-/// without one, anonymous access is governed by `allow_anonymous`.
+/// without one, `allow_anonymous` decides for everybody (there is nothing to
+/// verify a username against, so supplying one grants nothing).
 ///
 /// The provider is foreign code that may block (a database or network
 /// lookup is typical), so it runs on the blocking pool rather than
@@ -236,7 +251,10 @@ where
 async fn authenticate(state: &Arc<BrokerState>, client_id: &str, connect: &ConnectPacket) -> bool {
     let provider = state.auth_provider.lock_safe().clone();
     let Some(provider) = provider else {
-        return state.config.allow_anonymous || connect.username.is_some();
+        // Fail closed, as Mosquitto/VerneMQ/HiveMQ do: with nothing able to
+        // verify credentials, a username proves nothing, so the only choice
+        // is "everyone" (`allow_anonymous`) or "no one".
+        return state.config.allow_anonymous;
     };
     let client_id = client_id.to_string();
     let username = connect.username.clone();
@@ -483,11 +501,27 @@ fn handle_publish(state: &Arc<BrokerState>, client_id: &str, p: PublishPacket) -
         return false;
     }
 
-    if p.retain {
+    // Topics starting with `$` are broker-reserved (`$SYS/…`, `$share/…`); a
+    // client may not publish to them (MQTT-5.0 §4.7.2). Acknowledge per QoS so
+    // the sender isn't left retrying, but neither retain nor deliver.
+    let reserved = p.topic.starts_with('$');
+
+    if p.retain && !reserved {
         state.retained.update(&p);
     }
 
     match (p.qos, p.packet_id) {
+        (QoS::AtMostOnce, _) if reserved => {}
+        (QoS::AtLeastOnce, Some(id)) if reserved => {
+            state
+                .sessions
+                .send_to(client_id, &Packet::PubAck(SimpleAck::success(id)));
+        }
+        (QoS::ExactlyOnce, Some(id)) if reserved => {
+            state
+                .sessions
+                .send_to(client_id, &Packet::PubRec(SimpleAck::success(id)));
+        }
         (QoS::AtMostOnce, _) => dispatch_publish(state, client_id, &QueuedMessage::from(&p)),
         (QoS::AtLeastOnce, id) => {
             dispatch_publish(state, client_id, &QueuedMessage::from(&p));

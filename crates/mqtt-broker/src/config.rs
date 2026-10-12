@@ -12,6 +12,13 @@ use mqtt_client::support::secs_or;
 /// buffering.
 pub const DEFAULT_MAX_PACKET_SIZE: u32 = 1024 * 1024;
 
+/// Default cap, in bytes, on the encoded packets queued for one client's
+/// socket (see [`MqttBrokerConfig::max_outbound_queue`] for the packet-count
+/// cap). Bounds a slow subscriber receiving large messages, which the count
+/// alone would let grow to `count x max packet size`. Never below four
+/// maximum-size packets.
+pub const DEFAULT_MAX_OUTBOUND_BYTES: usize = 16 * 1024 * 1024;
+
 /// Default number of encoded packets that may be queued for one client's
 /// socket before further deliveries to it are dropped (see
 /// [`MqttBrokerConfig::max_outbound_queue`]).
@@ -71,9 +78,10 @@ pub struct MqttBrokerConfig {
     /// convention), which is why this is `Option<u16>` rather than reusing
     /// `0` itself as the "disabled" sentinel.
     pub ws_port: Option<u16>,
-    /// Accept connections without a username/password when no
-    /// [`MqttAuthProvider`] is registered. Ignored if an auth provider is
-    /// set — the provider always makes the final decision.
+    /// With no [`MqttAuthProvider`] registered, whether *everyone* may connect
+    /// (`true`) or *no one* may (`false`) — there is nothing to verify a
+    /// username against, so supplying one grants nothing. Ignored if an auth
+    /// provider is set — the provider always makes the final decision.
     pub allow_anonymous: bool,
     /// Maximum simultaneously connected clients. `0` means unlimited.
     pub max_clients: u32,
@@ -182,6 +190,10 @@ impl MqttBrokerConfig {
             0 => DEFAULT_MAX_PACKET_SIZE as usize,
             n => n as usize,
         }
+    }
+
+    pub(crate) fn outbound_queue_bytes(&self) -> usize {
+        DEFAULT_MAX_OUTBOUND_BYTES.max(self.max_packet_size_bytes().saturating_mul(4))
     }
 
     pub(crate) fn outbound_queue_capacity(&self) -> usize {
