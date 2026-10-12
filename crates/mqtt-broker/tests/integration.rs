@@ -1402,3 +1402,103 @@ mod enhanced_auth {
         assert!(matches!(err, mqtt_client::MqttError::Protocol(m) if m.contains("MQTT 5.0")));
     }
 }
+
+// ── Hardening regressions ───────────────────────────────────────────────
+
+#[tokio::test]
+async fn wildcard_will_topic_is_refused() {
+    // The client library validates this locally, so speak raw TCP.
+    let (broker, port) = start_broker(|_| {}).await;
+    let stream = tokio::net::TcpStream::connect(("127.0.0.1", port))
+        .await
+        .unwrap();
+    let mut raw = RawClient {
+        stream,
+        buf: bytes::BytesMut::new(),
+    };
+    raw.send(Packet::Connect(ConnectPacket {
+        version: MqttVersion::V5,
+        client_id: "bad-will".into(),
+        clean_start: true,
+        keep_alive: 30,
+        username: None,
+        password: None,
+        will: Some(mqtt_client::protocol::connect::Will {
+            topic: "a/#".into(),
+            payload: bytes::Bytes::from_static(b"x"),
+            qos: QoS::AtMostOnce,
+            retain: true,
+            properties: Properties::new(),
+            delay_interval: 0,
+        }),
+        properties: Properties::new(),
+    }))
+    .await;
+    match raw.read_packet().await {
+        Packet::ConnAck(ack) => assert!(!ack.reason_code.is_success(), "{ack:?}"),
+        other => panic!("expected CONNACK, got {other:?}"),
+    }
+    broker.stop().await.unwrap();
+}
+
+#[tokio::test]
+async fn unreleased_qos2_publishes_are_bounded() {
+    let (broker, port) = start_broker(|_| {}).await;
+    let mut flooder = RawClient::connect(port, "qos2-flood").await;
+    // Never send PUBREL: the broker must cut us off instead of buffering forever.
+    let mut closed = false;
+    for id in 1..=2000u16 {
+        let publish = Packet::Publish(mqtt_client::protocol::publish::PublishPacket {
+            dup: false,
+            qos: QoS::ExactlyOnce,
+            retain: false,
+            topic: "t/flood".into(),
+            packet_id: Some(id),
+            payload: bytes::Bytes::from_static(b"x"),
+            properties: Properties::new(),
+        });
+        let bytes = publish.encode(MqttVersion::V5).unwrap();
+        if flooder.stream.write_all(&bytes).await.is_err() {
+            closed = true;
+            break;
+        }
+    }
+    // Drain PUBRECs until the broker closes the socket.
+    let mut sink = vec![0u8; 8192];
+    let drained = timeout(Duration::from_secs(5), async {
+        loop {
+            match flooder.stream.read(&mut sink).await {
+                Ok(0) | Err(_) => return,
+                Ok(_) => {}
+            }
+        }
+    })
+    .await;
+    assert!(
+        closed || drained.is_ok(),
+        "broker kept accepting QoS 2 flood"
+    );
+    broker.stop().await.unwrap();
+}
+
+#[tokio::test]
+async fn absurdly_deep_filter_is_rejected_not_fatal() {
+    let (broker, port) = start_broker(|_| {}).await;
+    let mut raw = RawClient::connect(port, "deep").await;
+    let filter = vec!["a"; 30_000].join("/");
+    raw.send(Packet::Subscribe(SubscribePacket {
+        packet_id: 1,
+        filters: vec![SubscribeFilter::new(&filter, QoS::AtMostOnce)],
+        properties: Properties::new(),
+    }))
+    .await;
+    match raw.read_packet().await {
+        Packet::SubAck(ack) => assert!(!ack.reason_codes[0].is_success()),
+        other => panic!("expected SUBACK, got {other:?}"),
+    }
+    drop(raw);
+    // Still alive afterwards.
+    let c = client(port, "after");
+    c.connect().await.unwrap();
+    broker.stop().await.unwrap();
+}

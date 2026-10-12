@@ -21,6 +21,15 @@ pub struct Subscription {
     pub retain_as_published: bool,
 }
 
+/// Most unresolved inbound QoS 2 PUBLISHes (awaiting PUBREL) one session may
+/// hold. Without a bound, a client could send QoS 2 PUBLISHes under all
+/// 65 535 packet ids and never release them, pinning gigabytes.
+pub const MAX_INCOMING_QOS2: usize = 1024;
+/// Cap on the total payload bytes held by those unresolved PUBLISHes.
+pub const MAX_INCOMING_QOS2_BYTES: usize = 16 * 1024 * 1024;
+/// Most subscriptions one session may hold.
+pub const MAX_SUBSCRIPTIONS_PER_SESSION: usize = 10_000;
+
 /// Encoded QoS 0 PUBLISH frames shared by every subscriber of one fan-out.
 /// A QoS 0 frame has no packet id, so it depends only on the protocol
 /// version and the retain flag; encoding it once per combination instead of
@@ -135,6 +144,8 @@ pub struct Session {
     /// Packet ids this session has sent us a PUBLISH for at QoS 2, not yet
     /// resolved with PUBREL (dedup + hold-until-PUBREL semantics).
     pub incoming_qos2: HashMap<u16, PublishPacket>,
+    /// Payload bytes currently held in `incoming_qos2`.
+    pub incoming_qos2_bytes: usize,
     /// QoS 1/2 PUBLISHes and QoS 2 PUBRELs *we* sent to this session,
     /// awaiting their ack, eligible for a timed dup-flagged resend — see
     /// [`crate::registry::SessionRegistry::retry_pending`]. Without this, a
@@ -164,6 +175,7 @@ impl Session {
             conn: None,
             queued: VecDeque::new(),
             incoming_qos2: HashMap::new(),
+            incoming_qos2_bytes: 0,
             pending_redelivery: HashMap::new(),
             offline_since: None,
             next_packet_id: 1,

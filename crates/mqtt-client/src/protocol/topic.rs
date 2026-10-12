@@ -11,6 +11,16 @@
 /// on the wire, MQTT-3.1.1 §1.5.3).
 pub const MAX_TOPIC_LEN: usize = u16::MAX as usize;
 
+/// Most levels (`/`-separated segments) a topic name or filter may have.
+/// The spec only bounds the byte length (64 KiB), which allows ~32 000
+/// levels — deep enough to overflow the stack of any recursive walk over a
+/// subscription trie. 256 is far beyond any real topic hierarchy.
+pub const MAX_TOPIC_LEVELS: usize = 256;
+
+fn within_level_limit(s: &str) -> bool {
+    s.bytes().filter(|&b| b == b'/').count() < MAX_TOPIC_LEVELS
+}
+
 /// Returns `true` if `topic` (a concrete topic name, never containing
 /// wildcards) matches `filter` (which may contain `+` and `#`).
 pub fn topic_matches(filter: &str, topic: &str) -> bool {
@@ -78,7 +88,11 @@ pub fn classify_filter(filter: &str) -> FilterKind<'_> {
 /// `#` may only appear as the final, whole level; `+` may only appear as a
 /// whole level (not `a+` or `+a`).
 pub fn is_valid_filter(filter: &str) -> bool {
-    if filter.is_empty() || filter.len() > MAX_TOPIC_LEN || filter.contains('\0') {
+    if filter.is_empty()
+        || filter.len() > MAX_TOPIC_LEN
+        || filter.contains('\0')
+        || !within_level_limit(filter)
+    {
         return false;
     }
     let levels: Vec<&str> = filter.split('/').collect();
@@ -99,7 +113,10 @@ pub fn is_valid_filter(filter: &str) -> bool {
 /// Validate that `topic` is a legal topic name for PUBLISH: non-empty and
 /// free of wildcard characters, NULs, and no longer than [`MAX_TOPIC_LEN`].
 pub fn is_valid_topic_name(topic: &str) -> bool {
-    !topic.is_empty() && topic.len() <= MAX_TOPIC_LEN && !topic.contains(['+', '#', '\0'])
+    !topic.is_empty()
+        && topic.len() <= MAX_TOPIC_LEN
+        && !topic.contains(['+', '#', '\0'])
+        && within_level_limit(topic)
 }
 
 #[cfg(test)]
@@ -179,5 +196,15 @@ mod tests {
         assert!(!is_valid_topic_name(""));
         assert!(!is_valid_topic_name("a\0b"));
         assert!(!is_valid_topic_name(&"x".repeat(MAX_TOPIC_LEN + 1)));
+    }
+
+    #[test]
+    fn level_count_is_bounded() {
+        let ok = vec!["a"; MAX_TOPIC_LEVELS].join("/");
+        let deep = vec!["a"; MAX_TOPIC_LEVELS + 1].join("/");
+        assert!(is_valid_topic_name(&ok) && is_valid_filter(&ok));
+        assert!(!is_valid_topic_name(&deep) && !is_valid_filter(&deep));
+        let wide = "/".repeat(30_000); // within the byte limit, far over the level limit
+        assert!(!is_valid_topic_name(&wide) && !is_valid_filter(&wide));
     }
 }

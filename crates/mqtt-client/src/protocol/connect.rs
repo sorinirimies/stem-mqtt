@@ -193,6 +193,7 @@ impl ConnectReasonCode {
     pub const UNSUPPORTED_PROTOCOL_VERSION: ConnectReasonCode = ConnectReasonCode(0x84);
     pub const BAD_AUTHENTICATION_METHOD: ConnectReasonCode = ConnectReasonCode(0x8C);
     pub const SERVER_UNAVAILABLE: ConnectReasonCode = ConnectReasonCode(0x88);
+    pub const TOPIC_NAME_INVALID: ConnectReasonCode = ConnectReasonCode(0x90);
     pub const QUOTA_EXCEEDED: ConnectReasonCode = ConnectReasonCode(0x97);
 
     pub fn is_success(self) -> bool {

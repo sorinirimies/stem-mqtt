@@ -22,7 +22,7 @@ use tokio::sync::{mpsc, oneshot};
 
 use crate::broker::BrokerState;
 use crate::config::{EnhancedAuthOutcome, EnhancedAuthStep};
-use crate::registry::{AttachError, AttachRequest};
+use crate::registry::{AttachError, AttachRequest, SubscribeOutcome};
 use crate::session::{QueuedMessage, ShutdownReason, Subscription};
 use crate::topic::{is_valid_filter, is_valid_topic_name};
 use mqtt_client::protocol::topic::{classify_filter, FilterKind};
@@ -61,6 +61,15 @@ where
     };
 
     let version = connect.version;
+
+    // MQTT-3.1.3-2: the will topic is a Topic Name — never a wildcard
+    // filter. Unchecked, it would be published (and retained) verbatim.
+    if let Some(will) = &connect.will {
+        if !is_valid_topic_name(&will.topic) {
+            reject(&mut writer, version, ConnectReasonCode::TOPIC_NAME_INVALID).await;
+            return;
+        }
+    }
 
     // MQTT-3.1.3-8: a zero-length client id is only acceptable together
     // with a clean session; otherwise the broker must refuse it.
@@ -489,7 +498,10 @@ fn handle_publish(state: &Arc<BrokerState>, client_id: &str, p: PublishPacket) -
             }
         }
         (QoS::ExactlyOnce, Some(id)) => {
-            state.sessions.store_incoming_qos2(client_id, id, p);
+            // Too many unreleased QoS 2 PUBLISHes: protocol violation.
+            if !state.sessions.store_incoming_qos2(client_id, id, p) {
+                return false;
+            }
             state
                 .sessions
                 .send_to(client_id, &Packet::PubRec(SimpleAck::success(id)));
@@ -527,7 +539,7 @@ fn handle_subscribe(state: &Arc<BrokerState>, client_id: &str, p: SubscribePacke
             continue;
         }
         let granted_qos = filter.qos.min(state.config.max_qos_core());
-        let is_new = state.sessions.add_subscription(
+        let outcome = state.sessions.add_subscription(
             client_id,
             &filter.topic_filter,
             Subscription {
@@ -536,6 +548,12 @@ fn handle_subscribe(state: &Arc<BrokerState>, client_id: &str, p: SubscribePacke
                 retain_as_published: filter.retain_as_published,
             },
         );
+        if outcome == SubscribeOutcome::LimitReached {
+            // 0x97 "Quota exceeded" (collapses to 0x80 for MQTT 3.1.1).
+            reason_codes.push(SubAckReasonCode(0x97));
+            continue;
+        }
+        let is_new = outcome == SubscribeOutcome::New;
         reason_codes.push(SubAckReasonCode::granted(granted_qos));
         // Retained messages are never sent for shared subscriptions
         // (MQTT-5.0 §4.8.2).

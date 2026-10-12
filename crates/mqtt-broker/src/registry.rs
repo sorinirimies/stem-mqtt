@@ -23,6 +23,7 @@ use tokio::sync::{mpsc, oneshot};
 use crate::index::{IndexEntry, SubscriptionIndex};
 use crate::session::{
     LiveConn, PendingRedelivery, Qos0Frames, QueuedMessage, Session, ShutdownReason, Subscription,
+    MAX_INCOMING_QOS2, MAX_INCOMING_QOS2_BYTES, MAX_SUBSCRIPTIONS_PER_SESSION,
 };
 
 /// How often [`SessionRegistry::retry_pending`] sweeps for unacked
@@ -56,6 +57,19 @@ pub struct AttachRequest {
 pub enum AttachError {
     /// `max_clients` simultaneous connections are already live.
     QuotaExceeded,
+}
+
+/// Result of [`SessionRegistry::add_subscription`].
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum SubscribeOutcome {
+    /// A subscription that didn't exist before.
+    New,
+    /// An existing subscription had its options replaced.
+    Replaced,
+    /// Refused: the session is at [`MAX_SUBSCRIPTIONS_PER_SESSION`].
+    LimitReached,
+    /// The client has no session (already gone).
+    NoSession,
 }
 
 /// A successfully attached connection.
@@ -252,17 +266,40 @@ impl SessionRegistry {
         });
     }
 
-    pub fn store_incoming_qos2(&self, client_id: &str, packet_id: u16, publish: PublishPacket) {
+    /// Hold an inbound QoS 2 PUBLISH until its PUBREL. Returns `false` when
+    /// the session is already holding too many (count or bytes) — a protocol
+    /// violation by the client (Receive Maximum exceeded) the caller should
+    /// answer by dropping the connection. A retransmission of a held id is
+    /// accepted and deduplicated.
+    #[must_use]
+    pub fn store_incoming_qos2(
+        &self,
+        client_id: &str,
+        packet_id: u16,
+        publish: PublishPacket,
+    ) -> bool {
         self.with_session(client_id, |s| {
-            s.incoming_qos2.entry(packet_id).or_insert(publish);
-        });
+            if s.incoming_qos2.contains_key(&packet_id) {
+                return true;
+            }
+            if s.incoming_qos2.len() >= MAX_INCOMING_QOS2
+                || s.incoming_qos2_bytes + publish.payload.len() > MAX_INCOMING_QOS2_BYTES
+            {
+                return false;
+            }
+            s.incoming_qos2_bytes += publish.payload.len();
+            s.incoming_qos2.insert(packet_id, publish);
+            true
+        })
+        .unwrap_or(true)
     }
 
     pub fn take_incoming_qos2(&self, client_id: &str, packet_id: u16) -> Option<QueuedMessage> {
         self.with_session(client_id, |s| {
-            s.incoming_qos2
-                .remove(&packet_id)
-                .map(|p| QueuedMessage::from(&p))
+            s.incoming_qos2.remove(&packet_id).map(|p| {
+                s.incoming_qos2_bytes = s.incoming_qos2_bytes.saturating_sub(p.payload.len());
+                QueuedMessage::from(&p)
+            })
         })
         .flatten()
     }
@@ -341,17 +378,31 @@ impl SessionRegistry {
         }
     }
 
-    pub fn add_subscription(&self, client_id: &str, filter: &str, sub: Subscription) -> bool {
+    /// Add (or replace) a subscription, refusing a *new* one once the
+    /// session already holds [`MAX_SUBSCRIPTIONS_PER_SESSION`].
+    pub fn add_subscription(
+        &self,
+        client_id: &str,
+        filter: &str,
+        sub: Subscription,
+    ) -> SubscribeOutcome {
         self.with_session(client_id, |s| {
+            if !s.subscriptions.contains_key(filter)
+                && s.subscriptions.len() >= MAX_SUBSCRIPTIONS_PER_SESSION
+            {
+                return SubscribeOutcome::LimitReached;
+            }
             let is_new = s.subscriptions.insert(filter.to_string(), sub).is_none();
             if is_new {
                 if let Some(entry) = IndexEntry::from_key(client_id, filter) {
                     self.index.write_safe().insert(entry);
                 }
+                SubscribeOutcome::New
+            } else {
+                SubscribeOutcome::Replaced
             }
-            is_new
         })
-        .unwrap_or(false)
+        .unwrap_or(SubscribeOutcome::NoSession)
     }
 
     /// Remove a subscription. Returns whether it existed.
@@ -763,5 +814,71 @@ mod tests {
         registry.add_subscription("c", "a/b", sub(QoS::AtMostOnce, false));
         registry.fan_out("x", &message("a/c", QoS::AtMostOnce));
         assert_eq!(peer.received(), 0);
+    }
+
+    #[test]
+    fn subscription_count_is_capped_per_session() {
+        let registry = SessionRegistry::new();
+        let _peer = connect(&registry, "greedy");
+        for n in 0..MAX_SUBSCRIPTIONS_PER_SESSION {
+            let outcome =
+                registry.add_subscription("greedy", &format!("t/{n}"), sub(QoS::AtMostOnce, false));
+            assert_eq!(outcome, SubscribeOutcome::New);
+        }
+        assert_eq!(
+            registry.add_subscription("greedy", "one/too/many", sub(QoS::AtMostOnce, false)),
+            SubscribeOutcome::LimitReached
+        );
+        // Re-subscribing to an existing filter is still fine.
+        assert_eq!(
+            registry.add_subscription("greedy", "t/0", sub(QoS::AtLeastOnce, false)),
+            SubscribeOutcome::Replaced
+        );
+        assert!(registry
+            .index
+            .read_safe()
+            .matching("one/too/many")
+            .is_empty());
+    }
+
+    fn qos2_publish(id: u16, payload_len: usize) -> PublishPacket {
+        PublishPacket {
+            dup: false,
+            qos: QoS::ExactlyOnce,
+            retain: false,
+            topic: "t".into(),
+            packet_id: Some(id),
+            payload: Bytes::from(vec![0; payload_len]),
+            properties: mqtt_client::protocol::properties::Properties::new(),
+        }
+    }
+
+    #[test]
+    fn inbound_qos2_is_bounded_by_count_and_bytes() {
+        let registry = SessionRegistry::new();
+        let _peer = connect(&registry, "c");
+        for id in 1..=MAX_INCOMING_QOS2 as u16 {
+            assert!(registry.store_incoming_qos2("c", id, qos2_publish(id, 1)));
+        }
+        let over = MAX_INCOMING_QOS2 as u16 + 1;
+        assert!(!registry.store_incoming_qos2("c", over, qos2_publish(over, 1)));
+        // A retransmission of a held id is deduplicated, not refused.
+        assert!(registry.store_incoming_qos2("c", 1, qos2_publish(1, 1)));
+        // Releasing one frees a slot.
+        assert!(registry.take_incoming_qos2("c", 1).is_some());
+        assert!(registry.store_incoming_qos2("c", over, qos2_publish(over, 1)));
+
+        let registry = SessionRegistry::new();
+        let _peer = connect(&registry, "big");
+        assert!(registry.store_incoming_qos2("big", 1, qos2_publish(1, MAX_INCOMING_QOS2_BYTES)));
+        assert!(
+            !registry.store_incoming_qos2("big", 2, qos2_publish(2, 1)),
+            "byte budget spent"
+        );
+        registry.take_incoming_qos2("big", 1);
+        assert!(
+            registry.store_incoming_qos2("big", 2, qos2_publish(2, 1)),
+            "bytes released"
+        );
     }
 }
