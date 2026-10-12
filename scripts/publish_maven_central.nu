@@ -10,7 +10,9 @@
 #
 # One-time setup (by a human, on https://central.sonatype.com):
 #   1. verify the namespace `io.github.<user>` (create the verification repo it asks for)
-#   2. generate a user token  → MAVEN_CENTRAL_USERNAME / MAVEN_CENTRAL_PASSWORD
+#   2. generate a user token  → SONATYPE_TOKEN (paste the Portal's `settings.xml` snippet as is;
+#      `user:password` or the ready-made base64 bearer also work), or the two halves
+#      separately as MAVEN_CENTRAL_USERNAME / MAVEN_CENTRAL_PASSWORD
 #   3. create a GPG key and publish the public half to keys.openpgp.org
 #      → SIGNING_KEY (ASCII-armoured private key) / SIGNING_PASSWORD
 #
@@ -34,6 +36,34 @@ export def upload-args [bundle: string, name: string, manual: bool]: nothing -> 
         "--form" $"bundle=@($bundle)"
         $"($PORTAL)?name=($name | url encode)&publishingType=($publishing)"
     ]
+}
+
+# The Portal's `Authorization: Bearer` value, from whichever credentials were supplied.
+# Accepted, in order of preference:
+#   - separate username + password (MAVEN_CENTRAL_USERNAME / MAVEN_CENTRAL_PASSWORD)
+#   - `token` holding the Portal's `settings.xml` snippet (<username>…</username><password>…</password>)
+#   - `token` as `username:password`
+#   - `token` already base64-encoded (used verbatim)
+export def central-bearer [user: string, pass: string, token: string]: nothing -> string {
+    if $user != "" and $pass != "" {
+        return ($"($user):($pass)" | encode base64)
+    }
+    let t = ($token | str trim)
+    if $t == "" {
+        error make { msg: "no Maven Central credentials: set SONATYPE_TOKEN (or MAVEN_CENTRAL_USERNAME + MAVEN_CENTRAL_PASSWORD)" }
+    }
+    if ($t | str contains "<username>") {
+        let u = ($t | parse --regex '<username>\s*([^<]*?)\s*</username>' | get capture0)
+        let p = ($t | parse --regex '<password>\s*([^<]*?)\s*</password>' | get capture0)
+        if ($u | is-empty) or ($p | is-empty) or ($u.0 == "") or ($p.0 == "") {
+            error make { msg: "SONATYPE_TOKEN looks like a settings.xml snippet but has no <username>/<password>" }
+        }
+        return ($"($u.0):($p.0)" | encode base64)
+    }
+    if ($t | str contains ":") {
+        return ($t | encode base64)
+    }
+    $t
 }
 
 # Every artifact must come with a signature and checksums, or Central rejects the
@@ -69,12 +99,7 @@ def main [staging: string, name: string, --manual, --dry-run] {
         print $"==> would POST to Maven Central: curl ($args | str join ' ')"
         return
     }
-    let user = ($env.MAVEN_CENTRAL_USERNAME? | default "")
-    let pass = ($env.MAVEN_CENTRAL_PASSWORD? | default "")
-    if $user == "" or $pass == "" {
-        error make { msg: "MAVEN_CENTRAL_USERNAME / MAVEN_CENTRAL_PASSWORD are not set (Central Portal user token)" }
-    }
-    let token = ($"($user):($pass)" | encode base64)
+    let token = (central-bearer ($env.MAVEN_CENTRAL_USERNAME? | default "") ($env.MAVEN_CENTRAL_PASSWORD? | default "") ($env.SONATYPE_TOKEN? | default ""))
     let result = (^curl "--header" $"Authorization: Bearer ($token)" ...$args | complete)
     if $result.exit_code != 0 {
         error make { msg: $"Maven Central upload failed: ($result.stdout) ($result.stderr)" }

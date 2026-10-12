@@ -20,7 +20,7 @@ its own repository secret and **skips quietly without it**:
 | Python | PyPI | `stem-mqtt-client`, `stem-mqtt-broker` | `PYPI_API_TOKEN` | manylinux_2_28 wheels (zig) |
 | Node.js | npmjs.org | `stem-mqtt` | `NPM_TOKEN` | granular token with *bypass 2FA*; Linux x86_64 prebuild today |
 | C# | NuGet.org | `StemMqtt` | `NUGET_API_KEY` | |
-| Kotlin / Java | Maven Central | `io.github.<owner>.stemmqtt:stem-mqtt-kotlin` / `…-java` | `MAVEN_CENTRAL_USERNAME`, `MAVEN_CENTRAL_PASSWORD`, `SIGNING_KEY`, `SIGNING_PASSWORD` | verify the `io.github.<owner>` namespace first |
+| Kotlin / Java | Maven Central | `io.github.<owner>.stemmqtt:stem-mqtt-kotlin` / `…-java` | `SONATYPE_TOKEN` (the Portal's `settings.xml` snippet) or `MAVEN_CENTRAL_USERNAME` + `MAVEN_CENTRAL_PASSWORD`, `SIGNING_KEY`, `SIGNING_PASSWORD` | verify the `io.github.<owner>` namespace first |
 | Haskell | Hackage | `stem-mqtt` | `HACKAGE_TOKEN` | source package, builds the bundled Rust with `cargo` |
 | Dart | pub.dev | `stem_mqtt` | — (OIDC) | from GitHub Actions (`publish-pubdev.yml`); first release by hand |
 | Go | Go modules | `github.com/<owner>/stem-mqtt-go` | `GO_MODULE_TOKEN` | pushes the module to its own repo and tags it |

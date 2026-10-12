@@ -412,11 +412,11 @@ jobs:
     timeout-minutes: 60
     env:
       HAS_TOKEN: ${{ secrets.PACKAGES_TOKEN != '' }}
-      HAS_CENTRAL: ${{ secrets.MAVEN_CENTRAL_PASSWORD != '' }}
+      HAS_CENTRAL: ${{ secrets.MAVEN_CENTRAL_PASSWORD != '' || secrets.SONATYPE_TOKEN != '' }}
     steps:
       - name: Skip (no token)
         if: env.HAS_TOKEN != 'true' && env.HAS_CENTRAL != 'true'
-        run: echo "⏭️  neither PACKAGES_TOKEN nor MAVEN_CENTRAL_PASSWORD set — skipping the Kotlin package."
+        run: echo "⏭️  neither PACKAGES_TOKEN nor SONATYPE_TOKEN / MAVEN_CENTRAL_PASSWORD set — skipping the Kotlin package."
 
       - uses: actions/checkout@v4
         if: env.HAS_TOKEN == 'true' || env.HAS_CENTRAL == 'true'
@@ -471,7 +471,7 @@ jobs:
 
       # Maven Central takes a signed bundle of the Maven repository layout (Central Portal).
       # Needs the verified namespace io.github.<owner> and the secrets MAVEN_CENTRAL_USERNAME,
-      # MAVEN_CENTRAL_PASSWORD (Portal user token), SIGNING_KEY (armoured private key), SIGNING_PASSWORD.
+      # MAVEN_CENTRAL_PASSWORD (Portal user token) or SONATYPE_TOKEN (the Portal's settings.xml snippet), SIGNING_KEY (armoured private key), SIGNING_PASSWORD.
       - name: Publish to Maven Central
         if: env.HAS_CENTRAL == 'true'
         working-directory: packaging/kotlin
@@ -481,6 +481,7 @@ jobs:
           SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
           MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
           MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          SONATYPE_TOKEN: ${{ secrets.SONATYPE_TOKEN }}
         run: |
           gradle publishAllPublicationsToStagingRepository --no-daemon -PgroupId=io.github.${{ env.PUBLIC_OWNER }}.stemmqtt
           nu ../../scripts/publish_maven_central.nu build/staging-repo stem-mqtt-kotlin-${{ needs.validate.outputs.version }}
@@ -559,7 +560,7 @@ jobs:
   # language needs its own secret and is skipped quietly without it:
   #   node     NPM_TOKEN (npm granular access token, publish rights, "bypass 2FA") — package `stem-mqtt`
   #   csharp   NUGET_API_KEY
-  #   java     MAVEN_CENTRAL_USERNAME / MAVEN_CENTRAL_PASSWORD / SIGNING_KEY / SIGNING_PASSWORD
+  #   java     SONATYPE_TOKEN (or MAVEN_CENTRAL_USERNAME / MAVEN_CENTRAL_PASSWORD) / SIGNING_KEY / SIGNING_PASSWORD
   #   haskell  HACKAGE_TOKEN
   #   go       GO_MODULE_TOKEN (push access to github.com/<owner>/stem-mqtt-go)
   # Kotlin → Maven Central and Python → PyPI are in their own jobs above; pub.dev is
@@ -576,7 +577,7 @@ jobs:
       matrix:
         language: [node, csharp, java, haskell, go]
     env:
-      HAS_TOKEN: ${{ (matrix.language == 'node' && secrets.NPM_TOKEN != '') || (matrix.language == 'csharp' && secrets.NUGET_API_KEY != '') || (matrix.language == 'java' && secrets.MAVEN_CENTRAL_PASSWORD != '') || (matrix.language == 'haskell' && secrets.HACKAGE_TOKEN != '') || (matrix.language == 'go' && secrets.GO_MODULE_TOKEN != '') }}
+      HAS_TOKEN: ${{ (matrix.language == 'node' && secrets.NPM_TOKEN != '') || (matrix.language == 'csharp' && secrets.NUGET_API_KEY != '') || (matrix.language == 'java' && (secrets.MAVEN_CENTRAL_PASSWORD != '' || secrets.SONATYPE_TOKEN != '')) || (matrix.language == 'haskell' && secrets.HACKAGE_TOKEN != '') || (matrix.language == 'go' && secrets.GO_MODULE_TOKEN != '') }}
     steps:
       - name: Skip (no token)
         if: env.HAS_TOKEN != 'true'
@@ -659,6 +660,7 @@ jobs:
           GO_MODULE_TOKEN: ${{ secrets.GO_MODULE_TOKEN }}
           MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
           MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          SONATYPE_TOKEN: ${{ secrets.SONATYPE_TOKEN }}
           SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
           SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
         run: >

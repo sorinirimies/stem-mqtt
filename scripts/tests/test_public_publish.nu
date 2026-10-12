@@ -7,7 +7,7 @@
 use std/assert
 use runner.nu *
 use ../bindings/spec.nu *
-use ../publish_maven_central.nu [upload-args missing-files]
+use ../publish_maven_central.nu [upload-args missing-files central-bearer]
 use ../bindings/go_module.nu *
 use ../bindings/hackage.nu *
 use ../bindings/dart_package.nu *
@@ -23,6 +23,21 @@ def "test public: node goes to npmjs as a public package" [] {
 def "test public: csharp pushes to nuget.org" [] {
     let push = (publish-plan csharp "1.0.0" "d" "acme" "stem-mqtt" "public" | last)
     assert ($push.args | any { |a| $a == "https://api.nuget.org/v3/index.json" })
+}
+
+def "test public: Central credentials accept the settings.xml snippet, user:pass, a pair, or a ready bearer" [] {
+    let expected = ("alice:s3cret" | encode base64)
+    let xml = "<server>\n    <id>central</id>\n    <username>alice</username>\n    <password>s3cret</password>\n</server>"
+    assert equal (central-bearer "" "" $xml) $expected
+    assert equal (central-bearer "" "" "alice:s3cret") $expected
+    assert equal (central-bearer "alice" "s3cret" "ignored") $expected
+    assert equal (central-bearer "" "" $expected) $expected
+    assert equal (central-bearer "" "" $"  ($xml)\n") $expected
+}
+
+def "test public: Central credentials are required and the snippet must be complete" [] {
+    assert (try { central-bearer "" "" ""; false } catch { true })
+    assert (try { central-bearer "" "" "<server><username>a</username></server>"; false } catch { true })
 }
 
 def "test public: java signs into a staging repo then uploads to Maven Central under io.github" [] {
