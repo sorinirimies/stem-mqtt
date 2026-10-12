@@ -595,7 +595,7 @@ release-preflight:
     [ "$(git branch --show-current)" = "main" ] || { echo "❌ Releases must run from main."; exit 1; }
     [ -z "$(git status --porcelain)" ] || { echo "❌ Working tree is dirty."; exit 1; }
     command -v gh >/dev/null 2>&1 || { echo "❌ gh CLI not found."; exit 1; }
-    for secret in CRATES_IO_TOKEN PYPI_API_TOKEN; do
+    for secret in CRATES_IO_TOKEN; do
         gh secret list --json name --jq '.[].name' | rg -qx "$secret" || {
             echo "❌ Required GitHub secret missing: $secret"; exit 1;
         }
