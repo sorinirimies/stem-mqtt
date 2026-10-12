@@ -71,7 +71,7 @@ pub enum SubscribeOutcome {
     New,
     /// An existing subscription had its options replaced.
     Replaced,
-    /// Refused: the session is at [`MAX_SUBSCRIPTIONS_PER_SESSION`].
+    /// Refused: the session is at its per-session subscription cap.
     LimitReached,
     /// The client has no session (already gone).
     NoSession,

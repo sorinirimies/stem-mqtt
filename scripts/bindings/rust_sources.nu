@@ -1,7 +1,7 @@
 # Bundle the Rust sources a source package (Hackage, pub.dev) compiles at install time.
 
 # Copy the two library crates + a workspace manifest/lockfile trimmed to exactly those crates
-# (no demo/dashboard or fuzz members) into <dest>. The lockfile is pruned with
+# (no demo/dashboard or fuzz members, no benches) into <dest>. The lockfile is pruned with
 # `cargo update --workspace` so `cargo build --locked` works on the trimmed workspace.
 export def bundle-rust-sources [root: string, dest: string] {
     mkdir ($dest | path join "crates")
@@ -12,7 +12,11 @@ export def bundle-rust-sources [root: string, dest: string] {
     for crate in [mqtt-client mqtt-broker] {
         let out = ($dest | path join "crates" $crate)
         mkdir $out
-        cp ($root | path join "crates" $crate "Cargo.toml") $out
+        # Benches are dev-only and aren't shipped, so drop their `[[bench]]` tables —
+        # Cargo refuses a manifest that names a bench file which isn't there.
+        open --raw ($root | path join "crates" $crate "Cargo.toml")
+        | str replace --all --regex '\[\[bench\]\]\n(?:[^\[\n][^\n]*\n|\n)*' ''
+        | save --force ($out | path join "Cargo.toml")
         cp -r ($root | path join "crates" $crate "src") $out
         let readme = ($root | path join "crates" $crate "README.md")
         if ($readme | path exists) { cp $readme $out }
