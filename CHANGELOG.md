@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.6] - 2026-10-12
+### 🔧 Chores
+- don't require PYPI_API_TOKEN in release preflight (PyPI job skips itself when unset)
+**Full Changelog**: https://github.com/sorinirimies/stem-mqtt/compare/v0.3.5...v0.3.6
 ## [0.3.5] - 2026-10-12
 ### ✨ Features
 - accept SONATYPE_TOKEN (Portal settings.xml snippet, user:pass or bearer) for Maven Central
