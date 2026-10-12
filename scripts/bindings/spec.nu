@@ -96,7 +96,7 @@ def _raw-specs []: nothing -> list<record> {
 
 # Accept friendly aliases (`cs`, `c#`, `js`, …) and return the canonical name.
 export def canonical-language [name: string]: nothing -> string {
-    match ($name | str downcase) {
+    match ($name | str lowercase) {
         "cs" | "c#" | "dotnet" => "csharp"
         "js" | "node-js" | "nodejs" => "node"
         "hs" => "haskell"

@@ -20,6 +20,7 @@ _check-nu:
     @command -v nu >/dev/null 2>&1 || { \
         echo "❌ nu (nushell) not found. Install: https://www.nushell.sh"; exit 1; \
     }
+    @nu -c 'if (version | get minor) < 114 { error make { msg: $"nu 0.114+ required (found (version | get version)); upgrade with: cargo install nu --locked" } }' || exit 1
 
 _check-cross:
     @command -v cross >/dev/null 2>&1 || { \
