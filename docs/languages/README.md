@@ -50,8 +50,9 @@ There are two ways, and every language supports at least one:
 Why Dart and Haskell can't take callbacks: Dart's VM aborts when Rust invokes a Dart callback from one
 of its own threads, and the Haskell generator exposes callback interfaces only as opaque handles.
 `next_message` / `next_event` return nothing (`null` / `Nothing`) when the timeout passes. Auth
-providers can't be written in those two languages — use the broker's `allow_anonymous = false` rule
-instead of a custom provider.
+providers can't be written in those two languages, so a broker created there cannot check credentials:
+keep it on loopback or behind a firewall/TLS-terminating proxy, or run the standalone `mqtt-broker`
+binary (or a broker from another language) when you need authentication.
 
 ## `ConnectOptions` (client)
 
@@ -80,7 +81,7 @@ C#, Dart and Go (zero values); Java, Node and Haskell take every field explicitl
 | --- | --- |
 | `bind_address`, `port` | TCP listener; `port = 0` picks a free port (read it with `bound_port()`) |
 | `ws_port` | optional MQTT-over-WebSocket listener (`Some(0)` = free port) |
-| `allow_anonymous` | accept clients without credentials when no auth provider is set |
+| `allow_anonymous` | with no auth provider set: `true` admits everyone, `false` refuses everyone |
 | `max_clients` | `0` = unlimited |
 | `max_qos` | highest QoS granted on SUBSCRIBE |
 | `max_retained_messages`, `max_queued_per_client` | in-memory limits; `0` = unlimited |
@@ -102,7 +103,9 @@ C#, Dart and Go (zero values); Java, Node and Haskell take every field explicitl
 
 ## Authentication
 
-1. **Built in** — `allow_anonymous = false` refuses clients without credentials.
+1. **Built in** — `allow_anonymous`, used when no provider is set: `true` admits everyone, `false`
+   refuses everyone. A username is **not** verified (there is nothing to check it against), so it
+   grants nothing on its own.
 2. **Provider callback** — `MqttAuthProvider.authenticate(client_id, username, password) -> bool`,
    evaluated once per CONNECT; it always makes the final decision when set.
 3. **Enhanced authentication (MQTT 5)** — a multi-round challenge/response (SCRAM, Kerberos, OAuth,

@@ -109,14 +109,11 @@ Events are `BrokerEventClientConnected clientId`, `BrokerEventClientDisconnected
 
 ## Authentication
 
-Custom `MqttAuthProvider` / enhanced-authentication callbacks can't be written in Haskell. Use the broker's
-built-in rule instead: with `allowAnonymous = False` a client that sends **no username** is refused, and a
-client that sends one is accepted (there is no password check without a provider callback — run the broker
-from another language if you need one). A refused client's `mqttClientConnect` returns `Left …`.
-
-```haskell
-refused <- C.mqttClientConnect =<< C.newMqttClient (options port "anon")   -- Left … when allowAnonymous is False
-```
+Custom `MqttAuthProvider` / enhanced-authentication callbacks can't be written in Haskell, so a
+Haskell-hosted broker cannot check credentials. Without a provider, `allowAnonymous = True` admits every
+client and `False` refuses every client — a username is never verified. Keep such a broker on loopback or
+behind a firewall/TLS-terminating proxy, or run the broker from another language (or the standalone
+`mqtt-broker` binary) when you need authentication. A refused client's `mqttClientConnect` returns `Left …`.
 
 ## TLS
 

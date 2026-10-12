@@ -87,7 +87,7 @@ enhanced-auth callbacks **cannot be implemented in Dart**; use the pull API inst
 | --- | --- |
 | `setMessageListener` | `client.enableMessageQueue(capacity: n)` + `await client.nextMessage(timeoutMs: ms)` |
 | `setEventListener` | `broker.enableEventQueue(capacity: n)` + `await broker.nextEvent(timeoutMs: ms)` |
-| `setAuthProvider` | `allowAnonymous: false` (rejects credential-less clients) |
+| `setAuthProvider` | no equivalent — a Dart-hosted broker cannot check credentials (`allowAnonymous` admits everyone or no one) |
 
 ## Client
 

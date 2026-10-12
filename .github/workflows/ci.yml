@@ -193,9 +193,32 @@ jobs:
         with:
           python-version: "3.12"
       - uses: actions/setup-go@v5
+        id: setup_go
+        continue-on-error: true
         if: matrix.language == 'go'
         with:
           go-version: "1.24.x"
+      # `setup-go` can exit 0 without leaving `go` on PATH when the runner's
+      # download is cut short, so verify, and fall back to go.dev if needed.
+      - name: Verify Go
+        id: go_check
+        if: matrix.language == 'go'
+        continue-on-error: true
+        run: go version
+      - name: Install Go from go.dev (fallback)
+        if: matrix.language == 'go' && steps.go_check.outcome == 'failure'
+        run: |
+          set -euo pipefail
+          case "$(uname -m)" in x86_64) arch=amd64 ;; aarch64|arm64) arch=arm64 ;; *) echo "unsupported arch"; exit 1 ;; esac
+          ver=$(curl -fsSL --retry 5 --retry-all-errors 'https://go.dev/dl/?mode=json&include=all' \
+            | python3 -c "import sys,json; print(next(r['version'] for r in json.load(sys.stdin) if r['stable'] and r['version'].startswith('go1.24.')))")
+          curl -fsSL --retry 5 --retry-all-errors -o /tmp/go.tgz "https://go.dev/dl/${ver}.linux-${arch}.tar.gz"
+          mkdir -p "$HOME/go-fallback"
+          tar -C "$HOME/go-fallback" -xzf /tmp/go.tgz
+          echo "$HOME/go-fallback/go/bin" >> "$GITHUB_PATH"
+      - name: Go toolchain ready
+        if: matrix.language == 'go'
+        run: go version
       - uses: actions/setup-dotnet@v4
         if: matrix.language == 'csharp'
         with:

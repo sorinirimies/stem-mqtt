@@ -275,7 +275,7 @@ interfaces are exposed only as opaque handles. So `MqttMessageListener`, `MqttAu
 `MqttBrokerEventListener` and the enhanced-auth callbacks can't be implemented there — use the
 **pull-style API** that exists for exactly this: `enable_message_queue` / `next_message(timeout_ms)` on the
 client and `enable_event_queue` / `next_event(timeout_ms)` on the broker. Their smoke tests receive
-messages and observe broker events that way. Authentication uses the built-in `allow_anonymous` rule.
+messages and observe broker events that way. Without a provider callback there is no credential check: `allow_anonymous` admits everyone or no one.
 ² Upstream's Haskell generator had three bugs that made every binding unusable: constructors never
 lowered their arguments (generated code didn't compile), flat-error variants dropped their message
 (decoder failed with "left N trailing bytes"), and records sharing a field name broke the public module.

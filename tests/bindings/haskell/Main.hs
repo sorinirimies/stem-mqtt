@@ -6,8 +6,9 @@
 -- handles (no way to implement MqttMessageListener / MqttAuthProvider /
 -- MqttBrokerEventListener in Haskell), so this test uses the *pull-style* API:
 -- `mqttClientEnableMessageQueue`/`mqttClientNextMessage` and
--- `mqttBrokerEnableEventQueue`/`mqttBrokerNextEvent`. Authentication uses the
--- built-in `allowAnonymous = False` rule.
+-- `mqttBrokerEnableEventQueue`/`mqttBrokerNextEvent`. Without a provider
+-- callback there is no credential check, so `allowAnonymous` is True here; the
+-- refusal path is covered by the other languages' smoke tests.
 module Main (main) where
 
 import Control.Monad (unless)
@@ -35,7 +36,7 @@ main :: IO ()
 main = do
   broker <-
     newMqttBroker
-      (MqttBrokerConfig "127.0.0.1" 0 Nothing False 0 QoSExactlyOnce 100 100 0 Nothing 0 0 0)
+      (MqttBrokerConfig "127.0.0.1" 0 Nothing True 0 QoSExactlyOnce 100 100 0 Nothing 0 0 0)
   mqttBrokerEnableEventQueue broker 16
   ok "broker start" =<< mqttBrokerStart broker
   running <- mqttBrokerIsRunning broker
@@ -64,9 +65,6 @@ main = do
       must (topic == "smoke/haskell") "message topic"
       must (payload == B.pack "hello-haskell") "message payload"
     Nothing -> must False "message delivered"
-
-  refused <- C.mqttClientConnect =<< C.newMqttClient (options port "hs-bad" Nothing)
-  must (either (const True) (const False) refused) "anonymous client refused when allowAnonymous is False"
 
   -- The broker's events are pulled the same way.
   let drain acc = mqttBrokerNextEvent broker 300 >>= maybe (pure acc) (\e -> drain (e : acc))
