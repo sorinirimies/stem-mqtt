@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.5] - 2026-10-12
+### ✨ Features
+- accept SONATYPE_TOKEN (Portal settings.xml snippet, user:pass or bearer) for Maven Central
+- skip the Maven Central upload when the versions are already published (GitHub + Gitea can both release)
+### 🔄 CI
+- publish Kotlin/JVM to Maven Central from GitHub too, via the shared Nushell script and SONATYPE_TOKEN
+**Full Changelog**: https://github.com/sorinirimies/stem-mqtt/compare/v0.3.4...v0.3.5
 ## [0.3.4] - 2026-10-12
 ### ⚡ Performance
 - Arc'd index entries, borrow-based fan_out, RwLock retain store with exact-topic fast path; add fan_out tests

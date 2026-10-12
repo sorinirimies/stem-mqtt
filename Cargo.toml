@@ -7,7 +7,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version      = "0.3.4"
+version      = "0.3.5"
 edition      = "2021"
 authors      = ["Sorin Irimies <sorinirimies@gmail.com>"]
 license      = "MIT"
@@ -49,7 +49,7 @@ criterion  = { version = "0.5", default-features = false }
 clap       = { version = "4", features = ["derive"] }
 
 # Internal crates
-mqtt-client = { package = "stem-mqtt-client", path = "crates/mqtt-client", version = "0.3.4" }
+mqtt-client = { package = "stem-mqtt-client", path = "crates/mqtt-client", version = "0.3.5" }
 
 [profile.dev]
 opt-level = 0
