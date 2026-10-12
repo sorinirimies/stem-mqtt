@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.4] - 2026-10-12
+### ⚡ Performance
+- Arc'd index entries, borrow-based fan_out, RwLock retain store with exact-topic fast path; add fan_out tests
+- single-buffer packet encode, shared QoS0 frames, strict SUBACK/NUL handling found by fuzzing, new fuzz targets and CI, inner/ws tests
+### ✨ Features
+- pull-style auth queue for Dart/Haskell (next_auth_request/resolve_auth_request, fails closed); Criterion benches for codec, topic matching, fan-out, index
+### 🐛 Bug Fixes
+- bound topic depth (stack overflow), inbound QoS2, subscriptions; validate will topic
+- fail-closed auth without a provider, outbound byte budget, pre-CONNECT socket cap, reserved $ topics, stop race; client QoS2 cap and keep-alive during callbacks; CI secrets via env, pin Go in Gitea CI **[BREAKING]**
+- drop [[bench]] tables from bundled Rust sources (Dart/Haskell builds); fix private intra-doc link
+- use str downcase again — str lowercase doesn't exist before nu 0.114 and broke test-nu on older nu
+### 📚 Documentation
+- move the publishing section out of the README into docs/publishing.md (maintainers)
+- move Development, CI/CD and Release process out of the README into docs/development.md
+### 🔄 CI
+- add cargo-audit workflow and just audit recipe
+- pin Go to 1.24.x for runtime-go job
+- run nightly
+- verify Go after setup with go.dev fallback; fix Dart/Haskell smoke tests and docs for fail-closed auth
+### 🔧 Chores
+- use str lowercase (nu 0.114+) and require it in _check-nu
+**Full Changelog**: https://github.com/sorinirimies/stem-mqtt/compare/v0.3.3...v0.3.4
 ## [0.3.3] - 2026-10-09
 ### ✨ Features
 - publish stem-mqtt (client + broker) to npmjs.org with multi-platform prebuilds
