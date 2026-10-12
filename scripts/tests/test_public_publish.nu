@@ -7,7 +7,7 @@
 use std/assert
 use runner.nu *
 use ../bindings/spec.nu *
-use ../publish_maven_central.nu [upload-args missing-files central-bearer]
+use ../publish_maven_central.nu [upload-args missing-files central-bearer central-pom-urls]
 use ../bindings/go_module.nu *
 use ../bindings/hackage.nu *
 use ../bindings/dart_package.nu *
@@ -33,6 +33,16 @@ def "test public: Central credentials accept the settings.xml snippet, user:pass
     assert equal (central-bearer "alice" "s3cret" "ignored") $expected
     assert equal (central-bearer "" "" $expected) $expected
     assert equal (central-bearer "" "" $"  ($xml)\n") $expected
+}
+
+def "test public: Central duplicate check derives one pom URL per artifact version" [] {
+    let dir = (mktemp -d)
+    let v = ($dir | path join "io/github/acme/stemmqtt/stem-mqtt-kotlin/1.2.3")
+    mkdir $v
+    "" | save ($v | path join "stem-mqtt-kotlin-1.2.3.pom")
+    "" | save ($v | path join "stem-mqtt-kotlin-1.2.3.jar")
+    assert equal (central-pom-urls $dir) ["https://repo1.maven.org/maven2/io/github/acme/stemmqtt/stem-mqtt-kotlin/1.2.3/stem-mqtt-kotlin-1.2.3.pom"]
+    rm -rf $dir
 }
 
 def "test public: Central credentials are required and the snippet must be complete" [] {

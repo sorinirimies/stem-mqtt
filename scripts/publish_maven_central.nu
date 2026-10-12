@@ -17,13 +17,16 @@
 #      → SIGNING_KEY (ASCII-armoured private key) / SIGNING_PASSWORD
 #
 # Usage:
-#   nu scripts/publish_maven_central.nu <staging-dir> <name> [--manual] [--dry-run]
+#   nu scripts/publish_maven_central.nu <staging-dir> <name> [--manual] [--dry-run] [--force]
 #
 #   staging-dir   e.g. packaging/kotlin/build/staging-repo (from
 #                 `gradle publishAllPublicationsToStagingRepository -PgroupId=io.github.…`,
 #                 run with SIGNING_KEY set)
 #   --manual      upload but leave the deployment for you to release in the Portal UI
 #                 (default: publish automatically once validation passes)
+#   --force       upload even if Central already serves these versions. Without it the upload
+#                 is skipped when they are already published, so GitHub and Gitea releases
+#                 can both run this without the second one failing as a duplicate.
 # ──────────────────────────────────────────────────────────────────────────────
 
 const PORTAL = "https://central.sonatype.com/api/v1/publisher/upload"
@@ -66,6 +69,25 @@ export def central-bearer [user: string, pass: string, token: string]: nothing -
     $t
 }
 
+# The Maven Central URL of every `.pom` in the staging repository — one per published
+# artifact version, and the file Central serves once that version is live.
+export def central-pom-urls [staging: string]: nothing -> list<string> {
+    glob ($staging | path join "**" "*.pom")
+    | each { |f| $f | path relative-to $staging | str replace --all '\\' '/' }
+    | each { |rel| $"https://repo1.maven.org/maven2/($rel)" }
+    | sort
+}
+
+# True when Central already serves every artifact version in `staging`.
+def already-published [staging: string]: nothing -> bool {
+    let urls = (central-pom-urls $staging)
+    if ($urls | is-empty) { return false }
+    $urls | all { |url|
+        let code = (^curl --silent --head --output /dev/null --write-out "%{http_code}" --max-time 20 $url | complete | get stdout | str trim)
+        $code == "200"
+    }
+}
+
 # Every artifact must come with a signature and checksums, or Central rejects the
 # whole bundle with an opaque error — so check up front and say what is missing.
 export def missing-files [staging: string]: nothing -> list<string> {
@@ -80,7 +102,7 @@ export def missing-files [staging: string]: nothing -> list<string> {
     | flatten
 }
 
-def main [staging: string, name: string, --manual, --dry-run] {
+def main [staging: string, name: string, --manual, --dry-run, --force] {
     let staging = ($staging | path expand)
     if not ($staging | path exists) { error make { msg: $"staging repository not found: ($staging)" } }
     let missing = (missing-files $staging)
@@ -97,6 +119,10 @@ def main [staging: string, name: string, --manual, --dry-run] {
     let args = (upload-args $bundle $name $manual)
     if $dry_run {
         print $"==> would POST to Maven Central: curl ($args | str join ' ')"
+        return
+    }
+    if (not $force) and (already-published $staging) {
+        print "==> every artifact version is already on Maven Central — nothing to upload (use --force to override)"
         return
     }
     let token = (central-bearer ($env.MAVEN_CENTRAL_USERNAME? | default "") ($env.MAVEN_CENTRAL_PASSWORD? | default "") ($env.SONATYPE_TOKEN? | default ""))
