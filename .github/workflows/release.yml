@@ -557,6 +557,10 @@ jobs:
     name: Publish Kotlin packages
     needs: [validate, build-kotlin, release]
     runs-on: ubuntu-latest
+    env:
+      # Maven Central needs SONATYPE_TOKEN (the Portal's settings.xml snippet, pasted as is)
+      # or MAVEN_CENTRAL_USERNAME + MAVEN_CENTRAL_PASSWORD, plus SIGNING_KEY / SIGNING_PASSWORD.
+      HAS_CENTRAL: ${{ secrets.SONATYPE_TOKEN != '' || secrets.MAVEN_CENTRAL_PASSWORD != '' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -594,6 +598,30 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PACKAGE_VERSION: ${{ needs.validate.outputs.version }}
         run: gradle publish --no-daemon
+
+      # Maven Central takes a signed bundle of the Maven repository layout (Central Portal),
+      # built and uploaded by the same Nushell script the Gitea release uses.
+      # Needs the verified namespace io.github.<owner>.
+      - name: Install Rust (for Nushell)
+        if: env.HAS_CENTRAL == 'true'
+        uses: dtolnay/rust-toolchain@stable
+      - name: Install Nushell
+        if: env.HAS_CENTRAL == 'true'
+        run: cargo install nu --locked
+      - name: Publish Kotlin/JVM package to Maven Central
+        if: env.HAS_CENTRAL == 'true'
+        working-directory: packaging/kotlin
+        env:
+          PACKAGE_VERSION: ${{ needs.validate.outputs.version }}
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+          SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
+          MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          SONATYPE_TOKEN: ${{ secrets.SONATYPE_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          gradle publishAllPublicationsToStagingRepository --no-daemon -PgroupId="io.github.${OWNER}.stemmqtt"
+          nu ../../scripts/publish_maven_central.nu build/staging-repo "stem-mqtt-kotlin-${PACKAGE_VERSION}"
 
   # ── 10b. Third-party language packages → GitHub Packages ──────────────────────
   # GitHub Packages hosts Maven, npm, NuGet and containers; Go, Dart, Haskell
