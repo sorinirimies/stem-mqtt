@@ -50,9 +50,9 @@ There are two ways, and every language supports at least one:
 Why Dart and Haskell can't take callbacks: Dart's VM aborts when Rust invokes a Dart callback from one
 of its own threads, and the Haskell generator exposes callback interfaces only as opaque handles.
 `next_message` / `next_event` return nothing (`null` / `Nothing`) when the timeout passes. Auth
-providers can't be written in those two languages, so a broker created there cannot check credentials:
-keep it on loopback or behind a firewall/TLS-terminating proxy, or run the standalone `mqtt-broker`
-binary (or a broker from another language) when you need authentication.
+providers can't be written in those two languages — use the **pull-style auth queue** instead:
+`enable_auth_queue(capacity)`, then loop on `next_auth_request(timeout_ms)` and answer each request with
+`resolve_auth_request(id, allow)`. An unanswered request is denied after 10 seconds.
 
 ## `ConnectOptions` (client)
 
@@ -106,9 +106,14 @@ C#, Dart and Go (zero values); Java, Node and Haskell take every field explicitl
 1. **Built in** — `allow_anonymous`, used when no provider is set: `true` admits everyone, `false`
    refuses everyone. A username is **not** verified (there is nothing to check it against), so it
    grants nothing on its own.
-2. **Provider callback** — `MqttAuthProvider.authenticate(client_id, username, password) -> bool`,
+2. **Pull-style auth queue** — for Dart and Haskell (works everywhere): each CONNECT becomes an
+   `AuthRequest { id, client_id, username, password }` you pull with `next_auth_request(timeout_ms)` and
+   answer with `resolve_auth_request(id, allow)`. Fails closed: no answer within 10 s, a full queue, or
+   disabling the queue all deny. Used when no provider callback is set; takes precedence over
+   `allow_anonymous`.
+3. **Provider callback** — `MqttAuthProvider.authenticate(client_id, username, password) -> bool`,
    evaluated once per CONNECT; it always makes the final decision when set.
-3. **Enhanced authentication (MQTT 5)** — a multi-round challenge/response (SCRAM, Kerberos, OAuth,
+4. **Enhanced authentication (MQTT 5)** — a multi-round challenge/response (SCRAM, Kerberos, OAuth,
    …). The client sets `auth_method` / `auth_data` and an `MqttAuthHandler.respond(method, challenge)`;
    the broker registers an `MqttEnhancedAuthProvider.step(client_id, method, data, round)` that
    returns an `EnhancedAuthStep { outcome: Continue | Success | Failure, data }`. A CONNECT naming an

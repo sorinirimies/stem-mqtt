@@ -210,6 +210,11 @@ clean-bindings:
 audit:
     cargo audit
 
+# Criterion benchmarks: packet codec, topic matching, fan-out, subscription index
+bench:
+    cargo bench -p stem-mqtt-client --bench codec
+    cargo bench -p stem-mqtt-broker --features bench-internals --bench fanout
+
 # Fuzz targets (needs `cargo install cargo-fuzz` + nightly)
 fuzz_targets := "decode roundtrip chunked varint publish topics"
 

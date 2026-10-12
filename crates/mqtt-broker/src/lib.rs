@@ -6,6 +6,7 @@
 //! intentionally has no separate "core" crate; the client crate's codec
 //! doubles as the shared foundation for both binaries.
 
+mod auth_queue;
 mod broker;
 mod config;
 mod connection;
@@ -19,6 +20,16 @@ mod tls;
 mod topic;
 mod ws;
 
+/// Internals exposed only for the Criterion benches (`--features bench-internals`).
+#[cfg(feature = "bench-internals")]
+#[doc(hidden)]
+pub mod internals {
+    pub use crate::index::{IndexEntry, SubscriptionIndex};
+    pub use crate::registry::{AttachRequest, SessionRegistry, SubscribeOutcome};
+    pub use crate::session::{OutboundBudget, QueuedMessage, Subscription};
+}
+
+pub use auth_queue::AuthRequest;
 pub use broker::MqttBroker;
 pub use config::{
     BrokerTlsConfig, EnhancedAuthOutcome, EnhancedAuthStep, MqttAuthProvider, MqttBrokerConfig,

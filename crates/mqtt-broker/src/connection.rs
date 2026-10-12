@@ -251,6 +251,18 @@ pub(crate) async fn handle_connection<S>(
 async fn authenticate(state: &Arc<BrokerState>, client_id: &str, connect: &ConnectPacket) -> bool {
     let provider = state.auth_provider.lock_safe().clone();
     let Some(provider) = provider else {
+        // No callback provider: a pull-style one (Dart/Haskell) decides if enabled.
+        if state.auth_requests.is_enabled() {
+            return state
+                .auth_requests
+                .ask(
+                    client_id.to_string(),
+                    connect.username.clone(),
+                    connect.password.as_ref().map(|b| b.to_vec()),
+                    crate::auth_queue::AUTH_QUEUE_TIMEOUT,
+                )
+                .await;
+        }
         // Fail closed, as Mosquitto/VerneMQ/HiveMQ do: with nothing able to
         // verify credentials, a username proves nothing, so the only choice
         // is "everyone" (`allow_anonymous`) or "no one".

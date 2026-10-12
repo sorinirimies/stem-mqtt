@@ -1556,3 +1556,46 @@ async fn clients_cannot_publish_to_reserved_dollar_topics() {
     assert_no_message(&mut rx2).await;
     broker.stop().await.unwrap();
 }
+
+#[tokio::test]
+async fn pull_style_auth_admits_and_refuses_per_the_applications_answer() {
+    let (broker, port) = start_broker(|c| c.allow_anonymous = false).await;
+    broker.enable_auth_queue(8);
+    let broker = Arc::new(broker);
+
+    // The "application": answer each request from its own loop, like Dart would.
+    let app = tokio::spawn({
+        let broker = broker.clone();
+        async move {
+            while let Some(req) = broker.next_auth_request(3000).await {
+                let allow = req.username.as_deref() == Some("good")
+                    && req.password.as_deref() == Some(&b"pw"[..]);
+                broker.resolve_auth_request(req.id, allow);
+            }
+        }
+    });
+
+    let creds = |id: &str, user: &str, pw: &[u8]| {
+        let mut o = ConnectOptions::new("127.0.0.1", port, id, MqttVersion::V5);
+        o.username = Some(user.into());
+        o.password = Some(pw.to_vec());
+        MqttClient::new(o)
+    };
+    let ok = creds("ok", "good", b"pw");
+    ok.connect().await.expect("right credentials");
+    for (user, pw) in [("good", &b"wrong"[..]), ("bad", b"pw")] {
+        let r = creds("no", user, pw).connect().await;
+        assert!(
+            matches!(r, Err(mqtt_client::MqttError::ConnectionRefused(_))),
+            "{user}: {r:?}"
+        );
+    }
+    assert!(
+        client(port, "anon").connect().await.is_err(),
+        "anonymous goes to the app too"
+    );
+    assert_eq!(broker.client_count(), 1);
+
+    app.abort();
+    broker.stop().await.unwrap();
+}

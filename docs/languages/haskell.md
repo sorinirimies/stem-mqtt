@@ -109,11 +109,16 @@ Events are `BrokerEventClientConnected clientId`, `BrokerEventClientDisconnected
 
 ## Authentication
 
-Custom `MqttAuthProvider` / enhanced-authentication callbacks can't be written in Haskell, so a
-Haskell-hosted broker cannot check credentials. Without a provider, `allowAnonymous = True` admits every
-client and `False` refuses every client — a username is never verified. Keep such a broker on loopback or
-behind a firewall/TLS-terminating proxy, or run the broker from another language (or the standalone
-`mqtt-broker` binary) when you need authentication. A refused client's `mqttClientConnect` returns `Left …`.
+Custom `MqttAuthProvider` / enhanced-authentication callbacks can't be written in Haskell. Use the
+**pull-style auth queue**: `mqttBrokerEnableAuthQueue broker 8`, then loop on
+`mqttBrokerNextAuthRequest broker timeoutMs` (an `AuthRequest reqId clientId username password`) and answer
+with `mqttBrokerResolveAuthRequest broker reqId allow`. An unanswered request is denied after 10 seconds.
+A refused client's `mqttClientConnect` returns `Left …`.
+
+```haskell
+Just (AuthRequest reqId _ user pass) <- mqttBrokerNextAuthRequest broker 5000
+_ <- mqttBrokerResolveAuthRequest broker reqId (checkCredentials user pass)
+```
 
 ## TLS
 

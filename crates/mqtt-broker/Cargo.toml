@@ -38,6 +38,16 @@ futures-util      = { workspace = true }
 rustls         = { workspace = true }
 tokio-rustls   = { workspace = true }
 
+[features]
+# Re-exports internals (`mqtt_broker::internals`) for the Criterion benches only.
+bench-internals = []
+
 [dev-dependencies]
+criterion = { workspace = true }
 tokio = { workspace = true, features = ["test-util", "macros"] }
 rcgen = { workspace = true }
+
+[[bench]]
+name = "fanout"
+harness = false
+required-features = ["bench-internals"]

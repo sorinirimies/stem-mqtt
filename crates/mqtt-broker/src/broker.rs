@@ -16,6 +16,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::task::JoinHandle;
 
+use crate::auth_queue::AuthQueue;
 use crate::config::{
     MqttAuthProvider, MqttBrokerConfig, MqttBrokerEventListener, MqttEnhancedAuthProvider,
     SharedAuthProvider, SharedEnhancedAuth,
@@ -42,6 +43,8 @@ pub(crate) struct BrokerState {
     pub auth_provider: Mutex<Option<SharedAuthProvider>>,
     pub enhanced_auth: Mutex<Option<SharedEnhancedAuth>>,
     pub events: EventHub,
+    /// Pull-style authentication (see [`crate::auth_queue`]).
+    pub auth_requests: AuthQueue,
     /// Bounds sockets that haven't completed CONNECT yet (see
     /// [`MAX_UNAUTHENTICATED_CONNECTIONS`]).
     pub handshakes: Arc<Semaphore>,
@@ -57,6 +60,7 @@ impl BrokerState {
             auth_provider: Mutex::new(None),
             enhanced_auth: Mutex::new(None),
             events: EventHub::new(),
+            auth_requests: AuthQueue::default(),
             handshakes: Arc::new(Semaphore::new(MAX_UNAUTHENTICATED_CONNECTIONS)),
         }
     }
@@ -172,6 +176,34 @@ impl MqttBroker {
     /// may be replaced at any time.
     pub fn set_auth_provider(&self, provider: Arc<dyn MqttAuthProvider>) {
         *self.state.auth_provider.lock_safe() = Some(provider);
+    }
+
+    /// Pull-style authentication for runtimes that can't implement
+    /// [`MqttAuthProvider`] (Dart, Haskell). Once enabled — and with no
+    /// provider set — every CONNECT is queued as an [`AuthRequest`](crate::AuthRequest)
+    /// for [`next_auth_request`](Self::next_auth_request); answer it with
+    /// [`resolve_auth_request`](Self::resolve_auth_request). A request left
+    /// unanswered for 10 seconds, or dropped because more than `capacity` are
+    /// waiting, is **denied**. `0` disables the queue (and denies anything
+    /// waiting); the broker then falls back to `allow_anonymous`.
+    pub fn enable_auth_queue(&self, capacity: u32) {
+        self.state.auth_requests.enable(capacity as usize);
+    }
+
+    /// The next CONNECT awaiting a decision, waiting up to `timeout_ms`
+    /// milliseconds; `None` if none arrived. Requires
+    /// [`enable_auth_queue`](Self::enable_auth_queue).
+    pub async fn next_auth_request(&self, timeout_ms: u32) -> Option<crate::AuthRequest> {
+        self.state
+            .auth_requests
+            .next(Duration::from_millis(u64::from(timeout_ms)))
+            .await
+    }
+
+    /// Admit (`allow = true`) or refuse the CONNECT behind request `id`.
+    /// Returns `false` if the request is unknown or already expired.
+    pub fn resolve_auth_request(&self, id: u64, allow: bool) -> bool {
+        self.state.auth_requests.resolve(id, allow)
     }
 
     /// Register the MQTT 5.0 enhanced-authentication provider (multi-round
