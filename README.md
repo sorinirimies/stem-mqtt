@@ -8,6 +8,8 @@ broker ship in every language, one generator per language, each runtime-tested a
 broker in CI.
 
 [![CI](https://github.com/sorinirimies/stem-mqtt/actions/workflows/ci.yml/badge.svg)](https://github.com/sorinirimies/stem-mqtt/actions/workflows/ci.yml)
+[![Audit](https://github.com/sorinirimies/stem-mqtt/actions/workflows/security.yml/badge.svg)](https://github.com/sorinirimies/stem-mqtt/actions/workflows/security.yml)
+[![Fuzz](https://github.com/sorinirimies/stem-mqtt/actions/workflows/fuzz.yml/badge.svg)](https://github.com/sorinirimies/stem-mqtt/actions/workflows/fuzz.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![MSRV](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](Cargo.toml)
 
