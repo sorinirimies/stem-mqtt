@@ -247,12 +247,27 @@ jobs:
           distribution: temurin
           java-version: "22"
       # (retried once: the runner's network to the toolchain CDNs is flaky)
-      - uses: dart-lang/setup-dart@v1
-        id: setup_try_4
-        continue-on-error: true
+      - name: Cache Dart SDK
         if: matrix.language == 'dart'
-      - uses: dart-lang/setup-dart@v1
-        if: steps.setup_try_4.outcome == 'failure'
+        id: dart_cache
+        uses: actions/cache@v4
+        with:
+          path: ~/dart-sdk
+          key: dart-sdk-linux-x64-3.13.5
+      - name: Install Dart SDK
+        if: matrix.language == 'dart' && steps.dart_cache.outputs.cache-hit != 'true'
+        timeout-minutes: 15
+        run: |
+          curl -fsSL --retry 5 --retry-delay 10 --retry-all-errors --max-time 300 -o /tmp/dart.zip \
+            https://storage.googleapis.com/dart-archive/channels/stable/release/3.13.5/sdk/dartsdk-linux-x64-release.zip
+          (command -v unzip >/dev/null || sudo apt-get install -y -qq unzip)
+          unzip -q /tmp/dart.zip -d /tmp && mv /tmp/dart-sdk ~/dart-sdk
+          rm -f /tmp/dart.zip
+          # trim cache: devtools/dartdoc assets and unused sdk dirs aren't needed for packaging
+          rm -rf ~/dart-sdk/bin/resources ~/dart-sdk/bin/devtools ~/dart-sdk/include
+      - name: Add Dart to PATH
+        if: matrix.language == 'dart'
+        run: echo "$HOME/dart-sdk/bin" >> "$GITHUB_PATH"
       # (retried once: the runner's network to the toolchain CDNs is flaky)
       - uses: actions/setup-node@v4
         id: setup_try_5
@@ -429,12 +444,27 @@ jobs:
         with:
           node-version: "22"
       # (retried once: the runner's network to the toolchain CDNs is flaky)
-      - uses: dart-lang/setup-dart@v1
-        id: setup_try_11
-        continue-on-error: true
+      - name: Cache Dart SDK
         if: matrix.language == 'dart'
-      - uses: dart-lang/setup-dart@v1
-        if: steps.setup_try_11.outcome == 'failure'
+        id: dart_cache
+        uses: actions/cache@v4
+        with:
+          path: ~/dart-sdk
+          key: dart-sdk-linux-x64-3.13.5
+      - name: Install Dart SDK
+        if: matrix.language == 'dart' && steps.dart_cache.outputs.cache-hit != 'true'
+        timeout-minutes: 15
+        run: |
+          curl -fsSL --retry 5 --retry-delay 10 --retry-all-errors --max-time 300 -o /tmp/dart.zip \
+            https://storage.googleapis.com/dart-archive/channels/stable/release/3.13.5/sdk/dartsdk-linux-x64-release.zip
+          (command -v unzip >/dev/null || sudo apt-get install -y -qq unzip)
+          unzip -q /tmp/dart.zip -d /tmp && mv /tmp/dart-sdk ~/dart-sdk
+          rm -f /tmp/dart.zip
+          # trim cache: devtools/dartdoc assets and unused sdk dirs aren't needed for packaging
+          rm -rf ~/dart-sdk/bin/resources ~/dart-sdk/bin/devtools ~/dart-sdk/include
+      - name: Add Dart to PATH
+        if: matrix.language == 'dart'
+        run: echo "$HOME/dart-sdk/bin" >> "$GITHUB_PATH"
 
       # The generators are `cargo install`ed from git; cache them (keyed by their pins).
       - name: Restore generator cache
