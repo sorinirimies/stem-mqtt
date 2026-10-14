@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.8] - 2026-10-14
+### 🔄 CI
+- split fuzz into own workflow; add audit & fuzz badges to README
+- cache Dart SDK (trimmed) instead of setup-dart; fail fast on stalled download
+**Full Changelog**: https://github.com/sorinirimies/stem-mqtt/compare/v0.3.6...v0.3.8
 ## [0.3.6] - 2026-10-12
 ### 🔧 Chores
 - don't require PYPI_API_TOKEN in release preflight (PyPI job skips itself when unset)
