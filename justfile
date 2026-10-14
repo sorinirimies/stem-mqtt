@@ -211,6 +211,10 @@ clean-bindings:
 audit:
     cargo audit
 
+# Check advisories, licenses, bans, sources (needs cargo-deny)
+deny:
+    cargo deny check
+
 # Criterion benchmarks: packet codec, topic matching, fan-out, subscription index
 bench:
     cargo bench -p stem-mqtt-client --bench codec

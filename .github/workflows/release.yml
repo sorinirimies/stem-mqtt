@@ -34,7 +34,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - name: Install Nushell
-        run: cargo install nu --locked
+        run: |
+          V=0.116.1
+          curl -fsSL https://github.com/nushell/nushell/releases/download/$V/nu-$V-x86_64-unknown-linux-gnu.tar.gz | tar -xz -C /tmp
+          sudo install -m 0755 /tmp/nu-$V-x86_64-unknown-linux-gnu/nu /usr/local/bin/nu || install -m 0755 /tmp/nu-$V-x86_64-unknown-linux-gnu/nu "$HOME/.cargo/bin/nu"
+          nu --version
       - name: Resolve and validate tag
         id: resolve
         run: |
@@ -59,7 +63,11 @@ jobs:
           components: rustfmt,clippy
       - uses: Swatinem/rust-cache@v2
       - name: Install Nushell
-        run: cargo install nu --locked
+        run: |
+          V=0.116.1
+          curl -fsSL https://github.com/nushell/nushell/releases/download/$V/nu-$V-x86_64-unknown-linux-gnu.tar.gz | tar -xz -C /tmp
+          sudo install -m 0755 /tmp/nu-$V-x86_64-unknown-linux-gnu/nu /usr/local/bin/nu || install -m 0755 /tmp/nu-$V-x86_64-unknown-linux-gnu/nu "$HOME/.cargo/bin/nu"
+          nu --version
       - name: Quality gate
         run: nu scripts/ci/quality_gate.nu
 
@@ -268,7 +276,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Install Nushell
-        run: cargo install nu --locked
+        run: |
+          V=0.116.1
+          curl -fsSL https://github.com/nushell/nushell/releases/download/$V/nu-$V-x86_64-unknown-linux-gnu.tar.gz | tar -xz -C /tmp
+          sudo install -m 0755 /tmp/nu-$V-x86_64-unknown-linux-gnu/nu /usr/local/bin/nu || install -m 0755 /tmp/nu-$V-x86_64-unknown-linux-gnu/nu "$HOME/.cargo/bin/nu"
+          nu --version
 
       - name: Generate bindings (mqtt-client)
         run: nu scripts/generate_bindings.nu ${{ matrix.language }} mqtt-client
@@ -396,7 +408,11 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
 
       - name: Install Nushell
-        run: cargo install nu --locked
+        run: |
+          V=0.116.1
+          curl -fsSL https://github.com/nushell/nushell/releases/download/$V/nu-$V-x86_64-unknown-linux-gnu.tar.gz | tar -xz -C /tmp
+          sudo install -m 0755 /tmp/nu-$V-x86_64-unknown-linux-gnu/nu /usr/local/bin/nu || install -m 0755 /tmp/nu-$V-x86_64-unknown-linux-gnu/nu "$HOME/.cargo/bin/nu"
+          nu --version
 
       - name: Generate and stage client + broker
         run: |
@@ -460,7 +476,11 @@ jobs:
       - name: Install git-cliff
         run: cargo install git-cliff --locked
       - name: Install Nushell
-        run: cargo install nu --locked
+        run: |
+          V=0.116.1
+          curl -fsSL https://github.com/nushell/nushell/releases/download/$V/nu-$V-x86_64-unknown-linux-gnu.tar.gz | tar -xz -C /tmp
+          sudo install -m 0755 /tmp/nu-$V-x86_64-unknown-linux-gnu/nu /usr/local/bin/nu || install -m 0755 /tmp/nu-$V-x86_64-unknown-linux-gnu/nu "$HOME/.cargo/bin/nu"
+          nu --version
       - name: Generate release notes
         run: nu scripts/ci/release_notes.nu ${{ needs.validate.outputs.tag }}
 
@@ -504,7 +524,11 @@ jobs:
         if: env.HAS_TOKEN == 'true'
       - name: Install Nushell
         if: env.HAS_TOKEN == 'true'
-        run: cargo install nu --locked
+        run: |
+          V=0.116.1
+          curl -fsSL https://github.com/nushell/nushell/releases/download/$V/nu-$V-x86_64-unknown-linux-gnu.tar.gz | tar -xz -C /tmp
+          sudo install -m 0755 /tmp/nu-$V-x86_64-unknown-linux-gnu/nu /usr/local/bin/nu || install -m 0755 /tmp/nu-$V-x86_64-unknown-linux-gnu/nu "$HOME/.cargo/bin/nu"
+          nu --version
 
       - name: Publish mqtt-client (must go first — mqtt-broker depends on it)
         if: env.HAS_TOKEN == 'true'
@@ -607,7 +631,11 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
       - name: Install Nushell
         if: env.HAS_CENTRAL == 'true'
-        run: cargo install nu --locked
+        run: |
+          V=0.116.1
+          curl -fsSL https://github.com/nushell/nushell/releases/download/$V/nu-$V-x86_64-unknown-linux-gnu.tar.gz | tar -xz -C /tmp
+          sudo install -m 0755 /tmp/nu-$V-x86_64-unknown-linux-gnu/nu /usr/local/bin/nu || install -m 0755 /tmp/nu-$V-x86_64-unknown-linux-gnu/nu "$HOME/.cargo/bin/nu"
+          nu --version
       - name: Publish Kotlin/JVM package to Maven Central
         if: env.HAS_CENTRAL == 'true'
         working-directory: packaging/kotlin
@@ -650,7 +678,15 @@ jobs:
           ref: ${{ needs.validate.outputs.tag }}
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Install Nushell
+      - name: Install Nushell (Linux prebuilt)
+        if: runner.os == 'Linux'
+        run: |
+          V=0.116.1
+          curl -fsSL https://github.com/nushell/nushell/releases/download/$V/nu-$V-x86_64-unknown-linux-gnu.tar.gz | tar -xz -C /tmp
+          sudo install -m 0755 /tmp/nu-$V-x86_64-unknown-linux-gnu/nu /usr/local/bin/nu || install -m 0755 /tmp/nu-$V-x86_64-unknown-linux-gnu/nu "$HOME/.cargo/bin/nu"
+          nu --version
+      - name: Install Nushell (build)
+        if: runner.os != 'Linux'
         run: cargo install nu --locked
       - name: Install the ${{ matrix.language }} generator
         run: nu scripts/install_bindgens.nu ${{ matrix.language }}
@@ -690,7 +726,11 @@ jobs:
           ref: ${{ needs.validate.outputs.tag }}
       - uses: dtolnay/rust-toolchain@stable
       - name: Install Nushell
-        run: cargo install nu --locked
+        run: |
+          V=0.116.1
+          curl -fsSL https://github.com/nushell/nushell/releases/download/$V/nu-$V-x86_64-unknown-linux-gnu.tar.gz | tar -xz -C /tmp
+          sudo install -m 0755 /tmp/nu-$V-x86_64-unknown-linux-gnu/nu /usr/local/bin/nu || install -m 0755 /tmp/nu-$V-x86_64-unknown-linux-gnu/nu "$HOME/.cargo/bin/nu"
+          nu --version
 
       # Merge every platform's staged native libraries into one tree.
       - uses: actions/download-artifact@v4
