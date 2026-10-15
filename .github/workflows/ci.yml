@@ -204,7 +204,7 @@ jobs:
       - name: Install Nushell (build)
         if: runner.os != 'Linux'
         run: cargo install nu --locked
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         if: matrix.language == 'python'
         with:
           python-version: "3.12"
@@ -358,7 +358,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: Build client + broker wheels

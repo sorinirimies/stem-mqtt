@@ -122,7 +122,7 @@ jobs:
         with:
           key: ${{ matrix.target }}
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -325,7 +325,7 @@ jobs:
           ref: ${{ needs.validate.outputs.tag }}
 
       - uses: dtolnay/rust-toolchain@stable
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -355,7 +355,7 @@ jobs:
         with:
           ref: ${{ needs.validate.outputs.tag }}
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -554,7 +554,7 @@ jobs:
         if: env.HAS_TOKEN != 'true'
         run: echo "⏭️  PYPI_API_TOKEN not set — skipping. See packaging/python/README.md."
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         if: env.HAS_TOKEN == 'true'
         with:
           python-version: "3.12"
