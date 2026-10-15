@@ -6,7 +6,8 @@
 # workflow on Gitea (.gitea/workflows/deps-update.yml).
 #
 # If CI passes, patch and minor Action bumps are approved and merged
-# automatically so they don't pile up. Major bumps require manual review.
+# automatically so they don't pile up. Major bumps of GitHub Actions are merged
+# too (CI is the gate); majors of other ecosystems require manual review.
 #
 # Requirements:
 #   • The repo must have "Allow auto-merge" enabled in Settings → General.
@@ -35,14 +36,14 @@ jobs:
           github-token: "${{ secrets.GITHUB_TOKEN }}"
 
       - name: Approve PR
-        if: steps.metadata.outputs.update-type != 'version-update:semver-major'
+        if: steps.metadata.outputs.update-type != 'version-update:semver-major' || steps.metadata.outputs.package-ecosystem == 'github_actions'
         run: gh pr review --approve "$PR_URL"
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Enable auto-merge (squash)
-        if: steps.metadata.outputs.update-type != 'version-update:semver-major'
+        if: steps.metadata.outputs.update-type != 'version-update:semver-major' || steps.metadata.outputs.package-ecosystem == 'github_actions'
         run: gh pr merge --auto --squash "$PR_URL"
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
