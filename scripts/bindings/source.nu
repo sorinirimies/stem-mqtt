@@ -23,11 +23,18 @@ export def install-arg [spec: record, flag: string]: nothing -> string {
 # Clone (if needed), check out the pinned rev, and apply the patch. Idempotent.
 export def prepare-source [spec: record]: nothing -> string {
     let dir = (source-dir $spec)
+    let rev = (install-arg $spec "--rev")
+    # A cached clone (rust-cache restores target/) can be partial/corrupt
+    # ("fatal: unable to read tree"); drop it and re-clone rather than fail.
+    if ($dir | path exists) {
+        let ok = (do { ^git -C $dir checkout --quiet --force $rev } | complete)
+        if $ok.exit_code != 0 { rm -rf $dir }
+    }
     if not ($dir | path exists) {
         mkdir ($dir | path dirname)
         ^git clone --quiet (install-arg $spec "--git") $dir
+        ^git -C $dir checkout --quiet --force $rev
     }
-    ^git -C $dir checkout --quiet --force (install-arg $spec "--rev")
     ^git -C $dir reset --quiet --hard
     if $spec.patch != "" {
         let patch = ($env.FILE_PWD | path dirname | path join $spec.patch)
