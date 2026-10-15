@@ -30,7 +30,12 @@ jobs:
 
       - name: Install Rust stable + rustfmt
         run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+          for attempt in 1 2 3 4 5; do
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+              | sh -s -- -y --default-toolchain stable && break
+            echo "rustup install failed (attempt $attempt); retrying in 20s"; sleep 20
+          done
+          [ -x "$HOME/.cargo/bin/cargo" ] || { echo "rustup could not be installed"; exit 1; }
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
           . "$HOME/.cargo/env"
           rustup component add rustfmt
@@ -49,7 +54,12 @@ jobs:
 
       - name: Install Rust stable + clippy
         run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+          for attempt in 1 2 3 4 5; do
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+              | sh -s -- -y --default-toolchain stable && break
+            echo "rustup install failed (attempt $attempt); retrying in 20s"; sleep 20
+          done
+          [ -x "$HOME/.cargo/bin/cargo" ] || { echo "rustup could not be installed"; exit 1; }
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
           . "$HOME/.cargo/env"
           rustup component add clippy
@@ -68,7 +78,12 @@ jobs:
 
       - name: Install Rust stable
         run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+          for attempt in 1 2 3 4 5; do
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+              | sh -s -- -y --default-toolchain stable && break
+            echo "rustup install failed (attempt $attempt); retrying in 20s"; sleep 20
+          done
+          [ -x "$HOME/.cargo/bin/cargo" ] || { echo "rustup could not be installed"; exit 1; }
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
       - uses: Swatinem/rust-cache@v2
@@ -89,7 +104,12 @@ jobs:
 
       - name: Install Rust stable
         run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+          for attempt in 1 2 3 4 5; do
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+              | sh -s -- -y --default-toolchain stable && break
+            echo "rustup install failed (attempt $attempt); retrying in 20s"; sleep 20
+          done
+          [ -x "$HOME/.cargo/bin/cargo" ] || { echo "rustup could not be installed"; exit 1; }
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
       - uses: Swatinem/rust-cache@v2
@@ -112,7 +132,12 @@ jobs:
 
       - name: Install Rust nightly
         run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain nightly
+          for attempt in 1 2 3 4 5; do
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+              | sh -s -- -y --default-toolchain nightly && break
+            echo "rustup install failed (attempt $attempt); retrying in 20s"; sleep 20
+          done
+          [ -x "$HOME/.cargo/bin/cargo" ] || { echo "rustup could not be installed"; exit 1; }
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
       - uses: Swatinem/rust-cache@v2
@@ -136,7 +161,12 @@ jobs:
 
       - name: Install Rust stable
         run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+          for attempt in 1 2 3 4 5; do
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+              | sh -s -- -y --default-toolchain stable && break
+            echo "rustup install failed (attempt $attempt); retrying in 20s"; sleep 20
+          done
+          [ -x "$HOME/.cargo/bin/cargo" ] || { echo "rustup could not be installed"; exit 1; }
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
       - uses: Swatinem/rust-cache@v2
