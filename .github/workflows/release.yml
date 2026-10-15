@@ -157,7 +157,7 @@ jobs:
             tar czf "${out}.tar.gz" "$out"
           fi
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: mqtt-broker-${{ matrix.target }}
           path: |
@@ -251,7 +251,7 @@ jobs:
             tar czf "${out}.tar.gz" "$out"
           fi
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: mqtt-client-${{ matrix.target }}
           path: |
@@ -302,7 +302,7 @@ jobs:
           zip -qr "bindings-${{ matrix.language }}.zip" "$root"
           unzip -t "bindings-${{ matrix.language }}.zip" >/dev/null
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: bindings-${{ matrix.language }}
           path: bindings-${{ matrix.language }}.zip
@@ -335,7 +335,7 @@ jobs:
       - name: Build wheel
         run: maturin build --release --manifest-path crates/${{ matrix.crate }}/Cargo.toml
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: python-${{ matrix.crate }}-${{ matrix.runner }}
           path: target/wheels/*.whl
@@ -451,7 +451,7 @@ jobs:
           cp "$jar_path" .
           cp "$aar_path" stem-mqtt-android-${{ needs.validate.outputs.version }}.aar
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: kotlin-packages
           path: |
@@ -695,7 +695,7 @@ jobs:
         run: nu scripts/test_bindings.nu ${{ matrix.language }} --strict
       - name: Stage ${{ matrix.language }} package
         run: nu scripts/publish_packages.nu stage ${{ matrix.language }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: stage-${{ matrix.language }}-${{ matrix.runner }}
           path: dist/${{ matrix.language }}
@@ -793,7 +793,7 @@ jobs:
         run: ./packaging/swift/build_xcframework.sh ${{ needs.validate.outputs.version }}
 
       - name: Upload Swift package artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: stem-mqtt-swift
           path: packaging/swift/dist/StemMqttSwift-*.zip

@@ -47,7 +47,7 @@ jobs:
         run: nu scripts/test_bindings.nu ${{ matrix.language }} --strict
       - name: Stage ${{ matrix.language }} package
         run: nu scripts/publish_packages.nu stage ${{ matrix.language }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: stage-${{ matrix.language }}
           path: dist/${{ matrix.language }}
