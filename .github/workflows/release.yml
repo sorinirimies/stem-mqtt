@@ -741,7 +741,7 @@ jobs:
       - name: Place staged package under dist/
         run: mkdir -p dist && mv staged dist/${{ matrix.language }}
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         if: matrix.language == 'node'
         with:
           node-version: "20"
