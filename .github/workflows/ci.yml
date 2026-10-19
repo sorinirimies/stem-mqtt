@@ -289,7 +289,7 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v6
       - name: Generate + stage client and broker
         run: |
           nu scripts/generate_bindings.nu kotlin mqtt-client
@@ -329,7 +329,7 @@ jobs:
         with:
           distribution: temurin
           java-version: "22"
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v6
         if: matrix.language == 'java'
       - uses: actions/setup-node@v4
         if: matrix.language == 'node'
