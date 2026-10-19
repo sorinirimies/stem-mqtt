@@ -359,7 +359,7 @@ jobs:
         with:
           python-version: "3.12"
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: python-*
           path: wheels
@@ -484,7 +484,7 @@ jobs:
       - name: Generate release notes
         run: nu scripts/ci/release_notes.nu ${{ needs.validate.outputs.tag }}
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: artifacts/
           merge-multiple: true
@@ -563,7 +563,7 @@ jobs:
         if: env.HAS_TOKEN == 'true'
         run: pip install maturin
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         if: env.HAS_TOKEN == 'true'
         with:
           pattern: python-*
@@ -601,7 +601,7 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v5
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: kotlin-packages
           path: .
@@ -733,7 +733,7 @@ jobs:
           nu --version
 
       # Merge every platform's staged native libraries into one tree.
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: stage-${{ matrix.language }}-*
           path: staged
