@@ -758,7 +758,7 @@ jobs:
           java-version: "22"
       - uses: gradle/actions/setup-gradle@v6
         if: matrix.language == 'java'
-      - uses: oras-project/setup-oras@v1
+      - uses: oras-project/setup-oras@v2
         if: matrix.language != 'java' && matrix.language != 'csharp' && matrix.language != 'node'
       - name: Log in to ghcr.io
         if: matrix.language != 'java' && matrix.language != 'csharp' && matrix.language != 'node'
