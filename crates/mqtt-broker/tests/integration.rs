@@ -136,7 +136,7 @@ async fn websocket_client_connects_and_subscribes() {
         properties: Properties::new(),
     });
     ws.send(Message::Binary(
-        connect.encode(MqttVersion::V5).unwrap().to_vec(),
+        connect.encode(MqttVersion::V5).unwrap().to_vec().into(),
     ))
     .await
     .unwrap();
@@ -172,7 +172,7 @@ async fn websocket_subscriber_receives_publish_from_tcp_client() {
         properties: Properties::new(),
     });
     ws.send(Message::Binary(
-        connect.encode(MqttVersion::V5).unwrap().to_vec(),
+        connect.encode(MqttVersion::V5).unwrap().to_vec().into(),
     ))
     .await
     .unwrap();
@@ -184,7 +184,7 @@ async fn websocket_subscriber_receives_publish_from_tcp_client() {
         properties: Properties::new(),
     });
     ws.send(Message::Binary(
-        subscribe.encode(MqttVersion::V5).unwrap().to_vec(),
+        subscribe.encode(MqttVersion::V5).unwrap().to_vec().into(),
     ))
     .await
     .unwrap();

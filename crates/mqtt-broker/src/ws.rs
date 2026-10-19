@@ -102,7 +102,7 @@ where
             Poll::Pending => return Poll::Pending,
         }
         Pin::new(&mut self.inner)
-            .start_send(Message::Binary(buf.to_vec()))
+            .start_send(Message::Binary(buf.to_vec().into()))
             .map_err(to_io_err)?;
         // Flush immediately: our callers never call `flush()` themselves
         // (see module docs), so a write that isn't force-flushed here
@@ -148,8 +148,14 @@ mod tests {
     #[tokio::test]
     async fn binary_messages_concatenate_into_one_byte_stream() {
         let (mut server, mut client) = pair().await;
-        client.send(Message::Binary(vec![1, 2])).await.unwrap();
-        client.send(Message::Binary(vec![3, 4, 5])).await.unwrap();
+        client
+            .send(Message::Binary(vec![1, 2].into()))
+            .await
+            .unwrap();
+        client
+            .send(Message::Binary(vec![3, 4, 5].into()))
+            .await
+            .unwrap();
         let mut buf = [0u8; 2];
         server.read_exact(&mut buf).await.unwrap();
         assert_eq!(buf, [1, 2]);
@@ -162,7 +168,7 @@ mod tests {
     async fn oversized_message_is_served_across_reads() {
         let (mut server, mut client) = pair().await;
         client
-            .send(Message::Binary((0..10).collect()))
+            .send(Message::Binary((0..10).collect::<Vec<u8>>().into()))
             .await
             .unwrap();
         let mut got = Vec::new();
@@ -179,8 +185,8 @@ mod tests {
     async fn text_and_empty_frames_are_ignored() {
         let (mut server, mut client) = pair().await;
         client.send(Message::Text("hi".into())).await.unwrap();
-        client.send(Message::Binary(vec![])).await.unwrap();
-        client.send(Message::Binary(vec![9])).await.unwrap();
+        client.send(Message::Binary(vec![].into())).await.unwrap();
+        client.send(Message::Binary(vec![9].into())).await.unwrap();
         let mut b = [0u8; 1];
         server.read_exact(&mut b).await.unwrap();
         assert_eq!(b, [9]);
@@ -202,11 +208,11 @@ mod tests {
         server.write_all(&[4]).await.unwrap();
         assert_eq!(
             client.next().await.unwrap().unwrap(),
-            Message::Binary(vec![1, 2, 3])
+            Message::Binary(vec![1, 2, 3].into())
         );
         assert_eq!(
             client.next().await.unwrap().unwrap(),
-            Message::Binary(vec![4])
+            Message::Binary(vec![4].into())
         );
     }
 }

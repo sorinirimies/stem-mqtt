@@ -486,11 +486,9 @@ async fn accept_ws_connection(
     // slack for framing), so the transport can't be used to buffer more than
     // the packet decoder itself would ever accept.
     let limit = state.config.max_packet_size_bytes().saturating_add(1024);
-    let ws_config = tokio_tungstenite::tungstenite::protocol::WebSocketConfig {
-        max_message_size: Some(limit),
-        max_frame_size: Some(limit),
-        ..Default::default()
-    };
+    let ws_config = tokio_tungstenite::tungstenite::protocol::WebSocketConfig::default()
+        .max_message_size(Some(limit))
+        .max_frame_size(Some(limit));
 
     // The `Err` side of `accept_hdr_async`'s callback contract is
     // tungstenite's own `ErrorResponse` type (an HTTP response) — its size
