@@ -246,7 +246,7 @@ jobs:
           java-version: "22"
       - uses: dart-lang/setup-dart@v1
         if: matrix.language == 'dart'
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         if: matrix.language == 'node'
         with:
           node-version: "22"
@@ -331,7 +331,7 @@ jobs:
           java-version: "22"
       - uses: gradle/actions/setup-gradle@v6
         if: matrix.language == 'java'
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         if: matrix.language == 'node'
         with:
           node-version: "22"
