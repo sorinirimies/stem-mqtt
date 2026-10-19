@@ -208,7 +208,7 @@ jobs:
         if: matrix.language == 'python'
         with:
           python-version: "3.12"
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         id: setup_go
         continue-on-error: true
         if: matrix.language == 'go'
