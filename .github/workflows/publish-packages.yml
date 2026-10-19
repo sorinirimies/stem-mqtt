@@ -90,7 +90,7 @@ jobs:
         with:
           distribution: temurin
           java-version: "22"
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v6
         if: matrix.language == 'java'
       - uses: oras-project/setup-oras@v1
         if: matrix.language == 'go' || matrix.language == 'dart' || matrix.language == 'haskell'
