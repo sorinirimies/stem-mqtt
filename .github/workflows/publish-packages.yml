@@ -92,7 +92,7 @@ jobs:
           java-version: "22"
       - uses: gradle/actions/setup-gradle@v6
         if: matrix.language == 'java'
-      - uses: oras-project/setup-oras@v1
+      - uses: oras-project/setup-oras@v2
         if: matrix.language == 'go' || matrix.language == 'dart' || matrix.language == 'haskell'
       - name: Log in to ghcr.io
         if: (matrix.language == 'go' || matrix.language == 'dart' || matrix.language == 'haskell') && !inputs.dry_run
