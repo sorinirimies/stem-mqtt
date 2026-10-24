@@ -6,6 +6,7 @@
 //! intentionally has no separate "core" crate; the client crate's codec
 //! doubles as the shared foundation for both binaries.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
 mod auth_queue;
 mod broker;
 mod config;

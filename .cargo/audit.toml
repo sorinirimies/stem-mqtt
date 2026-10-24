@@ -1,4 +1,6 @@
 # cargo-audit configuration. Vulnerabilities always fail; unsound/unmaintained
 # are reported as warnings.
 [advisories]
-ignore = []   # add "RUSTSEC-YYYY-NNNN" with a justification comment
+# RUSTSEC-2026-0374: basic-toml unmaintained. Transitive via askama_derive
+# (uniffi bindgen, build-time only). Revisit when uniffi bumps askama.
+ignore = ["RUSTSEC-2026-0374"]

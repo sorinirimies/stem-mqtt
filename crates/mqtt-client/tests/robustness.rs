@@ -259,3 +259,60 @@ async fn endless_auth_challenges_are_cut_off() {
         "{err:?}"
     );
 }
+
+/// A broker-sent DISCONNECT must surface its reason once and mark the
+/// client disconnected.
+#[tokio::test]
+async fn server_disconnect_is_reported_with_its_reason_code() {
+    use mqtt_client::protocol::packet::DisconnectPacket;
+    let port = fake_broker(|mut stream, _buf| async move {
+        let pkt = Packet::Disconnect(DisconnectPacket {
+            reason_code: 0x8B,
+            properties: Properties::new(),
+        });
+        stream
+            .write_all(&pkt.encode(MqttVersion::V5).unwrap())
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_secs(5)).await;
+    })
+    .await;
+
+    let client = MqttClient::new(ConnectOptions::new(
+        "127.0.0.1",
+        port,
+        "sd",
+        MqttVersion::V5,
+    ));
+    let recorder = Arc::new(Recorder::default());
+    client.set_message_listener(recorder.clone());
+    client.connect().await.unwrap();
+
+    timeout(Duration::from_secs(3), async {
+        while client.is_connected() {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("server DISCONNECT must end the session");
+    let reasons = recorder.disconnects.lock().unwrap().clone();
+    assert_eq!(reasons.len(), 1, "{reasons:?}");
+    assert!(reasons[0].contains("0x8B"), "{reasons:?}");
+}
+
+/// Every operation on a never-connected client fails cleanly with
+/// `NotConnected` instead of hanging or panicking.
+#[tokio::test]
+async fn operations_before_connect_report_not_connected() {
+    let client = MqttClient::new(ConnectOptions::new("127.0.0.1", 1, "nc", MqttVersion::V5));
+    assert!(!client.is_connected());
+    assert!(matches!(
+        client.subscribe("a/b".into(), QoS::AtLeastOnce).await,
+        Err(MqttError::NotConnected)
+    ));
+    assert!(matches!(
+        client.unsubscribe("a/b".into()).await,
+        Err(MqttError::NotConnected)
+    ));
+    assert!(client.next_message(10).await.is_none());
+}

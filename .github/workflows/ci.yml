@@ -58,6 +58,20 @@ jobs:
       - name: Run clippy (workspace)
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
+  # ── Coverage gate ────────────────────────────────────────────────────────────
+  coverage:
+    name: coverage (>= 88% lines)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      - name: Enforce minimum line coverage
+        run: cargo llvm-cov --workspace --exclude stem-mqtt-dashboard --summary-only --fail-under-lines 88
+
   # ── 3. Tests ─────────────────────────────────────────────────────────────────
   test:
     name: test (${{ matrix.os }})

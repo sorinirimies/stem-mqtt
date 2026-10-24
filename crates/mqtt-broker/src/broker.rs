@@ -509,10 +509,10 @@ async fn accept_ws_connection(
                 .unwrap_or(false);
 
             if !offers_mqtt {
-                let resp: ErrorResponse = tokio_tungstenite::tungstenite::http::Response::builder()
-                    .status(400)
-                    .body(Some("expected Sec-WebSocket-Protocol: mqtt".to_string()))
-                    .unwrap();
+                let mut resp: ErrorResponse = tokio_tungstenite::tungstenite::http::Response::new(
+                    Some("expected Sec-WebSocket-Protocol: mqtt".to_string()),
+                );
+                *resp.status_mut() = tokio_tungstenite::tungstenite::http::StatusCode::BAD_REQUEST;
                 return Err(resp);
             }
             response

@@ -7,6 +7,7 @@
 //! `tokio`-based client on top of it. The `mqtt-broker` crate re-uses
 //! [`protocol`] directly instead of duplicating the codec.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
 pub mod client;
 pub mod error;
 pub mod protocol;

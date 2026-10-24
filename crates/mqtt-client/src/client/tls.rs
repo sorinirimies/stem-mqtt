@@ -201,4 +201,39 @@ mod tests {
         let err = build_client_config(&o).unwrap_err().to_string();
         assert!(err.contains("no private key"), "{err}");
     }
+
+    #[test]
+    fn accept_any_verifier_accepts_and_advertises_schemes() {
+        use rustls::client::danger::ServerCertVerifier;
+        let v = AcceptAnyServerCert::new();
+        let cert = CertificateDer::from(vec![0u8; 4]);
+        let name = rustls::pki_types::ServerName::try_from("localhost").unwrap();
+        let now = rustls::pki_types::UnixTime::since_unix_epoch(std::time::Duration::ZERO);
+        assert!(v.verify_server_cert(&cert, &[], &name, &[], now).is_ok());
+        assert!(!v.supported_verify_schemes().is_empty());
+    }
+
+    #[test]
+    fn parse_certs_accepts_empty_input_and_rejects_garbage() {
+        assert!(parse_certs(b"").unwrap().is_empty());
+        assert!(
+            parse_certs(b"-----BEGIN CERTIFICATE-----\n!!\n-----END CERTIFICATE-----\n").is_err()
+        );
+    }
+
+    #[test]
+    fn garbage_private_key_is_an_error() {
+        let pem = b"-----BEGIN PRIVATE KEY-----\n!!\n-----END PRIVATE KEY-----\n";
+        assert!(parse_private_key(pem).is_err());
+    }
+
+    #[tokio::test]
+    async fn connecting_to_a_closed_port_is_an_error() {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = l.local_addr().unwrap().port();
+        drop(l);
+        let mut o = ConnectOptions::new("127.0.0.1", port, "c", crate::protocol::MqttVersion::V5);
+        o.tls = Some(opts());
+        assert!(connect_transport(&o).await.is_err());
+    }
 }

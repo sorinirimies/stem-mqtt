@@ -215,4 +215,45 @@ mod tests {
             Message::Binary(vec![4].into())
         );
     }
+
+    #[tokio::test]
+    async fn flush_and_shutdown_succeed_and_peer_sees_close() {
+        use futures_util::StreamExt;
+        let (mut server, mut client) = pair().await;
+        server.write_all(&[7]).await.unwrap();
+        server.flush().await.unwrap();
+        server.shutdown().await.unwrap();
+        assert_eq!(
+            client.next().await.unwrap().unwrap(),
+            Message::Binary(vec![7].into())
+        );
+        assert!(matches!(
+            client.next().await,
+            Some(Ok(Message::Close(_))) | None
+        ));
+    }
+
+    #[tokio::test]
+    async fn writing_after_peer_is_gone_is_an_io_error() {
+        let (mut server, client) = pair().await;
+        drop(client);
+        let mut failed = false;
+        for _ in 0..64 {
+            if server.write_all(&[0u8; 1024]).await.is_err() {
+                failed = true;
+                break;
+            }
+        }
+        assert!(failed, "write to a dropped peer must eventually fail");
+    }
+
+    #[tokio::test]
+    async fn dropped_peer_reads_as_eof_or_error() {
+        let (mut server, client) = pair().await;
+        drop(client);
+        let mut b = [0u8; 1];
+        if let Ok(n) = server.read(&mut b).await {
+            assert_eq!(n, 0);
+        }
+    }
 }
