@@ -115,4 +115,15 @@ mod tests {
         let decoded = SimpleAck::decode_body(MqttVersion::V5, out.freeze()).unwrap();
         assert_eq!(decoded, ack);
     }
+
+    #[test]
+    fn encoded_len_is_two_for_plain_success_and_longer_with_reason() {
+        let ok = SimpleAck::success(1);
+        assert_eq!(ok.encoded_len(MqttVersion::V5), 2);
+        assert_eq!(ok.encoded_len(MqttVersion::V311), 2);
+        let mut failed = SimpleAck::success(1);
+        failed.reason_code = 0x87;
+        assert!(failed.encoded_len(MqttVersion::V5) > 2);
+        assert_eq!(failed.encoded_len(MqttVersion::V311), 2);
+    }
 }

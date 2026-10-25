@@ -162,3 +162,34 @@ async fn mutual_tls_requires_a_trusted_client_certificate() {
 
     broker.stop().await.unwrap();
 }
+
+/// `insecure_skip_certificate_verification` accepts any certificate *and*
+/// any handshake signature, so an untrusted self-signed broker still works.
+#[tokio::test]
+async fn insecure_client_accepts_an_unverifiable_server_certificate() {
+    let server_cert = generate_self_signed(vec!["127.0.0.1".to_string()]);
+    let config = MqttBrokerConfig {
+        tls: Some(BrokerTlsConfig {
+            port: 0,
+            cert_pem: server_cert.cert_pem,
+            key_pem: server_cert.key_pem,
+            client_ca_pem: None,
+        }),
+        ..MqttBrokerConfig::new("127.0.0.1", 0)
+    };
+    let broker = MqttBroker::new(config);
+    broker.start().await.unwrap();
+    let port = broker.bound_tls_port().unwrap();
+
+    let mut options = ConnectOptions::new("127.0.0.1", port, "insecure", MqttVersion::V5);
+    options.tls = Some(TlsOptions {
+        ca_cert_pem: None,
+        client_cert_pem: None,
+        client_key_pem: None,
+        insecure_skip_certificate_verification: true,
+    });
+    let client = MqttClient::new(options);
+    client.connect().await.expect("insecure mode must connect");
+    client.disconnect().await.unwrap();
+    broker.stop().await.unwrap();
+}

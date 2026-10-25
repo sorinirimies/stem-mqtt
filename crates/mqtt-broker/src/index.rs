@@ -294,4 +294,10 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn removing_with_an_invalid_shared_key_is_a_noop() {
+        let mut idx = SubscriptionIndex::default();
+        idx.remove("c", "$share/onlygroup");
+    }
 }

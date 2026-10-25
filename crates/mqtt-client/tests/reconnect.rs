@@ -149,3 +149,95 @@ async fn client_auto_reconnects_and_replays_subscriptions() {
 
     fake_broker.await.unwrap();
 }
+
+/// How the fake broker treats the replayed SUBSCRIBE after a reconnect.
+enum ReplayReply {
+    /// Answer with an ack of the wrong type: the client logs it and carries on.
+    WrongAck,
+    /// Hang up mid-replay: the client abandons the replay.
+    Hangup,
+}
+
+async fn replay_scenario(reply: ReplayReply) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+
+    let broker = tokio::spawn(async move {
+        // First connection: ack two subscriptions, then drop.
+        let mut stream = accept_and_handshake(&listener).await;
+        let mut buf = BytesMut::new();
+        for _ in 0..2 {
+            let Packet::Subscribe(p) = read_packet(&mut stream, &mut buf).await else {
+                panic!("expected SUBSCRIBE");
+            };
+            send_packet(
+                &mut stream,
+                Packet::SubAck(SubAckPacket {
+                    packet_id: p.packet_id,
+                    reason_codes: vec![
+                        mqtt_client::protocol::subscribe::SubAckReasonCode::granted(
+                            p.filters[0].qos,
+                        ),
+                    ],
+                    properties: Properties::new(),
+                }),
+            )
+            .await;
+        }
+        drop(stream);
+
+        // Second connection: misbehave while the client replays.
+        let mut stream = accept_and_handshake(&listener).await;
+        let mut buf = BytesMut::new();
+        let Packet::Subscribe(p) = read_packet(&mut stream, &mut buf).await else {
+            panic!("expected replayed SUBSCRIBE");
+        };
+        match reply {
+            ReplayReply::WrongAck => {
+                send_packet(
+                    &mut stream,
+                    Packet::PubAck(mqtt_client::protocol::ack::SimpleAck::success(p.packet_id)),
+                )
+                .await;
+                // The client carries on with the second filter.
+                assert!(matches!(
+                    read_packet(&mut stream, &mut buf).await,
+                    Packet::Subscribe(_)
+                ));
+            }
+            ReplayReply::Hangup => drop(stream),
+        }
+        tokio::time::sleep(Duration::from_millis(300)).await;
+    });
+
+    let mut options = ConnectOptions::new("127.0.0.1", port, "replay", MqttVersion::V5);
+    options.auto_reconnect = true;
+    options.reconnect_backoff_secs = 1;
+    options.reconnect_max_backoff_secs = 1;
+    let client = MqttClient::new(options);
+    client.connect().await.unwrap();
+    client
+        .subscribe("t/a".into(), QoS::AtMostOnce)
+        .await
+        .unwrap();
+    client
+        .subscribe("t/b".into(), QoS::AtMostOnce)
+        .await
+        .unwrap();
+
+    timeout(Duration::from_secs(10), broker)
+        .await
+        .expect("broker script must finish")
+        .expect("broker script must not panic");
+    client.disconnect().await.unwrap();
+}
+
+#[tokio::test]
+async fn replay_continues_past_a_wrongly_acked_subscription() {
+    replay_scenario(ReplayReply::WrongAck).await;
+}
+
+#[tokio::test]
+async fn replay_is_abandoned_when_the_connection_drops_again() {
+    replay_scenario(ReplayReply::Hangup).await;
+}

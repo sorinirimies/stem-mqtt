@@ -74,7 +74,19 @@ impl ConnectPacket {
 
         if let Some(will) = &self.will {
             if self.version.is_v5() {
-                will.properties.encode(out)?;
+                // `delay_interval` is carried on the wire as a will
+                // property; fold it in unless the caller already set one.
+                let mut props = will.properties.clone();
+                let has_delay = props
+                    .0
+                    .iter()
+                    .any(|p| matches!(p, super::properties::Property::WillDelayInterval(_)));
+                if will.delay_interval != 0 && !has_delay {
+                    props.push(super::properties::Property::WillDelayInterval(
+                        will.delay_interval,
+                    ));
+                }
+                props.encode(out)?;
             }
             encode_utf8_string(&will.topic, out)?;
             encode_binary(&will.payload, out)?;
@@ -352,5 +364,38 @@ mod tests {
         let mut bytes = out.freeze();
         let decoded = ConnAckPacket::decode_body(MqttVersion::V5, &mut bytes).unwrap();
         assert_eq!(decoded, ack);
+    }
+
+    #[test]
+    fn truncated_protocol_level_is_malformed() {
+        let mut out = BytesMut::new();
+        encode_utf8_string("MQTT", &mut out).unwrap();
+        let mut buf = out.freeze();
+        assert!(ConnectPacket::decode_body(&mut buf).is_err());
+    }
+
+    #[test]
+    fn will_delay_interval_round_trips() {
+        let p = ConnectPacket {
+            version: MqttVersion::V5,
+            client_id: "c".into(),
+            clean_start: true,
+            keep_alive: 10,
+            username: None,
+            password: None,
+            will: Some(Will {
+                topic: "t".into(),
+                payload: Bytes::from_static(b"p"),
+                qos: QoS::AtMostOnce,
+                retain: false,
+                properties: Properties::new(),
+                delay_interval: 5,
+            }),
+            properties: Properties::new(),
+        };
+        let mut out = BytesMut::new();
+        p.encode_body(&mut out).unwrap();
+        let back = ConnectPacket::decode_body(&mut out.freeze()).unwrap();
+        assert_eq!(back.will.unwrap().delay_interval, 5);
     }
 }

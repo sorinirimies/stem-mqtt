@@ -303,4 +303,16 @@ mod tests {
         assert_eq!(Some(vec![1u8]).describe(), "Some(<redacted>)");
         assert_eq!(None::<Vec<u8>>.describe(), "None");
     }
+
+    #[test]
+    fn shrinking_an_enabled_queue_drops_the_oldest_events() {
+        let q: EventQueue<u32> = EventQueue::default();
+        q.enable(4);
+        for i in 0..4 {
+            q.push(i);
+        }
+        q.enable(2);
+        q.enable(0); // disabling discards everything
+        assert!(!q.is_enabled());
+    }
 }

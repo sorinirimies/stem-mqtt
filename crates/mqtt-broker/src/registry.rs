@@ -915,4 +915,10 @@ mod tests {
         let (req, _peer) = request("late", true, 0);
         assert!(registry.attach(req).is_ok());
     }
+
+    #[test]
+    fn default_registry_is_empty() {
+        let r = SessionRegistry::default();
+        assert_eq!(r.client_count(), 0);
+    }
 }

@@ -392,4 +392,11 @@ mod tests {
             "{shown}"
         );
     }
+
+    #[test]
+    fn tls_options_default_matches_new() {
+        let d = TlsOptions::default();
+        assert!(!d.insecure_skip_certificate_verification);
+        assert!(d.ca_cert_pem.is_none());
+    }
 }

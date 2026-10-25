@@ -316,3 +316,259 @@ async fn operations_before_connect_report_not_connected() {
     ));
     assert!(client.next_message(10).await.is_none());
 }
+
+// ── Deterministic failure-path coverage ─────────────────────────────────────
+
+use mqtt_client::protocol::ack::SimpleAck;
+use mqtt_client::protocol::subscribe::{SubAckPacket, SubAckReasonCode};
+
+async fn connected_client(port: u16, id: &str) -> MqttClient {
+    let mut options = ConnectOptions::new("127.0.0.1", port, id, MqttVersion::V5);
+    options.operation_timeout_secs = 2;
+    let client = MqttClient::new(options);
+    client.connect().await.unwrap();
+    client
+}
+
+async fn send(stream: &mut TcpStream, p: Packet) {
+    stream
+        .write_all(&p.encode(MqttVersion::V5).unwrap())
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn malformed_filters_are_rejected_client_side() {
+    let port = fake_broker(|s, _b| async move {
+        let _keep_open = s;
+        tokio::time::sleep(Duration::from_secs(3)).await;
+    })
+    .await;
+    let client = connected_client(port, "badfilter").await;
+    assert!(matches!(
+        client.subscribe("a/#/b".into(), QoS::AtMostOnce).await,
+        Err(MqttError::Protocol(_))
+    ));
+    assert!(matches!(
+        client.unsubscribe("a/#/b".into()).await,
+        Err(MqttError::Protocol(_))
+    ));
+}
+
+#[tokio::test]
+async fn wrong_ack_type_is_reported_as_unexpected() {
+    let port = fake_broker(|mut s, mut b| async move {
+        let Packet::Subscribe(sub) = read_packet(&mut s, &mut b).await else {
+            panic!("expected SUBSCRIBE");
+        };
+        send(&mut s, Packet::PubAck(SimpleAck::success(sub.packet_id))).await;
+        let Packet::Unsubscribe(u) = read_packet(&mut s, &mut b).await else {
+            panic!("expected UNSUBSCRIBE");
+        };
+        send(&mut s, Packet::PubAck(SimpleAck::success(u.packet_id))).await;
+        let Packet::Publish(p) = read_packet(&mut s, &mut b).await else {
+            panic!("expected PUBLISH");
+        };
+        send(
+            &mut s,
+            Packet::PubRec(SimpleAck::success(p.packet_id.unwrap())),
+        )
+        .await;
+        tokio::time::sleep(Duration::from_secs(3)).await;
+    })
+    .await;
+    let client = connected_client(port, "unexpected").await;
+    assert!(matches!(
+        client.subscribe("a/b".into(), QoS::AtMostOnce).await,
+        Err(MqttError::MalformedPacket(_))
+    ));
+    assert!(matches!(
+        client.unsubscribe("a/b".into()).await,
+        Err(MqttError::MalformedPacket(_))
+    ));
+    // QoS 1 PUBLISH answered with PUBREC instead of PUBACK.
+    assert!(matches!(
+        client
+            .publish("a/b".into(), b"x".to_vec(), QoS::AtLeastOnce, false)
+            .await,
+        Err(MqttError::MalformedPacket(_))
+    ));
+}
+
+#[tokio::test]
+async fn suback_failure_is_not_remembered_and_puback_failure_is_an_error() {
+    let port = fake_broker(|mut s, mut b| async move {
+        let Packet::Subscribe(sub) = read_packet(&mut s, &mut b).await else {
+            panic!("expected SUBSCRIBE");
+        };
+        send(
+            &mut s,
+            Packet::SubAck(SubAckPacket {
+                packet_id: sub.packet_id,
+                reason_codes: vec![SubAckReasonCode(0x80)],
+                properties: Properties::new(),
+            }),
+        )
+        .await;
+        let Packet::Publish(p) = read_packet(&mut s, &mut b).await else {
+            panic!("expected PUBLISH");
+        };
+        let mut ack = SimpleAck::success(p.packet_id.unwrap());
+        ack.reason_code = 0x87; // Not authorized
+        send(&mut s, Packet::PubAck(ack)).await;
+        tokio::time::sleep(Duration::from_secs(3)).await;
+    })
+    .await;
+    let client = connected_client(port, "rejected").await;
+    let r = client
+        .subscribe("a/b".into(), QoS::AtMostOnce)
+        .await
+        .unwrap();
+    assert_eq!(r.reason_code, 0x80);
+    let err = client
+        .publish("a/b".into(), b"x".to_vec(), QoS::AtLeastOnce, false)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&err, MqttError::Session(m) if m.contains("0x87")),
+        "{err:?}"
+    );
+}
+
+#[tokio::test]
+async fn handshake_answered_with_a_non_connack_is_rejected() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        let (mut s, _) = listener.accept().await.unwrap();
+        let mut b = BytesMut::new();
+        let _ = read_packet(&mut s, &mut b).await;
+        send(&mut s, Packet::PingResp).await;
+        tokio::time::sleep(Duration::from_secs(2)).await;
+    });
+    let client = MqttClient::new(ConnectOptions::new(
+        "127.0.0.1",
+        port,
+        "nc",
+        MqttVersion::V5,
+    ));
+    assert!(matches!(
+        client.connect().await,
+        Err(MqttError::MalformedPacket(_))
+    ));
+}
+
+#[tokio::test]
+async fn second_connect_and_repeat_disconnect_are_benign() {
+    let port = fake_broker(|s, _b| async move {
+        let _keep_open = s;
+        tokio::time::sleep(Duration::from_secs(3)).await;
+    })
+    .await;
+    let client = connected_client(port, "twice").await;
+    assert!(matches!(
+        client.connect().await,
+        Err(MqttError::AlreadyConnected)
+    ));
+    client.disconnect().await.unwrap();
+    client.disconnect().await.unwrap();
+    assert!(!client.is_connected());
+}
+
+/// A peer that stops reading must not wedge `publish`: the write times out
+/// and the connection is declared dead.
+#[tokio::test]
+async fn stalled_write_times_out_and_kills_the_connection() {
+    let port = fake_broker(|s, _b| async move {
+        let _keep_open = s;
+        // Never read again: socket buffers fill up.
+        tokio::time::sleep(Duration::from_secs(20)).await;
+    })
+    .await;
+    let mut options = ConnectOptions::new("127.0.0.1", port, "stall", MqttVersion::V5);
+    options.operation_timeout_secs = 1;
+    let client = MqttClient::new(options);
+    let recorder = Arc::new(Recorder::default());
+    client.set_message_listener(recorder.clone());
+    client.connect().await.unwrap();
+
+    let big = vec![0u8; 64 * 1024 * 1024];
+    let err = client
+        .publish("big".into(), big, QoS::AtMostOnce, false)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, MqttError::Timeout), "{err:?}");
+    assert!(!client.is_connected());
+    let reasons = recorder.disconnects.lock().unwrap().clone();
+    assert!(
+        reasons.iter().any(|r| r.contains("timed out")),
+        "{reasons:?}"
+    );
+}
+
+/// While the broker is unreachable the supervisor must keep retrying with
+/// backoff, and a deliberate disconnect must stop it.
+#[tokio::test]
+async fn reconnect_supervisor_retries_then_stops_on_disconnect() {
+    let port = fake_broker(|stream, _b| async move {
+        drop(stream); // and the listener goes away with this task
+    })
+    .await;
+    let mut options = ConnectOptions::new("127.0.0.1", port, "retry", MqttVersion::V5);
+    options.auto_reconnect = true;
+    options.reconnect_backoff_secs = 1;
+    options.reconnect_max_backoff_secs = 1;
+    let client = MqttClient::new(options);
+    client.connect().await.unwrap();
+
+    timeout(Duration::from_secs(3), async {
+        while client.is_connected() {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("drop must be noticed");
+    // Let at least one (failing) reconnect attempt happen.
+    tokio::time::sleep(Duration::from_millis(2500)).await;
+    assert!(!client.is_connected());
+    client.disconnect().await.unwrap();
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    assert!(!client.is_connected(), "supervisor must stay stopped");
+}
+
+#[tokio::test]
+async fn qos2_handshake_with_wrong_ack_types_is_reported() {
+    let port = fake_broker(|mut s, mut b| async move {
+        // 1st PUBLISH: answer PUBACK instead of PUBREC.
+        let Packet::Publish(p) = read_packet(&mut s, &mut b).await else {
+            panic!("expected PUBLISH");
+        };
+        send(
+            &mut s,
+            Packet::PubAck(SimpleAck::success(p.packet_id.unwrap())),
+        )
+        .await;
+        // 2nd PUBLISH: PUBREC is right, but answer PUBREL with PUBACK.
+        let Packet::Publish(p) = read_packet(&mut s, &mut b).await else {
+            panic!("expected PUBLISH");
+        };
+        let id = p.packet_id.unwrap();
+        send(&mut s, Packet::PubRec(SimpleAck::success(id))).await;
+        assert!(matches!(
+            read_packet(&mut s, &mut b).await,
+            Packet::PubRel(_)
+        ));
+        send(&mut s, Packet::PubAck(SimpleAck::success(id))).await;
+        tokio::time::sleep(Duration::from_secs(3)).await;
+    })
+    .await;
+    let client = connected_client(port, "q2wrong").await;
+    for _ in 0..2 {
+        assert!(matches!(
+            client
+                .publish("a".into(), b"x".to_vec(), QoS::ExactlyOnce, false)
+                .await,
+            Err(MqttError::MalformedPacket(_))
+        ));
+    }
+}

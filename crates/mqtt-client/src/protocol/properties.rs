@@ -226,4 +226,20 @@ mod tests {
             assert_eq!(decoded, prop);
         }
     }
+
+    #[test]
+    fn auth_accessors_ignore_unrelated_properties_and_find_u32_works() {
+        let mut p = Properties::new();
+        p.push(Property::SessionExpiryInterval(9));
+        assert!(p.auth_method().is_none());
+        assert!(p.auth_data().is_none());
+        let v = p.find_u32(|x| match x {
+            Property::SessionExpiryInterval(v) => Some(*v),
+            _ => None,
+        });
+        assert_eq!(v, Some(9));
+        let a = Properties::with_auth("m", Some(Bytes::from_static(b"d")));
+        assert_eq!(a.auth_method(), Some("m"));
+        assert_eq!(a.auth_data().map(|d| &d[..]), Some(&b"d"[..]));
+    }
 }

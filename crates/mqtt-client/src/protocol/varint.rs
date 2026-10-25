@@ -226,4 +226,12 @@ mod tests {
         let mut bytes = out.freeze();
         assert_eq!(&decode_binary(&mut bytes).unwrap()[..], &[1, 2, 3, 4]);
     }
+
+    #[test]
+    fn oversized_strings_and_binary_are_rejected_on_encode() {
+        let mut out = BytesMut::new();
+        assert!(encode_utf8_string(&"a".repeat(65_536), &mut out).is_err());
+        assert!(encode_binary(&vec![0u8; 65_536], &mut out).is_err());
+        assert!(out.is_empty());
+    }
 }

@@ -126,4 +126,15 @@ mod tests {
         ));
         assert!(message.contains("client CA"), "{message}");
     }
+
+    #[test]
+    fn non_pem_private_key_reports_the_parser_error() {
+        let err =
+            parse_private_key(b"-----BEGIN PRIVATE KEY-----\n!!!\n-----END PRIVATE KEY-----\n")
+                .unwrap_err();
+        assert!(!err.is_empty());
+        assert!(parse_private_key(b"")
+            .unwrap_err()
+            .contains("no private key"));
+    }
 }
