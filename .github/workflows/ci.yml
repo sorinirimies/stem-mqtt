@@ -271,7 +271,7 @@ jobs:
       # The generators are `cargo install`ed from git; cache them (keyed by their pins).
       - name: Restore generator cache
         if: matrix.language != 'python'
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.bindgens
           key: bindgens-${{ matrix.language }}-${{ hashFiles('scripts/bindings/spec.nu', 'packaging/haskell/uniffi-bindgen-haskell.patch') }}
@@ -353,7 +353,7 @@ jobs:
         if: matrix.language == 'dart'
       # The generators are `cargo install`ed from git; cache them (keyed by their pins).
       - name: Restore generator cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.bindgens
           key: bindgens-${{ matrix.language }}-${{ hashFiles('scripts/bindings/spec.nu', 'packaging/haskell/uniffi-bindgen-haskell.patch') }}
