@@ -266,7 +266,7 @@ jobs:
           node-version: "22"
       - uses: haskell-actions/setup@v2
         if: matrix.language == 'haskell'
-      - uses: swift-actions/setup-swift@v2
+      - uses: swift-actions/setup-swift@v3
         if: matrix.language == 'swift'
       # The generators are `cargo install`ed from git; cache them (keyed by their pins).
       - name: Restore generator cache
