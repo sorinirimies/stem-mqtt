@@ -271,7 +271,14 @@ jobs:
       # stays on (instead of `skip-verify-signature`).
       - name: Import Swift release signing keys
         if: matrix.language == 'swift'
-        run: curl -fsSL https://www.swift.org/keys/all-keys.asc | gpg --import
+        run: |
+          for attempt in 1 2 3 4 5; do
+            curl -fsSL --retry 3 -o swift-keys.asc https://www.swift.org/keys/all-keys.asc \
+              && gpg --import swift-keys.asc && exit 0
+            echo "key import failed (attempt $attempt); retrying in 10s"; sleep 10
+          done
+          # Fallback: fetch the Swiftly signing key from a keyserver.
+          gpg --keyserver hkps://keyserver.ubuntu.com --recv-keys E813C892820A6FA13755B268F167DF1ACF9CE069
       - uses: swift-actions/setup-swift@v3
         if: matrix.language == 'swift'
       # The generators are `cargo install`ed from git; cache them (keyed by their pins).
