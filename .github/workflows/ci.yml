@@ -266,6 +266,12 @@ jobs:
           node-version: "22"
       - uses: haskell-actions/setup@v2
         if: matrix.language == 'haskell'
+      # setup-swift v3 verifies the Swiftly download with gpg but no longer
+      # imports the Swift release keys itself; import them so verification
+      # stays on (instead of `skip-verify-signature`).
+      - name: Import Swift release signing keys
+        if: matrix.language == 'swift'
+        run: curl -fsSL https://www.swift.org/keys/all-keys.asc | gpg --import
       - uses: swift-actions/setup-swift@v3
         if: matrix.language == 'swift'
       # The generators are `cargo install`ed from git; cache them (keyed by their pins).
