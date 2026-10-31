@@ -5,17 +5,21 @@ import asyncio
 import mqtt_broker
 import mqtt_client
 
+# The broker wheel ships its own copy of mqtt_client.py (and so a second QoS),
+# and `mqtt_broker/__init__.py` star-imports both modules in filesystem order,
+# so `mqtt_broker.QoS` may resolve to either. Import the broker's QoS from the
+# defining module to be order-independent.
+from mqtt_broker.mqtt_broker import QoS as BrokerQoS
+
 
 async def main() -> None:
-    # External UniFFI enums in the broker wheel are generated in the
-    # mqtt_broker module; use that module's QoS when constructing broker data.
     config = mqtt_broker.MqttBrokerConfig(
         bind_address="127.0.0.1",
         port=0,
         ws_port=None,
         allow_anonymous=True,
         max_clients=0,
-        max_qos=mqtt_broker.QoS.EXACTLY_ONCE,
+        max_qos=BrokerQoS.EXACTLY_ONCE,
         max_retained_messages=100,
         max_queued_per_client=100,
         redelivery_interval_secs=0,

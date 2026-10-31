@@ -21,7 +21,7 @@ jobs:
       matrix:
         target: [decode, roundtrip, chunked, varint, publish, topics]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install Rust nightly
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain nightly
