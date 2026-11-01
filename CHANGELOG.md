@@ -2,6 +2,40 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.9] - 2026-11-01
+### 🐛 Bug Fixes
+- bump rustls to 0.23.46 (RUSTSEC-2026-0346..0349)
+- re-clone bindgen source when cached clone is corrupt
+- upgrade tokio-tungstenite to 0.30 (Bytes payloads, WebSocketConfig builder)
+- resolve rustls-webpki/webpki-roots advisories; add tests, unwrap guard, coverage gate, audit self-heal
+- send will delay interval in CONNECT; add wire-level, failure-path and unit tests (97.8% coverage)
+### 🔄 CI
+- prebuilt Nushell, cargo-deny + cargo-audit security workflow
+- retry rustup install to survive flaky network
+- retrigger (transient github.com DNS failure on runner)
+- auto-merge major GitHub Actions bumps when CI passes
+- bump gradle/actions from 4 to 5 (#2)
+- drop Approve PR step (Actions cannot approve PRs)
+- bump actions/setup-java from 4 to 5 (#5)
+- bump actions/upload-artifact from 4 to 7 (#4)
+- bump actions/setup-python from 5 to 7 (#3)
+- bump dependabot/fetch-metadata from 2 to 3 (#1)
+- retry nushell download (runner DNS flake)
+- bump actions/setup-go from 5 to 7 (#6)
+- bump actions/download-artifact from 4 to 8 (#7)
+- bump gradle/actions from 4 to 6 (#11)
+- bump actions/setup-node from 4 to 7 (#9)
+- nightly merges lockfile-only updates; bump + release only when a Cargo.toml requirement changes
+- bump actions/cache from 4 to 6 (#12)
+- bump softprops/action-gh-release from 2 to 3 (#13)
+- bump actions/checkout from 4 to 7 (#14)
+- bump actions/setup-java from 5 to 6 (#15)
+- import broker QoS from its defining module in smoke test
+- bump swift-actions/setup-swift from 2 to 3 (#16)
+### 🔧 Chores
+- skip unconfigured remotes in *-all recipes
+- push/pull current branch instead of hardcoded main
+**Full Changelog**: https://github.com/sorinirimies/stem-mqtt/compare/v0.3.8...v0.3.9
 ## [0.3.8] - 2026-10-14
 ### 🔄 CI
 - split fuzz into own workflow; add audit & fuzz badges to README
