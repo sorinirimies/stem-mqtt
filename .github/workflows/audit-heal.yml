@@ -29,7 +29,7 @@ jobs:
           echo "changed=true" >> "$GITHUB_OUTPUT"
       - name: Open PR
         if: steps.heal.outputs.changed == 'true'
-        uses: peter-evans/create-pull-request@v7
+        uses: peter-evans/create-pull-request@v8
         with:
           branch: bot/audit-heal
           commit-message: "fix(deps): cargo update to resolve security advisories"
