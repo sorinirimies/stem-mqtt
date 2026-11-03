@@ -75,6 +75,8 @@ def main [] {
     let test_result = (do { cargo test --workspace } | complete)
     if $test_result.exit_code != 0 {
         print "  ❌ Tests failed:"
+        # cargo prints the failing tests and their panics to stdout.
+        print ($test_result.stdout | lines | last 40 | str join "\n")
         print $test_result.stderr
         exit 1
     }
