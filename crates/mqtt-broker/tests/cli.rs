@@ -3,7 +3,7 @@
 //! systemd send to stop a service).
 
 #![cfg(unix)]
-
+#![allow(clippy::unwrap_used)] // Test harness: a failed setup step should panic.
 use std::net::TcpListener;
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};

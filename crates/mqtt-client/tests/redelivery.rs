@@ -14,7 +14,7 @@ use mqtt_client::protocol::properties::Properties;
 use mqtt_client::{ConnectOptions, MqttClient, MqttVersion, QoS};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::time::{timeout, Duration};
+use tokio::time::{Duration, timeout};
 
 /// Reads one packet off `stream`, using `buf` as the (persistent, across
 /// calls) decode buffer.

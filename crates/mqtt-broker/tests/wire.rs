@@ -3,6 +3,7 @@
 //! reserved-topic, retain-handling, will and event paths that a well-behaved
 //! `MqttClient` never triggers.
 
+#![allow(clippy::unwrap_used)] // Test harness: a failed setup step should panic.
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -168,9 +169,11 @@ async fn reserved_dollar_topics_are_acked_but_never_delivered() {
     assert!(matches!(p.recv().await, Some(Packet::PubRec(a)) if a.packet_id == 8));
 
     // Nothing reached the subscriber.
-    assert!(timeout(Duration::from_millis(300), sub.recv())
-        .await
-        .is_err());
+    assert!(
+        timeout(Duration::from_millis(300), sub.recv())
+            .await
+            .is_err()
+    );
     b.stop().await.unwrap();
 }
 

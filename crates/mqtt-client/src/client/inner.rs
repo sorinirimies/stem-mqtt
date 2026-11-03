@@ -12,13 +12,13 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use tokio::io::{AsyncWriteExt, WriteHalf};
-use tokio::sync::{oneshot, Mutex as AsyncMutex};
+use tokio::sync::{Mutex as AsyncMutex, oneshot};
 use tokio::task::JoinHandle;
 
 use crate::error::{MqttError, MqttResult};
-use crate::protocol::packet::Packet;
 use crate::protocol::MqttVersion;
-use crate::support::{guard_callback, EventQueue, LockExt};
+use crate::protocol::packet::Packet;
+use crate::support::{EventQueue, LockExt, guard_callback};
 
 use super::tls::Transport;
 use super::types::{MqttMessage, MqttMessageListener};
@@ -144,10 +144,10 @@ impl Inner {
             writer.take();
         }
         for task in [&self.read_task, &self.keepalive_task] {
-            if let Ok(mut task) = task.try_lock() {
-                if let Some(handle) = task.take() {
-                    handle.abort();
-                }
+            if let Ok(mut task) = task.try_lock()
+                && let Some(handle) = task.take()
+            {
+                handle.abort();
             }
         }
     }

@@ -24,8 +24,8 @@
 //! manually. Watch the broker's own logs (`RUST_LOG=mqtt_broker=debug`)
 //! if you want to see the pings arriving.
 
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use mqtt_client::{ConnectOptions, MqttClient, MqttMessage, MqttMessageListener, MqttVersion, QoS};

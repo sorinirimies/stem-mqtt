@@ -40,17 +40,17 @@ use tokio::sync::Mutex as AsyncMutex;
 
 use crate::error::{MqttError, MqttResult};
 use crate::protocol::{
+    QoS,
     ack::SimpleAck,
     packet::{AuthPacket, DisconnectPacket, Packet},
     properties::Properties,
     publish::PublishPacket,
     subscribe::{SubAckReasonCode, SubscribeFilter, SubscribePacket, UnsubscribePacket},
     topic::{is_valid_filter, is_valid_topic_name},
-    QoS,
 };
-use crate::support::{guard_callback, LockExt};
+use crate::support::{LockExt, guard_callback};
 
-use inner::{unexpected, Delivery, Inner, ListenerSlot};
+use inner::{Delivery, Inner, ListenerSlot, unexpected};
 use io::{
     build_connect_packet, exchange, exchange_with_retry, keepalive_loop, read_loop,
     read_one_packet, send_packet,
@@ -131,6 +131,13 @@ impl ClientShared {
 #[derive(uniffi::Object)]
 pub struct MqttClient {
     shared: Arc<ClientShared>,
+}
+
+// Manual: the shared state holds listeners and handlers that are not Debug.
+impl std::fmt::Debug for MqttClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MqttClient").finish_non_exhaustive()
+    }
 }
 
 #[uniffi::export(async_runtime = "tokio")]
@@ -488,7 +495,7 @@ async fn connect_once(shared: &Arc<ClientShared>) -> MqttResult<ConnectResult> {
             other => {
                 return Err(MqttError::MalformedPacket(format!(
                     "expected CONNACK, got {other:?}"
-                )))
+                )));
             }
         }
     };

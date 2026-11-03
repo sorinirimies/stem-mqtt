@@ -10,8 +10,8 @@ use std::future::Future;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use mqtt_client::support::LockExt;
 use mqtt_client::QoS;
+use mqtt_client::support::LockExt;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::task::JoinHandle;
@@ -48,6 +48,14 @@ pub(crate) struct BrokerState {
     /// Bounds sockets that haven't completed CONNECT yet (see
     /// [`MAX_UNAUTHENTICATED_CONNECTIONS`]).
     pub handshakes: Arc<Semaphore>,
+}
+
+// Manual: the auth providers are foreign trait objects, and the config can
+// hold credentials.
+impl std::fmt::Debug for BrokerState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BrokerState").finish_non_exhaustive()
+    }
 }
 
 impl BrokerState {
@@ -128,6 +136,7 @@ const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 /// trying again.
 const ACCEPT_ERROR_BACKOFF: Duration = Duration::from_millis(100);
 
+#[derive(Debug)]
 /// What a started broker owns; present exactly while it's running.
 struct Running {
     tasks: Vec<JoinHandle<()>>,
@@ -151,7 +160,7 @@ impl Running {
 /// Dropping a broker stops it (listeners are closed and live connections
 /// told to shut down); there is no way to reach a broker that has no
 /// remaining handle, so leaving it running would just leak its ports.
-#[derive(uniffi::Object)]
+#[derive(Debug, uniffi::Object)]
 pub struct MqttBroker {
     state: Arc<BrokerState>,
     /// Serialises `start`/`stop` so two concurrent calls can't both pass the

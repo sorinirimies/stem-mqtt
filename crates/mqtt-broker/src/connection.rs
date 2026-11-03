@@ -1,8 +1,8 @@
 //! Per-connection task: CONNECT handshake, the read loop, and packet
 //! dispatch into shared broker state.
 
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use bytes::{Bytes, BytesMut};
@@ -15,7 +15,7 @@ use mqtt_client::protocol::subscribe::{
     RetainHandling, SubAckPacket, SubAckReasonCode, SubscribePacket, UnsubAckPacket,
     UnsubscribePacket,
 };
-use mqtt_client::support::{guard_callback, LockExt};
+use mqtt_client::support::{LockExt, guard_callback};
 use mqtt_client::{MqttError, MqttVersion, QoS};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::{mpsc, oneshot};
@@ -25,7 +25,7 @@ use crate::config::{EnhancedAuthOutcome, EnhancedAuthStep};
 use crate::registry::{AttachError, AttachRequest, SubscribeOutcome};
 use crate::session::{OutboundBudget, QueuedMessage, ShutdownReason, Subscription};
 use crate::topic::{is_valid_filter, is_valid_topic_name};
-use mqtt_client::protocol::topic::{classify_filter, FilterKind};
+use mqtt_client::protocol::topic::{FilterKind, classify_filter};
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
 
@@ -68,11 +68,11 @@ pub(crate) async fn handle_connection<S>(
 
     // MQTT-3.1.3-2: the will topic is a Topic Name — never a wildcard
     // filter. Unchecked, it would be published (and retained) verbatim.
-    if let Some(will) = &connect.will {
-        if !is_valid_topic_name(&will.topic) || will.topic.starts_with('$') {
-            reject(&mut writer, version, ConnectReasonCode::TOPIC_NAME_INVALID).await;
-            return;
-        }
+    if let Some(will) = &connect.will
+        && (!is_valid_topic_name(&will.topic) || will.topic.starts_with('$'))
+    {
+        reject(&mut writer, version, ConnectReasonCode::TOPIC_NAME_INVALID).await;
+        return;
     }
 
     // MQTT-3.1.3-8: a zero-length client id is only acceptable together
@@ -387,7 +387,7 @@ where
 
         match step.outcome {
             EnhancedAuthOutcome::Success => {
-                return Ok((!step.data.is_empty()).then(|| Bytes::from(step.data)))
+                return Ok((!step.data.is_empty()).then(|| Bytes::from(step.data)));
             }
             EnhancedAuthOutcome::Failure => return Err(ConnectReasonCode::NOT_AUTHORIZED),
             EnhancedAuthOutcome::Continue => {

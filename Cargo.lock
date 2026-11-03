@@ -2112,7 +2112,6 @@ dependencies = [
  "anyhow",
  "bytes",
  "criterion",
- "rand 0.9.5",
  "rcgen",
  "rustls",
  "thiserror",
@@ -2128,8 +2127,8 @@ dependencies = [
 name = "stem-mqtt-dashboard"
 version = "0.3.9"
 dependencies = [
+ "anyhow",
  "futures-util",
- "serde",
  "stem-mqtt-client",
  "tokio",
  "topcoat",

@@ -11,17 +11,17 @@ use std::time::Duration;
 use bytes::{Bytes, BytesMut};
 use tokio::io::{AsyncReadExt, AsyncWriteExt, ReadHalf};
 
+use crate::MqttError;
 use crate::error::MqttResult;
+use crate::protocol::MqttVersion;
 use crate::protocol::ack::SimpleAck;
 use crate::protocol::connect::{ConnectPacket, Will};
 use crate::protocol::packet::Packet;
 use crate::protocol::properties::Properties;
-use crate::protocol::MqttVersion;
-use crate::MqttError;
 
 use super::inner::{
-    deliver, finish_disconnected, forget_pending, register_pending, resolve_pending, wait_for,
-    Inner,
+    Inner, deliver, finish_disconnected, forget_pending, register_pending, resolve_pending,
+    wait_for,
 };
 use super::tls::Transport;
 use super::types::{ConnectOptions, MqttMessage};
@@ -307,8 +307,8 @@ pub(super) async fn keepalive_loop(inner: Arc<Inner>, keep_alive_secs: u16) {
 mod tests {
     use super::*;
     use crate::client::inner::ListenerSlot;
-    use crate::protocol::publish::PublishPacket;
     use crate::protocol::MqttVersion;
+    use crate::protocol::publish::PublishPacket;
 
     fn inner() -> Arc<Inner> {
         let (a, _b) = tokio::io::duplex(1 << 16);

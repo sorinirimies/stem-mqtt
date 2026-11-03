@@ -4,6 +4,7 @@
 //! instance bound to port `0` so tests can run in parallel without port
 //! collisions.
 
+#![allow(clippy::unwrap_used)] // Test harness: a failed setup step should panic.
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -76,8 +77,8 @@ use mqtt_client::protocol::packet::Packet;
 use mqtt_client::protocol::properties::Properties;
 use mqtt_client::protocol::publish::PublishPacket;
 use mqtt_client::protocol::subscribe::{SubscribeFilter, SubscribePacket};
-use tokio_tungstenite::tungstenite::handshake::client::Request;
 use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::handshake::client::Request;
 async fn start_broker_with_ws() -> (MqttBroker, u16, u16) {
     let mut config = MqttBrokerConfig::new("127.0.0.1", 0);
     config.ws_port = Some(0);

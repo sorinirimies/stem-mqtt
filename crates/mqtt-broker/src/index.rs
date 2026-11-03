@@ -10,7 +10,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use mqtt_client::protocol::topic::{classify_filter, FilterKind};
+use mqtt_client::protocol::topic::{FilterKind, classify_filter};
 
 /// One subscription as stored in the index.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -43,7 +43,7 @@ impl IndexEntry {
     }
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 struct Node {
     children: HashMap<String, Node>,
     /// The `+` child.
@@ -64,7 +64,7 @@ impl Node {
 }
 
 /// Trie of every live subscription.
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct SubscriptionIndex {
     root: Node,
 }
@@ -149,10 +149,8 @@ impl SubscriptionIndex {
         if let Some(child) = node.children.get(*level) {
             Self::collect(child, levels, depth + 1, dollar, out);
         }
-        if wildcard_allowed {
-            if let Some(child) = node.plus.as_deref() {
-                Self::collect(child, levels, depth + 1, dollar, out);
-            }
+        if wildcard_allowed && let Some(child) = node.plus.as_deref() {
+            Self::collect(child, levels, depth + 1, dollar, out);
         }
     }
 

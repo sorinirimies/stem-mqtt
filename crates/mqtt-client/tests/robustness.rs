@@ -2,6 +2,7 @@
 //! TCP broker (the real `mqtt-broker` always behaves, so it can't exercise
 //! these paths).
 
+#![allow(clippy::unwrap_used)] // Test harness: a failed setup step should panic.
 use std::sync::{Arc, Mutex};
 
 use bytes::BytesMut;
@@ -14,7 +15,7 @@ use mqtt_client::{
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::time::{timeout, Duration, Instant};
+use tokio::time::{Duration, Instant, timeout};
 
 async fn read_packet(stream: &mut TcpStream, buf: &mut BytesMut) -> Packet {
     timeout(Duration::from_secs(5), async {
@@ -211,8 +212,8 @@ fn debug_output_never_contains_credentials() {
 /// client in an unbounded loop.
 #[tokio::test]
 async fn endless_auth_challenges_are_cut_off() {
-    use mqtt_client::protocol::packet::AuthPacket;
     use mqtt_client::MqttAuthHandler;
+    use mqtt_client::protocol::packet::AuthPacket;
 
     struct Echo;
     impl MqttAuthHandler for Echo {

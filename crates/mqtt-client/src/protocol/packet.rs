@@ -3,14 +3,14 @@
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 
+use super::MqttVersion;
 use super::ack::SimpleAck;
 use super::connect::{ConnAckPacket, ConnectPacket};
 use super::macros::u8_enum;
 use super::properties::Properties;
 use super::publish::PublishPacket;
 use super::subscribe::{SubAckPacket, SubscribePacket, UnsubAckPacket, UnsubscribePacket};
-use super::varint::{encode_varint, peek_varint, MAX_VARINT};
-use super::MqttVersion;
+use super::varint::{MAX_VARINT, encode_varint, peek_varint};
 use crate::error::{MqttError, MqttResult};
 
 // `u8_enum!` (see `super::macros`) generates both the `#[repr(u8)]`

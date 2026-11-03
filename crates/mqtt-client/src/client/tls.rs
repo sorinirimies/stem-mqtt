@@ -78,7 +78,7 @@ fn build_client_config(tls: &TlsOptions) -> MqttResult<rustls::ClientConfig> {
                 "TlsOptions: client_cert_pem and client_key_pem must both be set for mTLS, \
                  or both left unset"
                     .into(),
-            ))
+            ));
         }
     };
 

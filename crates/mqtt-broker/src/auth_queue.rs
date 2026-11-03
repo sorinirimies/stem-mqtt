@@ -12,8 +12,8 @@
 //! full queue that drops the request, or disabling the queue all deny.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use mqtt_client::support::{EventQueue, LockExt};
@@ -44,7 +44,7 @@ impl std::fmt::Debug for AuthRequest {
 }
 
 /// Queue of pending [`AuthRequest`]s and the channels that answer them.
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct AuthQueue {
     requests: EventQueue<AuthRequest>,
     pending: Mutex<HashMap<u64, oneshot::Sender<bool>>>,

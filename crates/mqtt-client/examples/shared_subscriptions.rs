@@ -11,8 +11,8 @@
 //! ordinary subscriber on the same filter still gets *every* job (shared subscriptions only
 //! split delivery *within* a group).
 
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use mqtt_client::{ConnectOptions, MqttClient, MqttMessage, MqttMessageListener, MqttVersion, QoS};

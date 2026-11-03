@@ -133,8 +133,10 @@ mod tests {
             parse_private_key(b"-----BEGIN PRIVATE KEY-----\n!!!\n-----END PRIVATE KEY-----\n")
                 .unwrap_err();
         assert!(!err.is_empty());
-        assert!(parse_private_key(b"")
-            .unwrap_err()
-            .contains("no private key"));
+        assert!(
+            parse_private_key(b"")
+                .unwrap_err()
+                .contains("no private key")
+        );
     }
 }

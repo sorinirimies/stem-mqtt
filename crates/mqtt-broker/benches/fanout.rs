@@ -1,7 +1,8 @@
 //! `cargo bench -p stem-mqtt-broker --features bench-internals` — the
 //! publish hot path: subscription-index lookup and fan-out to N subscribers.
+#![allow(clippy::unwrap_used)] // Benchmark harness: a failed setup step should panic.
 use bytes::Bytes;
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use mqtt_broker::internals::*;
 use mqtt_client::{MqttVersion, QoS};
 use tokio::sync::{mpsc, oneshot};

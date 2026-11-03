@@ -21,8 +21,8 @@ use std::task::{Context, Poll};
 
 use futures_util::{Sink, Stream};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
-use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::WebSocketStream;
+use tokio_tungstenite::tungstenite::Message;
 
 pub(crate) struct WsByteStream<S> {
     inner: WebSocketStream<S>,
@@ -75,7 +75,7 @@ where
                     // Text frame is not valid MQTT-over-WS — ignore it
                     // rather than tearing down the connection over it.
                     Message::Text(_) | Message::Ping(_) | Message::Pong(_) | Message::Frame(_) => {
-                        continue
+                        continue;
                     }
                     Message::Close(_) => return Poll::Ready(Ok(())), // EOF
                 },

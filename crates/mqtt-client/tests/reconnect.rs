@@ -5,6 +5,7 @@
 //! connection once, so the test controls exactly when the "network loss"
 //! happens.
 
+#![allow(clippy::unwrap_used)] // Test harness: a failed setup step should panic.
 use bytes::BytesMut;
 use mqtt_client::protocol::connect::ConnAckPacket;
 use mqtt_client::protocol::packet::Packet;
@@ -13,7 +14,7 @@ use mqtt_client::protocol::subscribe::SubAckPacket;
 use mqtt_client::{ConnectOptions, MqttClient, MqttVersion, QoS};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::time::{timeout, Duration};
+use tokio::time::{Duration, timeout};
 
 async fn read_packet(stream: &mut TcpStream, buf: &mut BytesMut) -> Packet {
     timeout(Duration::from_secs(5), async {

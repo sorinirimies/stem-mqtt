@@ -1,7 +1,8 @@
 //! `cargo bench -p stem-mqtt-client` — packet codec and topic matching.
+#![allow(clippy::unwrap_used)] // Benchmark harness: a failed setup step should panic.
 use bytes::{Bytes, BytesMut};
 use criterion::{
-    black_box, criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion, Throughput,
+    BatchSize, BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main,
 };
 use mqtt_client::protocol::packet::Packet;
 use mqtt_client::protocol::properties::Properties;

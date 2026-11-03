@@ -10,9 +10,9 @@ use std::collections::HashMap;
 use std::sync::RwLock;
 
 use bytes::Bytes;
+use mqtt_client::QoS;
 use mqtt_client::protocol::publish::PublishPacket;
 use mqtt_client::support::RwLockExt;
-use mqtt_client::QoS;
 
 use crate::topic::topic_matches;
 
@@ -24,6 +24,7 @@ pub struct RetainedMessage {
 }
 
 /// Thread-safe store of retained messages, one per topic.
+#[derive(Debug)]
 pub struct RetainStore {
     retained: RwLock<HashMap<String, RetainedMessage>>,
     max_retained_messages: u32,

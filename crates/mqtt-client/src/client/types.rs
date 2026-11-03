@@ -220,13 +220,13 @@ impl ConnectOptions {
         if self.auth_data.is_some() && self.auth_method.is_none() {
             return Err(Protocol("auth_data requires auth_method".into()));
         }
-        if let Some(will) = &self.will {
-            if !is_valid_topic_name(&will.topic) {
-                return Err(Protocol(format!(
-                    "invalid will topic {:?}: must be non-empty and wildcard-free",
-                    will.topic
-                )));
-            }
+        if let Some(will) = &self.will
+            && !is_valid_topic_name(&will.topic)
+        {
+            return Err(Protocol(format!(
+                "invalid will topic {:?}: must be non-empty and wildcard-free",
+                will.topic
+            )));
         }
         Ok(())
     }

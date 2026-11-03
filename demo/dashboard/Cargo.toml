@@ -13,9 +13,12 @@ name = "stem-mqtt-dashboard"
 path = "src/main.rs"
 
 [dependencies]
+anyhow = { workspace = true }
 mqtt-client = { workspace = true }
 tokio = { workspace = true }
 topcoat = { version = "0.5", features = ["datastar", "sse", "runtime", "asset", "discover"] }
 futures-util = { workspace = true }
-serde = { version = "1", features = ["derive"] }
 tracing-subscriber = { workspace = true }
+
+[lints]
+workspace = true

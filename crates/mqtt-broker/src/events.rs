@@ -7,8 +7,8 @@
 use std::sync::Mutex;
 
 use crate::config::{QoS, SharedEventListener};
-use mqtt_client::support::{guard_callback, EventQueue, LockExt};
 use mqtt_client::QoS as CoreQoS;
+use mqtt_client::support::{EventQueue, LockExt, guard_callback};
 
 /// A broker event, as returned by the pull-style `MqttBroker::next_event`
 /// (the polling twin of [`MqttBrokerEventListener`](crate::config::MqttBrokerEventListener)).
@@ -66,6 +66,15 @@ macro_rules! hub_notifiers {
 pub struct EventHub {
     listener: Mutex<Option<SharedEventListener>>,
     pub queue: EventQueue<BrokerEvent>,
+}
+
+// Manual: the listener is a foreign trait object.
+impl std::fmt::Debug for EventHub {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EventHub")
+            .field("queue", &self.queue)
+            .finish_non_exhaustive()
+    }
 }
 
 impl EventHub {

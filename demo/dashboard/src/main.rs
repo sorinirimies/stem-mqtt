@@ -21,16 +21,17 @@ use futures_util::Stream;
 use mqtt_client::{ConnectOptions, MqttClient, MqttMessage, MqttMessageListener, MqttVersion, QoS};
 use tokio::sync::broadcast;
 use topcoat::{
+    Result,
     asset::{AssetBundle, RouterBuilderAssetExt},
-    context::{app_context, Cx},
+    context::{Cx, app_context},
     datastar::{ElementPatchMode, PatchElements},
     router::{
+        Router, RouterBuilderDiscoverExt,
         content::sse::{Event as SseEvent, Sse},
-        page, path_param, query_params, route, Router, RouterBuilderDiscoverExt,
+        page, path_param, query_params, route,
     },
-    runtime::{self, procedure, Event},
+    runtime::{self, Event, procedure},
     view::view,
-    Result,
 };
 
 // ── Shared state ──────────────────────────────────────────────────────────
@@ -131,7 +132,7 @@ fn parse_qos(s: &str) -> QoS {
 // ── Entry point ───────────────────────────────────────────────────────────
 
 #[tokio::main]
-async fn main() {
+async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt().init();
     let state = AppState::new();
 
@@ -143,13 +144,13 @@ async fn main() {
 
     topcoat::start(
         Router::builder()
-            .assets(AssetBundle::load().unwrap())
+            .assets(AssetBundle::load()?)
             .discover()
             .app_context(state)
             .build(),
     )
-    .await
-    .unwrap();
+    .await?;
+    Ok(())
 }
 
 // ── Page shell + "new connection" form (Topcoat reactive system) ─────────
@@ -380,7 +381,12 @@ async fn connect(
     let Ok(port_num) = port.parse::<u16>() else {
         return Ok("invalid port".into());
     };
-    if state.connections.lock().unwrap().contains_key(&client_id) {
+    if state
+        .connections
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .contains_key(&client_id)
+    {
         return Ok(format!("client id {:?} is already connected", client_id));
     }
 
@@ -401,7 +407,7 @@ async fn connect(
             state
                 .connections
                 .lock()
-                .unwrap()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .insert(client_id.clone(), Connection { client });
 
             let card = render_client_card(&client_id, &host, port_num, &version);
@@ -497,7 +503,10 @@ async fn subscribe<'a>(cx: &'a Cx) -> Result<&'static str> {
     let query = query_params::<SubscribeQuery>(cx)?;
 
     let client = {
-        let conns = state.connections.lock().unwrap();
+        let conns = state
+            .connections
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         conns.get(id).map(|c| c.client.clone())
     };
     let Some(client) = client else {
@@ -543,7 +552,10 @@ async fn publish<'a>(cx: &'a Cx) -> Result<&'static str> {
     let query = query_params::<PublishQuery>(cx)?;
 
     let client = {
-        let conns = state.connections.lock().unwrap();
+        let conns = state
+            .connections
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         conns.get(id).map(|c| c.client.clone())
     };
     let Some(client) = client else {
@@ -588,7 +600,7 @@ async fn disconnect(cx: &Cx) -> Result<&'static str> {
     let client = state
         .connections
         .lock()
-        .unwrap()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
         .remove(id)
         .map(|c| c.client);
     if let Some(client) = client {

@@ -67,7 +67,7 @@ impl PublishPacket {
                 0 => {
                     return Err(MqttError::MalformedPacket(
                         "PUBLISH packet id must be non-zero".into(),
-                    ))
+                    ));
                 }
                 id => Some(id),
             }

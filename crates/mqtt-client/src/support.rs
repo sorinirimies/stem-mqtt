@@ -20,7 +20,7 @@
 //!   (`next_message`, `next_event`) built on this.
 
 use std::collections::VecDeque;
-use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::time::Duration;
 
@@ -157,6 +157,13 @@ pub fn secs_or(value: u32, default_secs: u32) -> Duration {
 pub struct EventQueue<T> {
     state: Mutex<QueueState<T>>,
     notify: Notify,
+}
+
+// Manual: showing the items would take the lock inside Debug.
+impl<T> std::fmt::Debug for EventQueue<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EventQueue").finish_non_exhaustive()
+    }
 }
 
 struct QueueState<T> {

@@ -40,7 +40,6 @@ macro_rules! u8_enum {
         }
 
         impl $name {
-            #[allow(dead_code)]
             fn from_u8(v: u8) -> crate::error::MqttResult<Self> {
                 Ok(match v {
                     $( $val => $name::$variant, )+

@@ -51,3 +51,6 @@ rcgen = { workspace = true }
 name = "fanout"
 harness = false
 required-features = ["bench-internals"]
+
+[lints]
+workspace = true

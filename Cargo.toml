@@ -4,15 +4,15 @@ members = [
     "crates/mqtt-broker",
     "demo/dashboard",
 ]
-resolver = "2"
+resolver = "3"
 
 [workspace.package]
 version      = "0.3.9"
-edition      = "2021"
+edition      = "2024"
 authors      = ["Sorin Irimies <sorinirimies@gmail.com>"]
 license      = "MIT"
 repository   = "https://github.com/sorinirimies/stem-mqtt"
-rust-version = "1.75"
+rust-version = "1.90"
 
 # ── Shared dependency versions ────────────────────────────────────────────────
 # Pin versions here once; each crate's Cargo.toml references them with
@@ -41,9 +41,6 @@ thiserror  = "2"
 tracing    = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
-# Misc
-rand       = "0.9"
-
 # Benchmarks
 criterion  = { version = "0.5", default-features = false }
 clap       = { version = "4", features = ["derive"] }
@@ -61,3 +58,12 @@ codegen-units = 1
 # Keep exported UniFFI metadata symbols on ELF platforms; stripping all
 # symbols makes Linux bindgen silently generate empty output directories.
 strip         = "debuginfo"
+[workspace.lints.rust]
+# deny, not forbid: the UniFFI scaffolding needs unsafe; that crate allows it.
+unsafe_code = "deny"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+unwrap_used = "warn"

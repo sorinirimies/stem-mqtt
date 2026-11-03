@@ -3,16 +3,16 @@
 //! redelivery tracking.
 
 use std::collections::{HashMap, VecDeque};
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
 use bytes::Bytes;
+use mqtt_client::MqttVersion;
 use mqtt_client::protocol::connect::Will;
 use mqtt_client::protocol::packet::Packet;
 use mqtt_client::protocol::properties::Properties;
 use mqtt_client::protocol::publish::PublishPacket;
-use mqtt_client::MqttVersion;
 use tokio::sync::{mpsc, oneshot};
 
 /// One subscription held by a session.
@@ -121,7 +121,7 @@ pub enum ShutdownReason {
 /// *size* too, so a client that stops reading can't make the broker buffer
 /// `capacity x max packet size`. Cloned into the writer task, which releases
 /// each packet's bytes once it has been written.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct OutboundBudget {
     used: Arc<AtomicUsize>,
     limit: usize,
@@ -159,6 +159,7 @@ impl OutboundBudget {
 }
 
 /// The live network connection currently attached to a [`Session`].
+#[derive(Debug)]
 pub struct LiveConn {
     /// Unique per accepted connection. Lets a connection task tell, at
     /// teardown, whether the session is *still its own* or has since been
@@ -176,8 +177,8 @@ pub struct LiveConn {
 
 /// All state the broker keeps for one client identifier, whether currently
 /// connected or persisted across a `clean_start = false` disconnect.
+#[derive(Debug)]
 pub struct Session {
-    #[allow(dead_code)] // kept for debugging/observability; not read internally
     pub client_id: String,
     pub version: MqttVersion,
     pub clean_start: bool,

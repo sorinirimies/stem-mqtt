@@ -5,8 +5,8 @@
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 
-use super::properties::Properties;
 use super::MqttVersion;
+use super::properties::Properties;
 use crate::error::MqttError;
 
 /// Common body of PUBACK, PUBREC, PUBREL and PUBCOMP.

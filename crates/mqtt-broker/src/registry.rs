@@ -22,9 +22,9 @@ use tokio::sync::{mpsc, oneshot};
 
 use crate::index::{IndexEntry, SubscriptionIndex};
 use crate::session::{
-    LiveConn, OutboundBudget, PendingRedelivery, Qos0Frames, QueuedMessage, Session,
-    ShutdownReason, Subscription, MAX_INCOMING_QOS2, MAX_INCOMING_QOS2_BYTES,
-    MAX_SUBSCRIPTIONS_PER_SESSION,
+    LiveConn, MAX_INCOMING_QOS2, MAX_INCOMING_QOS2_BYTES, MAX_SUBSCRIPTIONS_PER_SESSION,
+    OutboundBudget, PendingRedelivery, Qos0Frames, QueuedMessage, Session, ShutdownReason,
+    Subscription,
 };
 
 /// How often [`SessionRegistry::retry_pending`] sweeps for unacked
@@ -38,6 +38,7 @@ pub const MAX_REDELIVERY_ATTEMPTS: u32 = 5;
 
 /// Everything [`SessionRegistry::attach`] needs to bind a new connection to
 /// a session.
+#[derive(Debug)]
 pub struct AttachRequest {
     pub client_id: String,
     pub version: MqttVersion,
@@ -88,6 +89,7 @@ pub struct Attached {
 
 /// Registry of every client session the broker currently knows about,
 /// whether connected right now or persisted offline (`clean_start = false`).
+#[derive(Debug)]
 pub struct SessionRegistry {
     sessions: RwLock<HashMap<String, Arc<Mutex<Session>>>>,
     /// Number of sessions that currently have a live connection.
@@ -170,12 +172,12 @@ impl SessionRegistry {
         }
 
         // Evict the previous connection, if any.
-        if let Some(session) = &existing {
-            if let Some(mut old) = session.lock_safe().conn.take() {
-                self.client_count.fetch_sub(1, Ordering::Relaxed);
-                if let Some(shutdown) = old.shutdown.take() {
-                    let _ = shutdown.send(ShutdownReason::TakenOver);
-                }
+        if let Some(session) = &existing
+            && let Some(mut old) = session.lock_safe().conn.take()
+        {
+            self.client_count.fetch_sub(1, Ordering::Relaxed);
+            if let Some(shutdown) = old.shutdown.take() {
+                let _ = shutdown.send(ShutdownReason::TakenOver);
             }
         }
 
@@ -248,10 +250,8 @@ impl SessionRegistry {
         }
         drop(guard);
 
-        if clean_start {
-            if let Some(removed) = sessions.remove(client_id) {
-                self.unindex_session(client_id, &removed.lock_safe());
-            }
+        if clean_start && let Some(removed) = sessions.remove(client_id) {
+            self.unindex_session(client_id, &removed.lock_safe());
         }
         will
     }
@@ -264,10 +264,10 @@ impl SessionRegistry {
         self.closed.store(true, Ordering::Release);
         let sessions = self.sessions.read_safe();
         for session in sessions.values() {
-            if let Some(conn) = session.lock_safe().conn.as_mut() {
-                if let Some(shutdown) = conn.shutdown.take() {
-                    let _ = shutdown.send(ShutdownReason::BrokerStopped);
-                }
+            if let Some(conn) = session.lock_safe().conn.as_mut()
+                && let Some(shutdown) = conn.shutdown.take()
+            {
+                let _ = shutdown.send(ShutdownReason::BrokerStopped);
             }
         }
     }
@@ -856,11 +856,13 @@ mod tests {
             registry.add_subscription("greedy", "t/0", sub(QoS::AtLeastOnce, false)),
             SubscribeOutcome::Replaced
         );
-        assert!(registry
-            .index
-            .read_safe()
-            .matching("one/too/many")
-            .is_empty());
+        assert!(
+            registry
+                .index
+                .read_safe()
+                .matching("one/too/many")
+                .is_empty()
+        );
     }
 
     fn qos2_publish(id: u16, payload_len: usize) -> PublishPacket {
