@@ -122,9 +122,10 @@ jobs:
         with:
           key: ${{ matrix.target }}
 
-      - uses: actions/setup-python@v7
+      - name: Install Nushell
+        uses: hustcer/setup-nu@v3
         with:
-          python-version: "3.12"
+          version: "0.116.1"
 
       - name: Install cross
         if: matrix.cross
@@ -139,8 +140,7 @@ jobs:
         run: cross build --release -p stem-mqtt-broker --bin mqtt-broker --target ${{ matrix.target }}
 
       - name: Validate executable
-        shell: bash
-        run: python scripts/ci/validate_binary.py "target/${{ matrix.target }}/release/mqtt-broker${{ matrix.suffix }}" "${{ matrix.target }}"
+        run: nu scripts/ci/validate_binary.nu "target/${{ matrix.target }}/release/mqtt-broker${{ matrix.suffix }}" "${{ matrix.target }}"
 
       - name: Package
         shell: bash

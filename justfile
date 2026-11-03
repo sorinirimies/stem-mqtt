@@ -207,6 +207,11 @@ clean-bindings:
     rm -rf packaging/kotlin/staged packaging/kotlin/android/staged-jniLibs packaging/swift/.build packaging/swift/dist
     @echo "🧹 generated binding artifacts removed"
 
+# Secrets anywhere in the git history (brew install gitleaks); CI runs it on every push.
+# A false positive goes in .gitleaksignore, by the fingerprint gitleaks prints.
+secrets:
+    gitleaks git --redact --no-banner .
+
 # Check Cargo.lock against the RustSec advisory database (needs cargo-audit)
 audit:
     cargo audit

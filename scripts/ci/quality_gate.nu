@@ -75,6 +75,19 @@ def main [
     }
     print ""
 
+    # ── 2b. Unused dependencies ───────────────────────────────────────────────
+    step "cargo machete"
+    if (which cargo-machete | is-empty) { ^cargo install cargo-machete --locked }
+    let machete = (do { cargo machete } | complete)
+    if $machete.exit_code != 0 {
+        print (red "  ✗ Unused dependencies (remove them, or list a false positive under [package.metadata.cargo-machete] ignored).")
+        print $machete.stdout
+        $failed = true
+    } else {
+        print (green "  ✔ No unused dependencies")
+    }
+    print ""
+
     # ── 3. Tests ──────────────────────────────────────────────────────────────
     if not $skip_test {
         step "cargo test --workspace --all-features --all-targets"

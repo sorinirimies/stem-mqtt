@@ -17,8 +17,7 @@ cargo fmt --all -- --check
 Or run everything CI runs in one shot:
 
 ```sh
-just check-all      # fmt + clippy + test + doc + nu script tests
-./scripts/check.sh  # equivalent, no `just`/`nu` required
+just check-all      # fmt + clippy + unused dependencies + test + doc + nu script tests
 ```
 
 ## Bindings, packages and CI
