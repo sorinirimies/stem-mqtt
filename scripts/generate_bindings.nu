@@ -77,9 +77,9 @@ def main [
     let tool = if $spec.kind == "external" { find-tool $spec.tool } else { "" }
     let root = if $spec.uniffi == "workspace" { $env.PWD } else { prepare-scratch-workspace $spec.uniffi }
 
-    print $"==> building ($crate) \(release, cdylib\) in ($root)"
+    print $"==> building ($crate) \(release, cdylib + staticlib\) in ($root)"
     cd $root
-    ^cargo rustc --release -p $target.package --lib --crate-type cdylib
+    ^cargo rustc --release -p $target.package --lib --crate-type cdylib,staticlib
 
     let lib = ($root | path join "target" "release" (native-lib-name $target.lib))
     if not ($lib | path exists) {
@@ -91,6 +91,12 @@ def main [
     if $spec.kind == "builtin" {
         ^cargo run --release -p $target.package --features uniffi/cli --bin uniffi-bindgen -- generate --library $lib --language $spec.language --out-dir $out_abs
     } else {
+        if $spec.language == "node" {
+            let stub = (node-stub-path $repo $target.lib)
+            mkdir ($stub | path dirname)
+            node-stub-manifest $target.lib | save -f $stub
+            "" | save -f ($stub | path dirname | path join "lib.rs")
+        }
         let args = (generator-args $spec.language $lib $out_abs $target.lib $repo)
         run-external $tool ...$args
     }

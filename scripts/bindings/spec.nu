@@ -161,7 +161,9 @@ export def generator-args [language: string, lib: string, out: string, lib_name:
         "dart" => ["--library" $lib "--out-dir" $out]
         # --bundled-prebuilds: the generated loader resolves prebuilds/<platform>-<arch>[-libc]/<lib>,
         # so one package can carry the native library of several platforms side by side.
-        "node" => ["generate" $lib "--crate-name" $lib_name "--out-dir" $out "--bundled-prebuilds"]
+        # --manifest-path: the generator reads the library name from a manifest that declares a
+        # cdylib; ours declare only the rlib, so it gets the stub from `node-stub-manifest`.
+        "node" => ["generate" $lib "--crate-name" $lib_name "--out-dir" $out "--bundled-prebuilds" "--manifest-path" (node-stub-path $repo $lib_name)]
         "haskell" => [
             "--library" $lib "--out-dir" $out
             # A ready-to-build Cabal package; consumers add `extra-lib-dirs` for the static library.
@@ -171,6 +173,33 @@ export def generator-args [language: string, lib: string, out: string, lib_name:
         ]
         $other => { error make { msg: $"no external generator arguments defined for '($other)'" } }
     }
+}
+
+# Where `generate_bindings.nu` writes the Node generator's stub manifest.
+export def node-stub-path [repo: string, lib_name: string]: nothing -> string {
+    $repo | path join "target" "node-stub" $lib_name "Cargo.toml"
+}
+
+# A stand-alone manifest whose only target is a cdylib named `lib_name`. The crates declare only
+# the rlib (the bindings build their cdylib with `cargo rustc --crate-type`), but
+# uniffi-bindgen-node-js --bundled-prebuilds takes the library name from `cargo metadata`.
+export def node-stub-manifest [lib_name: string]: nothing -> string {
+    [
+        "[package]"
+        $"name = \"($lib_name | str replace -a '_' '-')-node-stub\""
+        "version = \"0.0.0\""
+        "edition = \"2024\""
+        "publish = false"
+        ""
+        "[lib]"
+        $"name = \"($lib_name)\""
+        "crate-type = [\"cdylib\"]"
+        "path = \"lib.rs\""
+        ""
+        "# Not a member of the stem-mqtt workspace."
+        "[workspace]"
+        ""
+    ] | str join "\n"
 }
 
 # ── GitHub Packages publishing helpers (pure, unit-tested) ───────────────────

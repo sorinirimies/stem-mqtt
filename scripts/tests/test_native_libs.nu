@@ -11,7 +11,7 @@ const ROOT = path self ../..
 # Files that build the native libraries, and the crate type each one needs.
 const BUILDERS = [
     [file needs];
-    ["scripts/generate_bindings.nu" cdylib]
+    ["scripts/generate_bindings.nu" "cdylib,staticlib"]
     ["packaging/kotlin/stage.sh" cdylib]
     ["packaging/kotlin/stage-android.sh" cdylib]
     ["packaging/swift/build_xcframework.sh" staticlib]

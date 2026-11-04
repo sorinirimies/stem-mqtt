@@ -60,8 +60,17 @@ def "test bindgens: generator-args name the library and output dir" [] {
     let args = (generator-args go "/x/libmqtt_client.dylib" "/out" mqtt_client)
     assert ("/x/libmqtt_client.dylib" in $args)
     assert ("/out" in $args)
-    let node = (generator-args node "/x/lib.dylib" "/out" mqtt_broker)
+    let node = (generator-args node "/x/lib.dylib" "/out" mqtt_broker "/repo")
     assert ("mqtt_broker" in $node)
+    assert ("/repo/target/node-stub/mqtt_broker/Cargo.toml" in $node)
+}
+
+def "test bindgens: the node stub manifest declares one cdylib outside the workspace" [] {
+    let m = (node-stub-manifest mqtt_client | from toml)
+    assert equal $m.lib.name mqtt_client
+    assert equal $m.lib.crate-type [cdylib]
+    assert equal $m.package.name mqtt-client-node-stub
+    assert ($m.workspace? != null)
 }
 
 def "test bindgens: haskell is installed from a patched, pinned checkout" [] {
