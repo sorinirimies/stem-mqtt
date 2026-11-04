@@ -12,7 +12,12 @@ keywords = ["mqtt", "mqtt5", "iot", "uniffi", "networking"]
 
 [lib]
 name = "mqtt_client"
-crate-type = ["lib", "cdylib", "staticlib"]
+# Only `lib`: the bindings' cdylib/staticlib are built on demand with
+# `cargo rustc --lib --crate-type cdylib,staticlib`. Cargo names a cdylib crate's
+# rlib without a hash, so builds with different dependency features (`-p` vs
+# `--workspace`) overwrote one another and a stale rlib linked a second tokio
+# ("no reactor running" in tests).
+crate-type = ["lib"]
 
 [[bin]]
 name = "uniffi-bindgen"

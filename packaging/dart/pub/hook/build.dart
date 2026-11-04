@@ -26,18 +26,21 @@ void main(List<String> args) async {
     final result = await Process.run(
       'cargo',
       [
-        'build',
+        'rustc',
         '--release',
         '--locked',
         '-p',
         'stem-mqtt-broker',
+        '--lib',
+        '--crate-type',
+        'cdylib',
         '--manifest-path',
         rustDir.resolve('Cargo.toml').toFilePath(),
       ],
       environment: {'CARGO_TARGET_DIR': targetDir.toFilePath()},
     );
     if (result.exitCode != 0) {
-      throw StateError('`cargo build` failed - is a Rust toolchain installed '
+      throw StateError('`cargo rustc` failed - is a Rust toolchain installed '
           '(https://rustup.rs)?\n${result.stdout}\n${result.stderr}');
     }
 

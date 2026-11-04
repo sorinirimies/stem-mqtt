@@ -24,7 +24,7 @@ The module repository is generated and tagged by the release workflow
 
 - Go 1.21+ and **cgo** (`CGO_ENABLED=1`, a C compiler).
 - The native libraries **`libmqtt_client` and `libmqtt_broker` are not in the module** — install them
-  (release assets, or `cargo build --release -p stem-mqtt-client -p stem-mqtt-broker`) and point cgo
+  (release assets, or `cargo rustc --release -p <crate> --lib --crate-type cdylib` for each crate) and point cgo
   and the loader at them:
 
 ```sh
@@ -177,7 +177,8 @@ config.Tls = &mqtt_broker.BrokerTlsConfig{Port: 8883, CertPem: cert, KeyPem: key
 ## Building from source
 
 ```sh
-cargo build --release -p stem-mqtt-client -p stem-mqtt-broker
+cargo rustc --release -p stem-mqtt-client --lib --crate-type cdylib
+cargo rustc --release -p stem-mqtt-broker --lib --crate-type cdylib
 nu scripts/install_bindgens.nu go
 nu scripts/generate_bindings.nu go mqtt-broker bindings/go/mqtt-broker
 cd bindings/go/mqtt-broker && CGO_LDFLAGS="-L$PWD/../../../target/release" go build ./...

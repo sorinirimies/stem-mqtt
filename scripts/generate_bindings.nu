@@ -79,7 +79,7 @@ def main [
 
     print $"==> building ($crate) \(release, cdylib\) in ($root)"
     cd $root
-    ^cargo build --release -p $target.package
+    ^cargo rustc --release -p $target.package --lib --crate-type cdylib
 
     let lib = ($root | path join "target" "release" (native-lib-name $target.lib))
     if not ($lib | path exists) {

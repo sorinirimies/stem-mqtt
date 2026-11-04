@@ -147,7 +147,8 @@ const brokerTls = { port: 8883, cert_pem: readFileSync("server.pem"),
 ## Building from source
 
 ```sh
-cargo build --release -p stem-mqtt-client -p stem-mqtt-broker
+cargo rustc --release -p stem-mqtt-client --lib --crate-type cdylib
+cargo rustc --release -p stem-mqtt-broker --lib --crate-type cdylib
 nu scripts/install_bindgens.nu node
 nu scripts/publish_packages.nu stage node      # dist/node/{client,broker,runtime}/ + this host's native libs
 cd dist/node && npm pack

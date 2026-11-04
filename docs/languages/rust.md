@@ -145,7 +145,8 @@ Client side: `options.tls = Some(TlsOptions { ca_cert_pem: Some(std::fs::read("c
 - This is the only language where `QoS` from the two crates are convertible: `mqtt_broker::QoS` and
   `mqtt_client::QoS` implement `From` for each other.
 - All `async` methods are `tokio` futures; you need a `tokio` runtime (`#[tokio::main]`).
-- The same crates build as `cdylib`/`staticlib` for the bindings; that adds no cost to Rust users.
+- The bindings build the same crates as `cdylib`/`staticlib` on demand (`cargo rustc --crate-type`);
+  a Rust dependency compiles only the rlib.
 
 ## Building from source
 

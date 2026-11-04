@@ -108,7 +108,7 @@ impl MqttMessageListener for Printer {
 ## Foreign-language bindings
 
 ```sh
-cargo build --release -p stem-mqtt-client
+cargo rustc --release -p stem-mqtt-client --lib --crate-type cdylib
 cargo run -p stem-mqtt-client --features uniffi/cli --bin uniffi-bindgen -- \
     generate --library ../../target/release/libmqtt_client.so \
     --language kotlin --out-dir bindings/kotlin

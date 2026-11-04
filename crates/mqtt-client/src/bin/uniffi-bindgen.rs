@@ -1,7 +1,7 @@
 //! Standalone `uniffi-bindgen` CLI for this crate: generates Kotlin/Swift/
 //! Python bindings from the compiled library.
 //!
-//! Usage (after `cargo build --release`):
+//! Usage (after `cargo rustc --release -p stem-mqtt-client --lib --crate-type cdylib`):
 //!
 //! ```sh
 //! cargo run -p stem-mqtt-client --features uniffi/cli --bin uniffi-bindgen -- \

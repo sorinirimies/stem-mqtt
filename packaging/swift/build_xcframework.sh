@@ -35,7 +35,7 @@ build_xcframework() {
 
     echo "==> building ${crate} static libraries"
     for target in "${rust_targets[@]}"; do
-        cargo build --release -p "$cargo_package" --target "$target"
+        cargo rustc --release -p "$cargo_package" --lib --crate-type staticlib --target "$target"
     done
 
     crate_work="$work/$crate"

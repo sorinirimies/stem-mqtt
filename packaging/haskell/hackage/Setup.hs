@@ -66,11 +66,11 @@ rustConfHook pkg flags = do
     putStrLn "stem-mqtt: building the Rust core with cargo (the first build takes a minute or two)..."
     (code, out, err) <-
       readCreateProcessWithExitCode
-        (proc "cargo" ["build", "--release", "--locked", "-p", "stem-mqtt-broker"]) {cwd = Just rustDir}
+        (proc "cargo" ["rustc", "--release", "--locked", "-p", "stem-mqtt-broker", "--lib", "--crate-type", "staticlib"]) {cwd = Just rustDir}
         ""
     when (code /= ExitSuccess) $ do
       hPutStrLn stderr $
-        "stem-mqtt: `cargo build` failed — is a Rust toolchain installed (https://rustup.rs)?\n"
+        "stem-mqtt: `cargo rustc` failed — is a Rust toolchain installed (https://rustup.rs)?\n"
           ++ out
           ++ err
       exitFailure

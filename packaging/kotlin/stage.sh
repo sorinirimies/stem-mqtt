@@ -47,7 +47,7 @@ for crate in "${crates[@]}"; do
     lib_path="target/release/lib${lib_name}.${ext}"
     if [ ! -f "$lib_path" ]; then
         echo "==> building ${crate} release cdylib"
-        cargo build --release -p "$package"
+        cargo rustc --release -p "$package" --lib --crate-type cdylib
     fi
     test -s "$lib_path" || { echo "error: missing native library ${lib_path}" >&2; exit 1; }
     cp "$lib_path" "$out/resources/${os_dir}/"

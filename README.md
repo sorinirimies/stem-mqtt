@@ -196,7 +196,8 @@ Callbacks are available everywhere except Dart and Haskell, which use the
 - **Event observation** (`MqttBrokerEventListener`) and, for runtimes that can't receive callbacks
   (Dart, Haskell), a **pull-style API**: `enable_message_queue` / `next_message` on the client,
   `enable_event_queue` / `next_event` on the broker.
-- **UniFFI bindings** — both crates build as `cdylib`/`staticlib` and ship a
+- **UniFFI bindings** — both crates build as `cdylib`/`staticlib`
+  (`cargo rustc --lib --crate-type cdylib,staticlib`) and ship a
   `uniffi-bindgen` binary for Kotlin, Swift and Python; Go, C#, Java, Dart,
   Node.js and Haskell are generated through pinned community generators — all of
   them runtime-tested in CI against a real broker.

@@ -23,10 +23,13 @@ mkdir -p "$out"
 
 abis=(arm64-v8a armeabi-v7a x86_64 x86)
 echo "==> cross-compiling mqtt-client + mqtt-broker for: ${abis[*]}"
-cargo ndk \
-    -t arm64-v8a -t armeabi-v7a -t x86_64 -t x86 \
-    -o "$out" \
-    build --release -p stem-mqtt-client -p stem-mqtt-broker
+# `cargo rustc` takes one package at a time.
+for package in stem-mqtt-client stem-mqtt-broker; do
+    cargo ndk \
+        -t arm64-v8a -t armeabi-v7a -t x86_64 -t x86 \
+        -o "$out" \
+        rustc --release -p "$package" --lib --crate-type cdylib
+done
 
 for abi in "${abis[@]}"; do
     for lib in mqtt_client mqtt_broker; do

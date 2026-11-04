@@ -222,11 +222,11 @@ jobs:
 
       - name: Build (native)
         if: ${{ !matrix.cross }}
-        run: cargo build --release -p stem-mqtt-client --target ${{ matrix.target }}
+        run: cargo rustc --release -p stem-mqtt-client --lib --crate-type cdylib,staticlib --target ${{ matrix.target }}
 
       - name: Build (cross)
         if: matrix.cross
-        run: cross build --release -p stem-mqtt-client --target ${{ matrix.target }}
+        run: cross rustc --release -p stem-mqtt-client --lib --crate-type cdylib,staticlib --target ${{ matrix.target }}
 
       - name: Package
         shell: bash

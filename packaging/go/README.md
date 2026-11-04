@@ -15,7 +15,8 @@ import (
 The module links the Rust libraries `libmqtt_client` and `libmqtt_broker`, which you install
 separately — download them from the
 [release assets](https://github.com/sorinirimies/stem-mqtt/releases) or build them with
-`cargo build --release -p stem-mqtt-client -p stem-mqtt-broker` — and point cgo at them:
+`cargo rustc --release -p <crate> --lib --crate-type cdylib` for `stem-mqtt-client` and
+`stem-mqtt-broker` — and point cgo at them:
 
 ```sh
 export CGO_LDFLAGS="-L/path/to/libs"
