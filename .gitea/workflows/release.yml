@@ -17,7 +17,8 @@ permissions:
 
 concurrency:
   group: release
-  cancel-in-progress: true
+  # Never cancel a release: a newer run would stop one mid-publish.
+  cancel-in-progress: false
 
 env:
   CARGO_TERM_COLOR: always

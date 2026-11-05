@@ -60,4 +60,11 @@ def "test workflows: staging dart installs the dart sdk" [] {
     assert equal ($dart | first | get if) "matrix.language == 'dart'"
 }
 
+# A newer release run cancelled v0.4.1 mid-run; releases queue instead.
+def "test workflows: releases are never cancelled" [] {
+    for wf in (workflows | where {|p| ($p | path basename) == "release.yml" }) {
+        assert equal ((open $wf).concurrency.cancel-in-progress) false $"($wf) cancels a release"
+    }
+}
+
 def main [] { run-tests }
