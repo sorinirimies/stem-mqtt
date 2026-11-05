@@ -33,6 +33,7 @@
 # ──────────────────────────────────────────────────────────────────────────────
 
 use bindings/spec.nu *
+use ci/publish_once.nu [publish-once]
 use bindings/source.nu *
 use bindings/hackage.nu *
 use bindings/dart_package.nu *
@@ -375,7 +376,8 @@ def "main publish" [
                 $step.args | append ["--token" ($env.HACKAGE_TOKEN? | default "")]
             } else { $step.args }
             cd $step.cwd
-            run-external $step.cmd ...$args
+            # A re-run (or the other host's release) finds the version already there.
+            publish-once [$step.cmd ...$args] | ignore
         }
     }
 }

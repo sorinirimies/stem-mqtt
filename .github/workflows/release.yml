@@ -635,30 +635,10 @@ jobs:
       - name: Restore verified publication inputs
         run: tar xzf kotlin-publish-inputs.tar.gz
 
-      - name: Publish Kotlin/JVM package to GitHub Packages
-        working-directory: packaging/kotlin
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PACKAGE_VERSION: ${{ needs.validate.outputs.version }}
-        # Only to Packages: plain `publish` also fills the staging repository with
-        # unsigned artifacts that Maven Central then rejects.
-        run: gradle publishAllPublicationsToPackagesRepository --no-daemon
-
-      - name: Publish Kotlin/Android AAR to GitHub Packages
-        working-directory: packaging/kotlin/android
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PACKAGE_VERSION: ${{ needs.validate.outputs.version }}
-        run: gradle publish --no-daemon
-
-      # Maven Central takes a signed bundle of the Maven repository layout (Central Portal),
-      # built and uploaded by the same Nushell script the Gitea release uses.
-      # Needs the verified namespace io.github.<owner>.
+      # Nushell first: every publish runs through scripts/ci/publish_once.nu.
       - name: Install Rust (for Nushell)
-        if: env.HAS_CENTRAL == 'true'
         uses: dtolnay/rust-toolchain@stable
       - name: Install Nushell
-        if: env.HAS_CENTRAL == 'true'
         run: |
           V=0.116.1
           for attempt in 1 2 3 4 5; do
@@ -668,6 +648,25 @@ jobs:
           test -x /tmp/nu-$V-x86_64-unknown-linux-gnu/nu
           sudo install -m 0755 /tmp/nu-$V-x86_64-unknown-linux-gnu/nu /usr/local/bin/nu || install -m 0755 /tmp/nu-$V-x86_64-unknown-linux-gnu/nu "$HOME/.cargo/bin/nu"
           nu --version
+      - name: Publish Kotlin/JVM package to GitHub Packages
+        working-directory: packaging/kotlin
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PACKAGE_VERSION: ${{ needs.validate.outputs.version }}
+        # Only to Packages: plain `publish` also fills the staging repository with
+        # unsigned artifacts that Maven Central then rejects.
+        run: nu ../../scripts/ci/publish_once.nu gradle publishAllPublicationsToPackagesRepository --no-daemon
+
+      - name: Publish Kotlin/Android AAR to GitHub Packages
+        working-directory: packaging/kotlin/android
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PACKAGE_VERSION: ${{ needs.validate.outputs.version }}
+        run: nu ../../../scripts/ci/publish_once.nu gradle publish --no-daemon
+
+      # Maven Central takes a signed bundle of the Maven repository layout (Central Portal),
+      # built and uploaded by the same Nushell script the Gitea release uses.
+      # Needs the verified namespace io.github.<owner>.
       - name: Publish Kotlin/JVM package to Maven Central
         if: env.HAS_CENTRAL == 'true'
         working-directory: packaging/kotlin

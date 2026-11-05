@@ -87,4 +87,14 @@ def "test workflows: maven central stages only signed artifacts" [] {
     }
 }
 
+# v0.4.1: a re-run hit 409 Conflict at GitHub Packages and never reached Maven Central.
+def "test workflows: package registry publishes tolerate an existing version" [] {
+    for h in [.github .gitea] {
+        let steps = (open (root | path join $h workflows release.yml)).jobs | values | each {|j| $j.steps? | default [] } | flatten
+        let runs = $steps | each {|s| $s.run? | default "" } | where {|r| $r =~ '(gradle publishAllPublicationsToPackagesRepository|gradle publish |twine upload --repository-url)' }
+        assert ($runs | is-not-empty) $"($h): no package registry publish found"
+        assert ($runs | all {|r| ($r | str contains publish_once.nu) or ($r | str contains "--skip-existing") }) $"($h): a registry publish fails on an existing version"
+    }
+}
+
 def main [] { run-tests }

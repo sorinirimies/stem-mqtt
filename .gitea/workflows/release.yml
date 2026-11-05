@@ -535,7 +535,7 @@ jobs:
           PACKAGE_VERSION: ${{ needs.validate.outputs.version }}
         # Only to Packages: plain `publish` also fills the staging repository with
         # unsigned artifacts that Maven Central then rejects.
-        run: gradle publishAllPublicationsToPackagesRepository --no-daemon -PmavenUrl=${{ github.server_url }}/api/packages/${{ github.repository_owner }}/maven
+        run: nu ../../scripts/ci/publish_once.nu gradle publishAllPublicationsToPackagesRepository --no-daemon -PmavenUrl=${{ github.server_url }}/api/packages/${{ github.repository_owner }}/maven
 
       # Maven Central takes a signed bundle of the Maven repository layout (Central Portal).
       # Needs the verified namespace io.github.<owner> and the secrets MAVEN_CENTRAL_USERNAME,
@@ -605,7 +605,7 @@ jobs:
         env:
           TWINE_USERNAME: ${{ github.repository_owner }}
           TWINE_PASSWORD: ${{ secrets.PACKAGES_TOKEN }}
-        run: twine upload --repository-url ${{ github.server_url }}/api/packages/${{ github.repository_owner }}/pypi dist/*
+        run: twine upload --skip-existing --repository-url ${{ github.server_url }}/api/packages/${{ github.repository_owner }}/pypi dist/*
 
       # pypi.org only accepts manylinux wheels: build them against an old glibc with zig
       # (no Docker needed), test them, then upload with a PyPI API token.
