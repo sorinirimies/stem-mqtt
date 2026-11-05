@@ -579,34 +579,38 @@ jobs:
     name: Publish to PyPI
     needs: [validate, release]
     runs-on: ubuntu-latest
-    env:
-      HAS_TOKEN: ${{ secrets.PYPI_API_TOKEN != '' }}
+    # Trusted Publishing: PyPI trusts this workflow + environment, no token needed.
+    # Each project (stem-mqtt-client, stem-mqtt-broker) lists it as a publisher.
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write
     steps:
-      - name: Skip (no token)
-        if: env.HAS_TOKEN != 'true'
-        run: echo "⏭️  PYPI_API_TOKEN not set — skipping. See packaging/python/README.md."
-
-      - uses: actions/setup-python@v7
-        if: env.HAS_TOKEN == 'true'
+      - name: Download client wheels
+        uses: actions/download-artifact@v8
         with:
-          python-version: "3.12"
-
-      - name: Install maturin
-        if: env.HAS_TOKEN == 'true'
-        run: pip install maturin
-
-      - uses: actions/download-artifact@v8
-        if: env.HAS_TOKEN == 'true'
-        with:
-          pattern: python-*
-          path: wheels
+          pattern: python-mqtt-client-*
+          path: dist/client
           merge-multiple: true
 
-      - name: Publish verified wheels
-        if: env.HAS_TOKEN == 'true'
-        env:
-          MATURIN_PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
-        run: maturin upload --skip-existing wheels/*.whl
+      - name: Download broker wheels
+        uses: actions/download-artifact@v8
+        with:
+          pattern: python-mqtt-broker-*
+          path: dist/broker
+          merge-multiple: true
+
+      - name: Publish stem-mqtt-client
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/client
+          skip-existing: true
+
+      - name: Publish stem-mqtt-broker
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/broker
+          skip-existing: true
 
   # ── 10. Publish verified Kotlin packages to GitHub Packages ──────────────────
   publish-kotlin:

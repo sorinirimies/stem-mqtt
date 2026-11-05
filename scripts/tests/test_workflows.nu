@@ -109,4 +109,17 @@ def "test workflows: release jobs check out the resolved ref" [] {
     }
 }
 
+# GitHub publishes to PyPI with Trusted Publishing; the PyPI projects trust exactly
+# this workflow file and the `pypi` environment.
+def "test workflows: pypi uses trusted publishing" [] {
+    let wf = root | path join .github workflows release.yml
+    let job = open $wf | get jobs.publish-python
+    assert equal $job.environment pypi
+    assert equal ($job.permissions | get id-token) write
+    let pubs = $job.steps | where {|s| ($s.uses? | default "") starts-with "pypa/gh-action-pypi-publish" }
+    assert equal ($pubs | each {|s| $s.with | get packages-dir }) [dist/client dist/broker]
+    assert ($pubs | all {|s| $s.with | get skip-existing })
+    assert not (open --raw $wf | str contains "PYPI_API_TOKEN")
+}
+
 def main [] { run-tests }

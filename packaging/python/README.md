@@ -20,14 +20,17 @@ maturin build --release
 
 `.github/workflows/release.yml` first builds both crates' wheels on Linux,
 macOS, and Windows and gates GitHub Release creation on those builds. Its
-`publish-python` job uploads those exact verified wheels to PyPI when the
-`PYPI_API_TOKEN` repository secret is configured:
+`publish-python` job uploads those exact verified wheels to PyPI with
+[Trusted Publishing](https://docs.pypi.org/trusted-publishers/), so no token is
+needed. Each PyPI project (`stem-mqtt-client`, `stem-mqtt-broker`) lists a
+GitHub publisher: owner `sorinirimies`, repository `stem-mqtt`, workflow
+`release.yml`, environment `pypi`. The GitHub repository has an environment
+named `pypi`. Versions already on PyPI are skipped, so a release re-run is safe.
 
-```sh
-gh secret set PYPI_API_TOKEN --body "pypi-AgEI..."
-```
+Gitea can't use Trusted Publishing. `.gitea/workflows/release.yml` uploads with
+the `PYPI_API_TOKEN` secret and skips the upload when it isn't set.
 
-If the secret isn't set, registry upload skips, but wheel construction and a
+Whether or not a registry upload runs, wheel construction and a
 real client-to-broker runtime smoke test are still required on Linux, macOS,
 and Windows before GitHub Release creation.
 
