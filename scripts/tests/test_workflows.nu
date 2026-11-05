@@ -67,4 +67,12 @@ def "test workflows: releases are never cancelled" [] {
     }
 }
 
+# Either host publishes to the public registries (npmjs, NuGet, Maven Central, Hackage,
+# Go): only Gitea's release did, and GitHub-only tags never reached npm (v0.4.1).
+def "test workflows: both hosts publish the public registries" [] {
+    let matrix = {|h| (open (root | path join $h workflows release.yml)).jobs.publish-public.strategy.matrix.language }
+    assert equal (do $matrix .github) (do $matrix .gitea)
+    assert equal (open (root | path join .github workflows publish-npm.yml)) (open (root | path join .gitea workflows publish-npm.yml))
+}
+
 def main [] { run-tests }
