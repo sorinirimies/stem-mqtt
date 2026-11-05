@@ -34,6 +34,7 @@
 
 use bindings/spec.nu *
 use ci/publish_once.nu [publish-once]
+use ci/registry_readme.nu [registry-readme]
 use bindings/source.nu *
 use bindings/hackage.nu *
 use bindings/dart_package.nu *
@@ -207,15 +208,6 @@ System.getenv("SIGNING_KEY")?.let { key ->
         }
         _ => {}
     }
-}
-
-# The language guide (docs/languages/<language>.md) as a registry README. Its links are relative to the
-# repository, which would be broken on npmjs.org / nuget.org, so point them at the repository on GitHub.
-def registry-readme [language: string, owner: string]: nothing -> string {
-    let base = $"https://github.com/($owner)/stem-mqtt/blob/main"
-    open --raw ($env.PWD | path join "docs" "languages" $"($language).md")
-    | str replace --all "](../../" $"]\(($base)/"
-    | str replace --all --regex '\]\(([A-Za-z_-]+\.md)\)' $"]\(($base)/docs/languages/${1}\)"
 }
 
 # Registry-specific preparation that depends on the final version/owner:

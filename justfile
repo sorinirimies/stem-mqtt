@@ -158,6 +158,10 @@ bindings-lang language:
     nu scripts/generate_bindings.nu {{ language }} mqtt-client
     nu scripts/generate_bindings.nu {{ language }} mqtt-broker
 
+# Regenerate the PyPI READMEs from docs/languages/python.md (after editing the guide)
+registry-readmes:
+    nu scripts/ci/registry_readme.nu pypi
+
 # Generate Kotlin bindings for both crates
 bindings-kotlin: (bindings-lang "kotlin")
 
