@@ -416,7 +416,7 @@ jobs:
       - name: Install oras
         if: env.HAS_TOKEN == 'true' && (matrix.language == 'go' || matrix.language == 'dart' || matrix.language == 'haskell')
         run: |
-          curl -fsSL --retry 5 https://github.com/oras-project/oras/releases/download/v1.2.2/oras_1.2.2_linux_amd64.tar.gz | tar xz -C /tmp oras
+          curl -fsSL --retry 5 --retry-all-errors -o /tmp/dl.tgz https://github.com/oras-project/oras/releases/download/v1.2.2/oras_1.2.2_linux_amd64.tar.gz && tar -xzf /tmp/dl.tgz -C /tmp oras
           sudo install -m755 /tmp/oras /usr/local/bin/oras
 
       - name: Restore generator cache
