@@ -33,7 +33,11 @@ jobs:
       - name: Install Nushell
         run: |
           V=0.116.1
-          curl -fsSL https://github.com/nushell/nushell/releases/download/$V/nu-$V-x86_64-unknown-linux-gnu.tar.gz | tar -xz -C /tmp
+          for attempt in 1 2 3 4 5; do
+            curl -fsSL --retry 3 --retry-all-errors -o /tmp/nu.tgz https://github.com/nushell/nushell/releases/download/$V/nu-$V-x86_64-unknown-linux-gnu.tar.gz && tar -xzf /tmp/nu.tgz -C /tmp && break
+            echo "nu download failed (attempt $attempt); retrying in 15s"; sleep 15
+          done
+          test -x /tmp/nu-$V-x86_64-unknown-linux-gnu/nu
           sudo install -m 0755 /tmp/nu-$V-x86_64-unknown-linux-gnu/nu /usr/local/bin/nu || install -m 0755 /tmp/nu-$V-x86_64-unknown-linux-gnu/nu "$HOME/.cargo/bin/nu"
           nu --version
       - name: Install the Dart generator
@@ -42,21 +46,17 @@ jobs:
           nu scripts/install_bindgens.nu dart --root "$HOME/.bindgens"
       - name: Resolve the version
         id: version
-        run: |
-          v="${{ github.event.inputs.version }}"
-          [ -n "$v" ] || v="${GITHUB_REF_NAME#v}"
-          echo "version=$v" >> "$GITHUB_OUTPUT"
+        run: nu -c "print $\"version=('${{ github.event.inputs.version || github.ref_name }}' | str replace --regex '^v' '')\"" >> "$GITHUB_OUTPUT"
       - name: Runtime-test the bindings
         run: nu scripts/test_bindings.nu dart --strict
+      # Outside the checkout: dart pub honours the repo's .gitignore, which ignores dist/,
+      # and would publish an empty package.
       - name: Stage the package
-        run: nu scripts/publish_packages.nu stage dart
+        run: nu scripts/publish_packages.nu stage dart --out "${{ runner.temp }}/dart"
       - name: Set the version
-        run: |
-          sed -i "s/^version:.*/version: ${{ steps.version.outputs.version }}/" dist/dart/pub/pubspec.yaml
-          sed -i "s/^## .*/## ${{ steps.version.outputs.version }}/" dist/dart/pub/CHANGELOG.md
+        run: nu scripts/publish_packages.nu publish dart ${{ steps.version.outputs.version }} --from "${{ runner.temp }}/dart" --target public --dry-run
       - name: Validate
-        working-directory: dist/dart/pub
+        working-directory: ${{ runner.temp }}/dart/pub
         run: dart pub publish --dry-run
       - name: Publish
-        working-directory: dist/dart/pub
-        run: dart pub publish --force
+        run: nu scripts/publish_packages.nu publish dart ${{ steps.version.outputs.version }} --from "${{ runner.temp }}/dart" --target public
