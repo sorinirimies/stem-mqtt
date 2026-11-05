@@ -75,4 +75,16 @@ def "test workflows: both hosts publish the public registries" [] {
     assert equal (open (root | path join .github workflows publish-npm.yml)) (open (root | path join .gitea workflows publish-npm.yml))
 }
 
+# v0.4.1: `gradle publish` for GitHub Packages also staged unsigned artifacts, and
+# Maven Central refused the bundle ("missing: stem-mqtt-kotlin-0.4.1.jar.asc").
+def "test workflows: maven central stages only signed artifacts" [] {
+    for h in [.github .gitea] {
+        let steps = (open (root | path join $h workflows release.yml)).jobs.publish-kotlin.steps
+        let runs = $steps | where {|s| ($s.working-directory? | default "") == "packaging/kotlin" } | each {|s| $s.run? | default "" }
+        assert ($runs | all {|r| not ($r =~ 'gradle publish(\s|$)') }) $"($h): a plain gradle publish stages unsigned artifacts"
+        let central = $runs | where {|r| $r | str contains publishAllPublicationsToStagingRepository } | first
+        assert ($central | str starts-with "rm -rf build/staging-repo") $"($h): staging is not cleared first"
+    }
+}
+
 def main [] { run-tests }

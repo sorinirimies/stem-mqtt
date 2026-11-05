@@ -533,7 +533,9 @@ jobs:
           PACKAGES_USER: ${{ github.repository_owner }}
           PACKAGES_TOKEN: ${{ secrets.PACKAGES_TOKEN }}
           PACKAGE_VERSION: ${{ needs.validate.outputs.version }}
-        run: gradle publish --no-daemon -PmavenUrl=${{ github.server_url }}/api/packages/${{ github.repository_owner }}/maven
+        # Only to Packages: plain `publish` also fills the staging repository with
+        # unsigned artifacts that Maven Central then rejects.
+        run: gradle publishAllPublicationsToPackagesRepository --no-daemon -PmavenUrl=${{ github.server_url }}/api/packages/${{ github.repository_owner }}/maven
 
       # Maven Central takes a signed bundle of the Maven repository layout (Central Portal).
       # Needs the verified namespace io.github.<owner> and the secrets MAVEN_CENTRAL_USERNAME,
@@ -549,6 +551,7 @@ jobs:
           MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
           SONATYPE_TOKEN: ${{ secrets.SONATYPE_TOKEN }}
         run: |
+          rm -rf build/staging-repo
           gradle publishAllPublicationsToStagingRepository --no-daemon -PgroupId=io.github.${{ env.PUBLIC_OWNER }}.stemmqtt
           nu ../../scripts/publish_maven_central.nu build/staging-repo stem-mqtt-kotlin-${{ needs.validate.outputs.version }}
 

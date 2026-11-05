@@ -640,7 +640,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PACKAGE_VERSION: ${{ needs.validate.outputs.version }}
-        run: gradle publish --no-daemon
+        # Only to Packages: plain `publish` also fills the staging repository with
+        # unsigned artifacts that Maven Central then rejects.
+        run: gradle publishAllPublicationsToPackagesRepository --no-daemon
 
       - name: Publish Kotlin/Android AAR to GitHub Packages
         working-directory: packaging/kotlin/android
@@ -678,6 +680,7 @@ jobs:
           SONATYPE_TOKEN: ${{ secrets.SONATYPE_TOKEN }}
           OWNER: ${{ github.repository_owner }}
         run: |
+          rm -rf build/staging-repo
           gradle publishAllPublicationsToStagingRepository --no-daemon -PgroupId="io.github.${OWNER}.stemmqtt"
           nu ../../scripts/publish_maven_central.nu build/staging-repo "stem-mqtt-kotlin-${PACKAGE_VERSION}"
 
