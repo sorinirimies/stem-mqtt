@@ -720,6 +720,10 @@ jobs:
       - name: Install Nushell (build)
         if: runner.os != 'Linux'
         run: cargo install nu --locked
+      # The runner has Java, Node, .NET and Go; the Dart SDK the runtime test needs it lacks.
+      - name: Install Dart
+        if: matrix.language == 'dart'
+        uses: dart-lang/setup-dart@v1
       - name: Install the ${{ matrix.language }} generator
         run: nu scripts/install_bindgens.nu ${{ matrix.language }}
       - name: Runtime-test the generated bindings before packaging them
@@ -824,6 +828,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-darwin,x86_64-apple-darwin,aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios
+
+      # build_xcframework.sh generates the Swift bindings with nu.
+      - name: Install Nushell
+        uses: hustcer/setup-nu@v3
+        with:
+          version: "0.116.1"
 
       - name: Build and verify client + broker Swift package
         run: ./packaging/swift/build_xcframework.sh ${{ needs.validate.outputs.version }}

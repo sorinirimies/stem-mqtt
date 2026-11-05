@@ -34,4 +34,30 @@ def "test workflows: pub.dev stages the dart package outside the checkout" [] {
     assert equal $validate.working-directory "${{ runner.temp }}/dart/pub"
 }
 
+# A job that runs nu (directly or through a script that calls it) must install it:
+# build-swift ran build_xcframework.sh without it ("nu: command not found", v0.4.0).
+def "test workflows: every job that runs nu installs it" [] {
+    for wf in (workflows) {
+        for job in (open $wf | get jobs | transpose name job) {
+            let steps = $job.job.steps? | default []
+            let cmds = $steps | each {|s| $s.run? | default "" }
+            let scripts = $cmds | each {|c| $c | parse --regex '(?P<p>\./[\w./-]+\.sh)' | get p } | flatten
+            let via_script = $scripts | any {|p| (root | path join $p | path exists) and ((open --raw (root | path join $p)) =~ '(?m)^\s*nu\s') }
+            let direct = $cmds | any {|c| $c =~ '(?m)(^|[;&|]\s*)nu\s' }
+            if $direct or $via_script {
+                let installs = $steps | any {|s| (($s.uses? | default "") | str contains "setup-nu") or (($s.name? | default "") | str starts-with "Install Nushell") }
+                assert $installs $"($wf | path basename) job ($job.name) runs nu without installing it"
+            }
+        }
+    }
+}
+
+# The dart runtime test needs the Dart SDK ("skipped: dart not found" failed v0.4.0).
+def "test workflows: staging dart installs the dart sdk" [] {
+    let steps = (open (root | path join .github workflows release.yml)).jobs.stage-packages.steps
+    let dart = $steps | where {|s| ($s.uses? | default "") | str starts-with "dart-lang/setup-dart" }
+    assert ($dart | is-not-empty)
+    assert equal ($dart | first | get if) "matrix.language == 'dart'"
+}
+
 def main [] { run-tests }
