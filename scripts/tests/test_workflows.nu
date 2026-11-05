@@ -97,4 +97,16 @@ def "test workflows: package registry publishes tolerate an existing version" []
     }
 }
 
+# A release re-run builds the tag, whose CI scripts may be the broken ones (v0.4.1 could
+# not reach Maven Central). `source` lets a manual run build from a fixed ref.
+def "test workflows: release jobs check out the resolved ref" [] {
+    for h in [.github .gitea] {
+        let wf = open (root | path join $h workflows release.yml)
+        assert ($wf.on.workflow_dispatch.inputs | columns | any {|c| $c == source }) $"($h): no source input"
+        let refs = $wf.jobs | values | each {|j| $j.steps? | default [] } | flatten | where {|s| ($s.uses? | default "") starts-with "actions/checkout" } | each {|s| $s.with?.ref? } | compact
+        assert ($refs | is-not-empty)
+        assert ($refs | all {|r| $r == '${{ needs.validate.outputs.ref }}' }) $"($h): a job checks out something else"
+    }
+}
+
 def main [] { run-tests }

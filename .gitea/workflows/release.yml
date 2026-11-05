@@ -10,6 +10,10 @@ on:
         description: "Tag to release (e.g. v0.2.0)"
         required: true
         default: ""
+      source:
+        description: "Build from this ref instead of the tag (e.g. main), to re-publish a release with fixed CI. The workspace version must still match the tag."
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -33,6 +37,8 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.resolve.outputs.tag }}
+      # What every job checks out: the tag, or `source` when re-publishing.
+      ref: ${{ github.event.inputs.source || steps.resolve.outputs.tag }}
       version: ${{ steps.resolve.outputs.version }}
     steps:
       - name: Resolve and validate tag
@@ -59,7 +65,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.validate.outputs.tag }}
+          ref: ${{ needs.validate.outputs.ref }}
       - name: Install Rust stable
         run: |
           for attempt in 1 2 3 4 5; do
@@ -101,7 +107,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.validate.outputs.tag }}
+          ref: ${{ needs.validate.outputs.ref }}
 
       - name: Install cross-linker (aarch64)
         if: matrix.cross == true
@@ -157,7 +163,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.validate.outputs.tag }}
+          ref: ${{ needs.validate.outputs.ref }}
 
       - name: Install mingw-w64 cross-compiler
         run: |
@@ -212,7 +218,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.validate.outputs.tag }}
+          ref: ${{ needs.validate.outputs.ref }}
           fetch-depth: 0
 
       - name: Install Rust stable
@@ -296,7 +302,7 @@ jobs:
       - uses: actions/checkout@v4
         if: env.HAS_TOKEN == 'true'
         with:
-          ref: ${{ needs.validate.outputs.tag }}
+          ref: ${{ needs.validate.outputs.ref }}
 
       - name: Install Rust stable
         if: env.HAS_TOKEN == 'true'
@@ -360,7 +366,7 @@ jobs:
       - uses: actions/checkout@v4
         if: env.HAS_TOKEN == 'true'
         with:
-          ref: ${{ needs.validate.outputs.tag }}
+          ref: ${{ needs.validate.outputs.ref }}
 
       - name: Install Rust stable
         if: env.HAS_TOKEN == 'true'
@@ -479,7 +485,7 @@ jobs:
       - uses: actions/checkout@v4
         if: env.HAS_TOKEN == 'true' || env.HAS_CENTRAL == 'true'
         with:
-          ref: ${{ needs.validate.outputs.tag }}
+          ref: ${{ needs.validate.outputs.ref }}
       - name: Install Rust stable
         if: env.HAS_TOKEN == 'true' || env.HAS_CENTRAL == 'true'
         run: |
@@ -572,7 +578,7 @@ jobs:
       - uses: actions/checkout@v4
         if: env.HAS_TOKEN == 'true' || env.HAS_PYPI == 'true'
         with:
-          ref: ${{ needs.validate.outputs.tag }}
+          ref: ${{ needs.validate.outputs.ref }}
       - name: Install Rust stable
         if: env.HAS_TOKEN == 'true' || env.HAS_PYPI == 'true'
         run: |
@@ -655,7 +661,7 @@ jobs:
       - uses: actions/checkout@v4
         if: env.HAS_TOKEN == 'true'
         with:
-          ref: ${{ needs.validate.outputs.tag }}
+          ref: ${{ needs.validate.outputs.ref }}
       - name: Install Rust stable
         if: env.HAS_TOKEN == 'true'
         run: |
