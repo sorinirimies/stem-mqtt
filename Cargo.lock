@@ -2086,7 +2086,7 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "stem-mqtt-broker"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "anyhow",
  "bytes",
@@ -2107,7 +2107,7 @@ dependencies = [
 
 [[package]]
 name = "stem-mqtt-client"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "anyhow",
  "bytes",
@@ -2125,7 +2125,7 @@ dependencies = [
 
 [[package]]
 name = "stem-mqtt-dashboard"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "anyhow",
  "futures-util",

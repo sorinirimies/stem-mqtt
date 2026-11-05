@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.1] - 2026-11-05
+### 🔄 CI
+- retry the Nushell download in every GitHub job; stage the pub.dev package outside the checkout so its .gitignore does not hide it
+**Full Changelog**: https://github.com/sorinirimies/stem-mqtt/compare/v0.4.0...v0.4.1
 ## [0.4.0] - 2026-11-05
 ### ♻️  Refactor
 - edition 2024 and the shared lints; Debug on every public type; drop unused dependencies and dead_code allows
