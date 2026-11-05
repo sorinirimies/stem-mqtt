@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.0] - 2026-11-05
+### ♻️  Refactor
+- edition 2024 and the shared lints; Debug on every public type; drop unused dependencies and dead_code allows
+### 🐛 Bug Fixes
+- check_publish shows the failing tests, not only cargo's summary
+- build the bindings' cdylib/staticlib on demand so test builds never link a second tokio
+- node generator gets a cdylib stub manifest; generation builds the staticlib Haskell packaging copies
+### 📦 Build
+- Nushell-only scripts (binary check ported from Python), secrets scan, unused-dependency gate
+### 🔄 CI
+- bump peter-evans/create-pull-request from 7 to 8 (#17)
+**Full Changelog**: https://github.com/sorinirimies/stem-mqtt/compare/v0.3.9...v0.4.0
 ## [0.3.9] - 2026-11-01
 ### 🐛 Bug Fixes
 - bump rustls to 0.23.46 (RUSTSEC-2026-0346..0349)
