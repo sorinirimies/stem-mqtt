@@ -25,7 +25,8 @@ export def publish-once [cmd: list<string>]: nothing -> any {
     error make { msg: $"($cmd | first) failed with exit code ($r.exit_code)" }
 }
 
-def main [...cmd: string] {
+# --wrapped: the command's own flags (gradle --no-daemon) are passed through.
+def --wrapped main [...cmd: string] {
     if ($cmd | is-empty) { error make { msg: "usage: nu scripts/ci/publish_once.nu <command> [args...]" } }
     print $"published=(publish-once $cmd)"
 }
