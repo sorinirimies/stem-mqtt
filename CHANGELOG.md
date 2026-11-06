@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.2] - 2026-11-06
+### 📚 Documentation
+- PyPI pages show the Python guide, not the Rust crate README
+### 🔄 CI
+- install Nushell for the Swift build and the Dart SDK for staging Dart
+- queue release runs instead of cancelling one mid-publish
+- download archives to a file so curl retries a dropped transfer, instead of piping into tar
+- GitHub also publishes the public registries (npmjs, NuGet, Maven Central, Hackage, Go), and can publish npm by hand
+- GitHub Packages publishes only there, and Maven Central stages from an empty directory, so it gets only signed artifacts
+- a version a registry already has counts as published, so a re-run reaches Maven Central
+- a manual release can build from another ref (source), to re-publish with fixed CI
+- publish_once passes the command's own flags through
+- publish to PyPI with Trusted Publishing
+**Full Changelog**: https://github.com/sorinirimies/stem-mqtt/compare/v0.4.1...v0.4.2
 ## [0.4.1] - 2026-11-05
 ### 🔄 CI
 - retry the Nushell download in every GitHub job; stage the pub.dev package outside the checkout so its .gitignore does not hide it
