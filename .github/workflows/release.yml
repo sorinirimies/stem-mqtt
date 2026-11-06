@@ -529,6 +529,10 @@ jobs:
             CHANGELOG.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Keep binaries only on the newest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: nu scripts/ci/prune_releases.nu ${{ needs.validate.outputs.tag }}
 
   # ── 8. Publish to crates.io ────────────────────────────────────────────────────
   publish-crates:

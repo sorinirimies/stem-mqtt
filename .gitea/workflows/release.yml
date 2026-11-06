@@ -286,6 +286,10 @@ jobs:
               --data-binary "@${file}" > /dev/null
           done
           echo "✅ Release ${TAG} published."
+      - name: Keep binaries only on the newest release
+        env:
+          GITEA_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: nu scripts/ci/prune_releases.nu ${{ needs.validate.outputs.tag }} --gitea-api "${{ github.server_url }}/api/v1/repos/${{ github.repository }}"
 
   # ── 5. Publish to crates.io ───────────────────────────────────────────────────
   publish-crates:

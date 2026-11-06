@@ -122,4 +122,18 @@ def "test workflows: pypi uses trusted publishing" [] {
     assert not (open --raw $wf | str contains "PYPI_API_TOKEN")
 }
 
+# Only the newest release keeps its binaries, on both hosts, right after the release
+# is created (notes and tags stay).
+def "test workflows: releases prune older binaries" [] {
+    for h in [.github .gitea] {
+        let steps = open (root | path join $h workflows release.yml) | get jobs.release.steps
+        let names = $steps | get -o name
+        let create = $names | enumerate | where {|s| ($s.item | default "") =~ "^Create (GitHub|Gitea) Release$" } | get index | first
+        let prune = $names | enumerate | where item == "Keep binaries only on the newest release" | get index
+        assert equal ($prune | length) 1 $"($h): no prune step"
+        assert ($prune.0 > $create) $"($h): prune runs before the release exists"
+        assert str contains ($steps | get $prune.0 | get run) "scripts/ci/prune_releases.nu ${{ needs.validate.outputs.tag }}"
+    }
+}
+
 def main [] { run-tests }
