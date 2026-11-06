@@ -464,3 +464,20 @@ jobs:
 
       - name: Audit Cargo.lock
         run: cargo audit
+
+  # ── MSRV ─────────────────────────────────────────────────────────────────────
+  # Everything builds on rust-version except the demo dashboard (Topcoat needs a
+  # newer Rust).
+  msrv:
+    name: MSRV (1.90)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # @master + toolchain, not @1.90: Dependabot would bump a version ref.
+      - name: Install Rust 1.90
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.90"
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo check
+        run: cargo check --workspace --exclude stem-mqtt-dashboard --locked

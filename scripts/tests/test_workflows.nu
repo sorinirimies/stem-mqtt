@@ -136,4 +136,25 @@ def "test workflows: releases prune older binaries" [] {
     }
 }
 
+def "test workflows: the msrv job pins the toolchain from Cargo.toml without a version ref" [] {
+    let cargo = open (root | path join Cargo.toml)
+    let msrv = $cargo | get -o workspace.package.rust-version | default ($cargo | get -o package.rust-version)
+    let step = open (root | path join .github workflows ci.yml) | get jobs.msrv.steps
+        | where {|s| ($s | get -o uses | default "") | str starts-with "dtolnay/rust-toolchain" } | first
+    # A version ref (@1.90) is something Dependabot bumps; @master + toolchain is not.
+    assert equal $step.uses "dtolnay/rust-toolchain@master"
+    assert equal ($step.with.toolchain | into string) $msrv
+}
+
+# Gitea checks the MSRV too, with the same toolchain and commands as GitHub.
+def "test workflows: gitea checks the msrv like github" [] {
+    let gh = open (root | path join .github workflows ci.yml) | get jobs.msrv.steps
+    let gt = open (root | path join .gitea workflows ci.yml) | get jobs.msrv.steps
+    let msrv = $gh | where {|s| ($s.with?.toolchain? | default null) != null } | first | get with.toolchain | into string
+    let install = $gt | where {|s| ($s.name? | default "") starts-with "Install Rust" } | first
+    assert ($install.run | str contains $"--default-toolchain ($msrv) ") "gitea installs the msrv toolchain"
+    let checks = {|steps| $steps | where {|s| ($s.run? | default "") starts-with "cargo " } | get run }
+    assert equal (do $checks $gt) (do $checks $gh)
+}
+
 def main [] { run-tests }
