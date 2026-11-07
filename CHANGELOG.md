@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.0] - 2026-11-07
+### 🐛 Bug Fixes
+- hold cargo-platform at 0.3.2 for the 1.90 MSRV
+### 📦 Build
+- move to UniFFI 0.32
+### 🔄 CI
+- only the newest release keeps its binaries
+- MSRV check (1.90, without the demo dashboard) on GitHub and Gitea
+- run the Swift runtime test on ubuntu-24.04
+**Full Changelog**: https://github.com/sorinirimies/stem-mqtt/compare/v0.4.2...v0.5.0
 ## [0.4.2] - 2026-11-06
 ### 📚 Documentation
 - PyPI pages show the Python guide, not the Rust crate README
