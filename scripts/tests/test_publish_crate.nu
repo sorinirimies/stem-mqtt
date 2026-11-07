@@ -6,7 +6,7 @@
 
 use std/assert
 use runner.nu *
-use ../ci/publish_crate.nu [is_already_published]
+use ../ci/publish_crate.nu [is_already_published is_duplicate_version]
 
 def "test publish_crate: nonsense version is reported as not published" [] {
     let result = (is_already_published "mqtt-client" "0.0.0-definitely-not-a-real-release")
@@ -33,3 +33,11 @@ def "test publish_crate: real crate name with a version that was never published
 }
 
 def main [] { run-tests }
+
+# Regression: v0.5.0's GitHub release failed on "crate version `0.5.0` is already
+# uploaded" after the Gitea release had published it first.
+def "test publish_crate: an already uploaded version counts as published" [] {
+    assert (is_duplicate_version "error: failed to publish stem-mqtt-client v0.5.0 to registry at https://crates.io\n\nCaused by:\n  the remote server responded with an error (status 400 Bad Request): crate version `0.5.0` is already uploaded")
+    assert (is_duplicate_version "crate version `0.4.0` already exists")
+    assert (not (is_duplicate_version "error: 401 Unauthorized"))
+}

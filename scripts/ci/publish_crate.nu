@@ -49,6 +49,13 @@ export def copy_readme [target_dir: string] {
     print $"  (ansi green)✓(ansi reset) Copied README.md → ($readme_dst)"
 }
 
+# Whether `cargo publish` output says crates.io already has this version: another
+# forge's release won the race between our check and the upload. crates.io has
+# said "already exists" and, since 2026, "is already uploaded".
+export def is_duplicate_version [output: string]: nothing -> bool {
+    ($output | str contains "already exists") or ($output | str contains "is already uploaded")
+}
+
 # Publish the crate, handling the "already exists" race gracefully.
 export def do_publish [crate: string]: nothing -> bool {
     print $"  📦 Publishing ($crate)…"
@@ -60,7 +67,7 @@ export def do_publish [crate: string]: nothing -> bool {
     }
 
     let combined = $"($result.stdout)\n($result.stderr)"
-    if ($combined | str contains "already exists") {
+    if (is_duplicate_version $combined) {
         print $"  (ansi yellow)⏭️(ansi reset)  ($crate) already exists on crates.io — skipping."
         return true
     }
