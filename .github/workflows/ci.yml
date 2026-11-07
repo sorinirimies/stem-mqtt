@@ -212,6 +212,12 @@ jobs:
       matrix:
         runner: [ubuntu-latest]
         language: [python, swift, go, csharp, java, dart, node, haskell]
+        # Swiftly (setup-swift) rejects ubuntu-latest's Ubuntu 26.04 as an
+        # "Unsupported Linux platform"; Swift stays on 24.04 until it does.
+        exclude:
+          - { runner: ubuntu-latest, language: swift }
+        include:
+          - { runner: ubuntu-24.04, language: swift }
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
