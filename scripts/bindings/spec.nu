@@ -58,28 +58,28 @@ def _raw-specs []: nothing -> list<record> {
         { language: swift,   kind: builtin,  uniffi: workspace, tool: "", install: [], registry: oci,   maturity: stable }
         { language: python,  kind: builtin,  uniffi: workspace, tool: "", install: [], registry: oci,   maturity: stable }
         {
-            language: go, kind: external, uniffi: workspace, tool: "uniffi-bindgen-go"
+            language: go, kind: external, uniffi: "0.31.0", tool: "uniffi-bindgen-go"
             install: [uniffi-bindgen-go --git "https://github.com/NordSecurity/uniffi-bindgen-go" --tag "v0.7.1+v0.31.0"]
             registry: oci, maturity: stable
         }
         {
-            language: csharp, kind: external, uniffi: workspace, tool: "uniffi-bindgen-cs"
+            language: csharp, kind: external, uniffi: "0.31.0", tool: "uniffi-bindgen-cs"
             install: [uniffi-bindgen-cs --git "https://github.com/NordSecurity/uniffi-bindgen-cs" --tag "v0.11.0+v0.31.0"]
             registry: nuget, maturity: stable
         }
         {
             language: java, kind: external, uniffi: workspace, tool: "uniffi-bindgen-java"
-            install: [uniffi-bindgen-java --version "0.4.2"]
+            install: [uniffi-bindgen-java --version "0.5.2"]
             registry: maven, maturity: stable
         }
         {
-            language: dart, kind: external, uniffi: workspace, tool: "uniffi_bindgen_dart"
+            language: dart, kind: external, uniffi: "0.31.2", tool: "uniffi_bindgen_dart"
             # The v0.2.1 tag ships a placeholder `uniffi_bindgen_dart`; the real CLI landed on main, so pin a main commit.
             install: [uniffi-dart --git "https://github.com/acterglobal/uniffi-dart" --rev "e2dd2bb7180609184d0c70ddde0353f5e11d4c3b" --features binary --bin uniffi_bindgen_dart]
             registry: oci, maturity: experimental
         }
         {
-            language: node, kind: external, uniffi: workspace, tool: "uniffi-bindgen-node-js"
+            language: node, kind: external, uniffi: "0.31.0", tool: "uniffi-bindgen-node-js"
             install: [uniffi-bindgen-node-js --version "0.0.16"]
             registry: npm, maturity: experimental
         }

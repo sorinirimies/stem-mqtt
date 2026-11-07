@@ -291,7 +291,8 @@ enum instead of importing the client's, so no generator ever meets a cross-crate
 Node generator rejects them) and every language gets a standalone broker package.
 
 UniFFI bindgens can only read metadata from the UniFFI release they were built
-for, and the third-party generators disagree (most target 0.31, Haskell 0.32). `generate_bindings.nu` therefore builds the library for
+for, and the third-party generators disagree (the workspace and Java are on 0.32,
+Haskell on 0.32.0, Go, C#, Dart and Node still on 0.31). `generate_bindings.nu` therefore builds the library for
 such a generator in a scratch workspace under `target/uniffi-<version>/` pinned
 to the right release; your workspace is never touched.
 
