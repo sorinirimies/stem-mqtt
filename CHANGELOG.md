@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.0] - 2026-11-08
+### ✨ Features
+- Elixir and Erlang through a Rustler NIF
+- per-platform gems on rubygems.org
+### 🐛 Bug Fixes
+- treat crates.io's "already uploaded" as published
+- no Rust test target for the NIF; keep it out of coverage
+- exclude the NIF from every workspace test run
+- install the gems' ffi dependency in the smoke test
+### 🔄 CI
+- precompiled NIFs and the stem_mqtt Hex package
+- give setup-beam the OS it maps OTP builds from
+**Full Changelog**: https://github.com/sorinirimies/stem-mqtt/compare/v0.5.0...v0.6.0
 ## [0.5.0] - 2026-11-07
 ### 🐛 Bug Fixes
 - hold cargo-platform at 0.3.2 for the 1.90 MSRV
