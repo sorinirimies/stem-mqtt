@@ -41,10 +41,18 @@ releases.
 
 `nu scripts/publish_packages.nu stage|verify|publish` builds, checks and publishes per-language
 packages: Maven (Java), NuGet (C#), npm (Node) and OCI artifacts on `ghcr.io`
-(Go, Dart, Haskell). Native libraries are shipped for Linux
-x86_64 and macOS arm64; each package carries `native/<platform>/` and the
-consumer must point the generated loader at it (Go: `CGO_LDFLAGS=-L…`; Dart:
-`DynamicLibrary.open`; Haskell: link `libmqtt_*.a`).
+(Go, Dart, Haskell).
+
+Every package carries only its platform's native libraries:
+
+- **npm, Maven, RubyGems:** one package per platform (npm optional dependencies restricted by
+  `os`/`cpu`, Maven classifier jars, platform gems) for Linux x86_64/aarch64, macOS x86_64/arm64 and
+  Windows x86_64, built by the release's `build-native-libs` job (`scripts/ci/native_libs.nu`).
+- **Python, Hex, Kotlin/Android, Swift:** per-platform wheels, per-target NIF downloads, per-ABI
+  `jniLibs` (split by the Play Store), an XCFramework (Apple's per-architecture slices).
+- **NuGet and the OCI bundles:** the publishing host's libraries (Linux x86_64) under
+  `native/<platform>/`; the consumer points the generated loader at them (Go: `CGO_LDFLAGS=-L…`;
+  Dart: `DynamicLibrary.open`; Haskell: link `libmqtt_*.a`).
 
 ### Kotlin
 
@@ -75,8 +83,9 @@ Ruby bindings. See [`ruby/README.md`](ruby/README.md).
 
 Node is a UniFFI target like the others (`uniffi-bindgen-node-js`): one npm package,
 `stem-mqtt` on npmjs.org (`@<owner>/stem-mqtt-node` on GitHub Packages / Gitea), with two entry points —
-`/client` and `/broker` — each a generated ESM package sharing one `runtime/`, with native libraries under
-`prebuilds/<platform>-<arch>/`. (It replaces the hand-written napi-rs client addon.)
+`/client` and `/broker` — each a generated ESM package sharing one `runtime/`. The native libraries are in
+one package per platform (`stem-mqtt-<platform>-<arch>[-gnu]`), optional dependencies npm installs only
+where they match. (It replaces the hand-written napi-rs client addon.)
 
 ## Docker
 

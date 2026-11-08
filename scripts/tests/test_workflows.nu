@@ -87,14 +87,31 @@ def "test workflows: workspace tests exclude the nif" [] {
     }
 }
 
-# Ruby gems are built after the release (the release attaches every artifact
-# that exists when it runs) and cover exactly the platforms ruby_gem.nu maps.
-def "test workflows: ruby gems follow the release and cover every platform" [] {
+# The per-platform native libraries are built after the release (the release attaches every
+# artifact that exists when it runs), for every target ruby_gem.nu and native_libs.nu map,
+# and for every UniFFI release a per-platform package (Ruby, npm, Maven) is built against.
+def "test workflows: native libraries follow the release and cover every platform" [] {
     use ../ci/ruby_gem.nu [PLATFORMS]
+    use ../ci/native_libs.nu [TARGETS]
+    use ../bindings/spec.nu [spec-for]
     let gh = (open (root | path join .github workflows release.yml)).jobs
-    assert ("release" in $gh.build-ruby-libs.needs) "ruby artifacts would be attached to the release"
-    assert ("build-ruby-libs" in $gh.publish-ruby.needs)
-    assert equal ($gh.build-ruby-libs.strategy.matrix.include | get target | sort) ($PLATFORMS | columns | sort)
+    let job = $gh.build-native-libs
+    assert ("release" in $job.needs) "native library artifacts would be attached to the release"
+    assert equal ($job.strategy.matrix.target | sort) ($PLATFORMS | columns | sort)
+    assert equal ($job.strategy.matrix.target | sort) ($TARGETS | columns | sort)
+    assert equal ($job.strategy.matrix.include | get target | sort) ($TARGETS | columns | sort)
+    let needed = ([ruby java node] | each { |l| (spec-for $l).uniffi } | uniq | sort)
+    assert equal ($job.strategy.matrix.uniffi | sort) $needed
+    for consumer in [publish-ruby publish-github-packages publish-public] {
+        assert ("build-native-libs" in ($gh | get $consumer).needs) $"($consumer) runs before the libraries exist"
+    }
+}
+
+# Ruby gems are built from the workspace UniFFI libraries.
+def "test workflows: ruby gems use the workspace libraries" [] {
+    let steps = (open (root | path join .github workflows release.yml)).jobs.publish-ruby.steps
+    assert ($steps | any { |s| ($s.with?.pattern? | default "") == "native-workspace-*" })
+    assert ($steps | any { |s| ($s.run? | default "") | str contains "native-libs/workspace" })
 }
 
 # The stem_mqtt Hex package downloads its NIFs from the GitHub release, so only

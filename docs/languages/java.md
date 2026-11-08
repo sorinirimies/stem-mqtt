@@ -6,9 +6,15 @@ Read the [shared concepts](README.md) first for the option records and semantics
 
 ## Install
 
+The main jar carries the Java code; the native libraries come in one jar per platform, the
+classifier: `linux-x86_64`, `linux-aarch64`, `macos-x86_64`, `macos-aarch64` or `windows-x86_64`.
+Depend on the main jar and on the classifier of each platform you run on, so an application
+carries no other platform's libraries.
+
 ```kotlin
-// Gradle
-implementation("io.github.sorinirimies.stemmqtt:stem-mqtt-java:<version>")      // Maven Central
+// Gradle (Maven Central)
+implementation("io.github.sorinirimies.stemmqtt:stem-mqtt-java:<version>")
+runtimeOnly("io.github.sorinirimies.stemmqtt:stem-mqtt-java:<version>:linux-x86_64")
 ```
 
 ```xml
@@ -17,6 +23,13 @@ implementation("io.github.sorinirimies.stemmqtt:stem-mqtt-java:<version>")      
   <groupId>io.github.sorinirimies.stemmqtt</groupId>
   <artifactId>stem-mqtt-java</artifactId>
   <version>VERSION</version>
+</dependency>
+<dependency>
+  <groupId>io.github.sorinirimies.stemmqtt</groupId>
+  <artifactId>stem-mqtt-java</artifactId>
+  <version>VERSION</version>
+  <classifier>linux-x86_64</classifier>
+  <scope>runtime</scope>
 </dependency>
 ```
 
@@ -29,9 +42,8 @@ GitHub Packages and Gitea's Maven registry publish the same artifact under the g
   with `--release 22`.
 - Run with `--enable-native-access=ALL-UNNAMED` (or name your module) — without it the JVM warns or,
   on newer JDKs, refuses native access.
-- The jar bundles the native libraries for its publishing host (Linux x86_64 today). They are extracted
-  to a temp directory on first use (`io.github.stemmqtt.NativeLoader`), so no `java.library.path` is
-  needed. For your own build, set `-Djava.library.path=<dir>` or
+- The platform jar's libraries are extracted to a temp directory on first use
+  (`io.github.stemmqtt.NativeLoader`), so no `java.library.path` is needed. For your own build, set `-Djava.library.path=<dir>` or
   `-Duniffi.component.mqtt_client.libraryOverride=/path/libmqtt_client.so` (same for `mqtt_broker`).
 
 ## Quick start
@@ -152,7 +164,7 @@ BrokerTlsConfig brokerTls = new BrokerTlsConfig((short) 8883, certPem, keyPem, n
 
 ```sh
 nu scripts/install_bindgens.nu java
-nu scripts/publish_packages.nu stage java          # dist/java: sources + native-resources + build.gradle.kts
+nu scripts/publish_packages.nu stage java          # dist/java: sources + native-resources + build.gradle.kts (one classifier jar per platform)
 cd dist/java && JAVA_HOME=<jdk22+> gradle build
 ```
 
@@ -161,8 +173,9 @@ The end-to-end test is [`tests/bindings/java/Smoke.java`](../../tests/bindings/j
 ## Troubleshooting
 
 - **`UnsupportedClassVersionError` / `release version 22 not supported`** — you need JDK 22+.
-- **`UnsatisfiedLinkError: no mqtt_client in java.library.path`** — the jar has no native library for
-  your OS/arch (see Requirements); point `java.library.path` at your own build.
+- **`UnsatisfiedLinkError: no mqtt_client in java.library.path`** — the classifier jar of your OS/arch is
+  missing from the runtime classpath (see Install), or there is none for it: point `java.library.path`
+  at your own build.
 - **"native access" warnings** — pass `--enable-native-access=ALL-UNNAMED`.
 - **`incompatible types: int cannot be converted to short`** — cast ports and keep-alive: `(short) 1883`.
 - **The JVM doesn't exit** — call `System.exit(0)` as above.

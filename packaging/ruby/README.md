@@ -8,8 +8,8 @@ Each gem is built **per platform** and carries only that platform's native libra
 picks the one for the machine. The generated module's `ffi_lib 'mqtt_client'` is rewritten to load
 the library bundled next to it.
 
-- Built and pushed by `build-ruby-libs` + `publish-ruby` in `.github/workflows/release.yml`
-  (`RUBY_GEM_TOKEN`), after the release so the gems are not release assets.
+- Built from the libraries of `build-native-libs` and pushed by `publish-ruby` in
+  `.github/workflows/release.yml` (`RUBY_GEM_TOKEN`), after the release so they are not release assets.
 - `scripts/ci/ruby_gem.nu` builds (`build`, `release`) and pushes (`publish`, skipping versions
   rubygems.org already has).
 - `just test-bindings ruby` builds both gems for this machine, installs them into a scratch gem home

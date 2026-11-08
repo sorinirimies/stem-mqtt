@@ -670,63 +670,49 @@ jobs:
   # ── 8c. Ruby gems: one per crate per platform, each with only its own library ──
   # After the release on purpose: the release job attaches every artifact that
   # exists when it runs, and the gems are not release assets.
-  build-ruby-libs:
-    name: Ruby native libraries — ${{ matrix.target }}
+  # Both native libraries for every target, once per UniFFI release a packaged binding needs
+  # (the workspace's, and the 0.31 the Node generator is pinned to). Ruby, npm and Maven build
+  # one package per platform from these. After `release`: its artifacts are not release assets.
+  build-native-libs:
+    name: Native libraries — ${{ matrix.uniffi }} / ${{ matrix.target }}
     needs: [validate, release]
     runs-on: ${{ matrix.runner }}
-    env:
-      HAS_TOKEN: ${{ secrets.RUBY_GEM_TOKEN != '' }}
     strategy:
       fail-fast: false
       matrix:
+        uniffi: [workspace, "0.31.0"]
+        target: [x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu, x86_64-apple-darwin, aarch64-apple-darwin, x86_64-pc-windows-msvc]
         include:
-          - { runner: ubuntu-latest, target: x86_64-unknown-linux-gnu, cross: false }
-          - { runner: ubuntu-latest, target: aarch64-unknown-linux-gnu, cross: true }
-          - { runner: macos-latest, target: x86_64-apple-darwin, cross: false }
-          - { runner: macos-latest, target: aarch64-apple-darwin, cross: false }
-          - { runner: windows-latest, target: x86_64-pc-windows-msvc, cross: false }
+          - { target: x86_64-unknown-linux-gnu, runner: ubuntu-latest }
+          - { target: aarch64-unknown-linux-gnu, runner: ubuntu-24.04-arm }
+          - { target: x86_64-apple-darwin, runner: macos-latest }
+          - { target: aarch64-apple-darwin, runner: macos-latest }
+          - { target: x86_64-pc-windows-msvc, runner: windows-latest }
     steps:
-      - name: Skip (no token)
-        if: env.HAS_TOKEN != 'true'
-        run: echo "⏭️  RUBY_GEM_TOKEN not set — skipping."
       - uses: actions/checkout@v7
-        if: env.HAS_TOKEN == 'true'
         with:
           ref: ${{ needs.validate.outputs.ref }}
       - uses: dtolnay/rust-toolchain@stable
-        if: env.HAS_TOKEN == 'true'
         with:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
-        if: env.HAS_TOKEN == 'true'
         with:
-          key: ruby-${{ matrix.target }}
-      - name: Install cross
-        if: env.HAS_TOKEN == 'true' && matrix.cross
-        run: cargo install cross --git https://github.com/cross-rs/cross
+          key: native-${{ matrix.uniffi }}-${{ matrix.target }}
+      - uses: hustcer/setup-nu@v3
+        with:
+          version: "0.116.1"
       - name: Build both libraries
-        if: env.HAS_TOKEN == 'true'
-        shell: bash
-        run: |
-          tool=cargo; [ "${{ matrix.cross }}" = "true" ] && tool=cross
-          for p in stem-mqtt-client stem-mqtt-broker; do
-            $tool rustc --release -p $p --lib --crate-type cdylib --target ${{ matrix.target }}
-          done
-          mkdir -p ruby-libs/${{ matrix.target }}
-          for f in libmqtt_client.so libmqtt_broker.so libmqtt_client.dylib libmqtt_broker.dylib mqtt_client.dll mqtt_broker.dll; do
-            [ -f "target/${{ matrix.target }}/release/$f" ] && cp "target/${{ matrix.target }}/release/$f" ruby-libs/${{ matrix.target }}/
-          done
-          ls -la ruby-libs/${{ matrix.target }}
+        run: nu scripts/ci/native_libs.nu build ${{ matrix.uniffi }} ${{ matrix.target }} native-libs/${{ matrix.uniffi }}
       - uses: actions/upload-artifact@v7
-        if: env.HAS_TOKEN == 'true'
         with:
-          name: ruby-libs-${{ matrix.target }}
-          path: ruby-libs/
+          name: native-${{ matrix.uniffi }}-${{ matrix.target }}
+          path: native-libs/
+          if-no-files-found: error
           retention-days: 1
 
   publish-ruby:
     name: Publish Ruby gems
-    needs: [validate, build-ruby-libs]
+    needs: [validate, build-native-libs]
     runs-on: ubuntu-latest
     env:
       HAS_TOKEN: ${{ secrets.RUBY_GEM_TOKEN != '' }}
@@ -760,12 +746,12 @@ jobs:
       - uses: actions/download-artifact@v8
         if: env.HAS_TOKEN == 'true'
         with:
-          pattern: ruby-libs-*
-          path: ruby-libs/
+          pattern: native-workspace-*
+          path: native-libs/
           merge-multiple: true
       - name: Build the gems (Ruby code generated once; it is the same on every platform)
         if: env.HAS_TOKEN == 'true'
-        run: nu scripts/ci/ruby_gem.nu release ${{ needs.validate.outputs.version }} ruby-libs gems
+        run: nu scripts/ci/ruby_gem.nu release ${{ needs.validate.outputs.version }} native-libs/workspace gems
       - name: Push the gems
         if: env.HAS_TOKEN == 'true'
         env:
@@ -952,7 +938,7 @@ jobs:
 
   publish-github-packages:
     name: Publish ${{ matrix.language }} to GitHub Packages
-    needs: [validate, stage-packages, release]
+    needs: [validate, stage-packages, release, build-native-libs]
     runs-on: ubuntu-latest
     continue-on-error: ${{ matrix.experimental }}
     strategy:
@@ -992,6 +978,12 @@ jobs:
           merge-multiple: true
       - name: Place staged package under dist/
         run: mkdir -p dist && mv staged dist/${{ matrix.language }}
+      # Every platform's libraries: npm and Maven ship one package per platform.
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: native-*
+          path: native-libs/
+          merge-multiple: true
 
       - uses: actions/setup-node@v7
         if: matrix.language == 'node'
@@ -1026,6 +1018,7 @@ jobs:
           nu scripts/publish_packages.nu publish ${{ matrix.language }}
           ${{ needs.validate.outputs.version }}
           --owner ${{ github.repository_owner }}
+          --natives native-libs
 
   # ── 11. Build Swift client+broker package archive ─────────────────────────────
   build-swift:
@@ -1070,7 +1063,7 @@ jobs:
   # trusts that CI.
   publish-public:
     name: Publish ${{ matrix.language }} (public registry)
-    needs: [validate, release]
+    needs: [validate, release, build-native-libs]
     runs-on: ubuntu-latest
     timeout-minutes: 90
     strategy:
@@ -1160,6 +1153,12 @@ jobs:
       - name: Stage ${{ matrix.language }}
         if: env.HAS_TOKEN == 'true'
         run: nu scripts/publish_packages.nu stage ${{ matrix.language }}
+      - uses: actions/download-artifact@v8
+        if: env.HAS_TOKEN == 'true'
+        with:
+          pattern: native-*
+          path: native-libs/
+          merge-multiple: true
 
       - name: Publish ${{ matrix.language }}
         if: env.HAS_TOKEN == 'true'
@@ -1178,3 +1177,4 @@ jobs:
           ${{ needs.validate.outputs.version }}
           --target public
           --owner ${{ env.PUBLIC_OWNER }}
+          --natives native-libs

@@ -145,13 +145,27 @@ def "test public: the Dart package renames the native asset id away from the gen
     rm -rf $gen $root
 }
 
-def "test public: the java package check runs the smoke test against the packaged jar alone" [] {
+def "test public: the java package check runs the smoke test against the packaged jars alone" [] {
     let plan = (build-plan java "1.0.0" "dist/java")
     assert equal ($plan | get cmd) [gradle javac java]
     let run = ($plan | last)
     assert ($run.args | any { |a| $a | str contains "stem-mqtt-java-1.0.0.jar" })
+    # the main jar has no native library: the host's classifier jar must be on the classpath
+    assert ($run.args | any { |a| $a | str contains $"stem-mqtt-java-1.0.0-(platform-id).jar" })
     # no -Djava.library.path: the jar must find its own native library
     assert (not ($run.args | any { |a| $a | str contains "java.library.path" }))
+}
+
+def "test public: npm platform packages publish before the main package" [] {
+    let stage = (mktemp --directory)
+    mkdir ($stage | path join "platforms" "linux-x64-gnu") ($stage | path join "platforms" "darwin-arm64")
+    let plan = (publish-plan node "1.0.0" $stage "acme" "stem-mqtt" "public")
+    assert equal ($plan | get cwd) [($stage | path join "platforms" "darwin-arm64") ($stage | path join "platforms" "linux-x64-gnu") $stage]
+    assert ($plan | all { |s| "public" in $s.args })
+    let github = (publish-plan node "1.0.0" $stage "acme")
+    assert equal ($github | length) 3
+    assert ($github | all { |s| "restricted" in $s.args })
+    rm -rf $stage
 }
 
 def "test public: npm prebuild targets match what the generated Node loader resolves" [] {

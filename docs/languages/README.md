@@ -142,7 +142,10 @@ Every package contains or compiles the same Rust core, which is why a Rust toolc
 
 | Language | Native library |
 | --- | --- |
-| Python (wheel), Node, Kotlin, Java, C# | bundled in the package — only for the platforms the release built (Linux x86_64 today; Android AAR has four ABIs) |
+| Node, Java, Ruby | one package per platform (npm optional dependency, Maven classifier jar, platform gem): Linux x86_64/aarch64, macOS x86_64/arm64, Windows x86_64 |
+| Python | one wheel per platform the release built |
+| Kotlin, C# | bundled in the package for the platforms the release built (Linux x86_64 for the JVM jar and NuGet; Android AAR has four ABIs) |
+| Elixir / Erlang | the precompiled NIF for your target, downloaded at compile time |
 | Swift | XCFrameworks inside the zip (macOS, iOS, simulator) |
 | Dart, Haskell | built from the bundled Rust sources at install time (needs `cargo`) |
 | Go | installed separately (release assets or `cargo build --release`) and found with `CGO_LDFLAGS` |

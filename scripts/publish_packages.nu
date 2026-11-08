@@ -39,6 +39,8 @@ use bindings/source.nu *
 use bindings/hackage.nu *
 use bindings/dart_package.nu *
 use bindings/node_package.nu *
+use bindings/npm_platforms.nu [platform-manifest main-manifest patch-node-loader]
+use ci/native_libs.nu [natives-tree]
 
 def default-stage [language: string]: nothing -> string {
     $"dist/(canonical-language $language)"
@@ -149,7 +151,17 @@ tasks.withType<JavaCompile> { options.release.set(22) }
 java { withSourcesJar(); withJavadocJar() }   // Maven Central requires both
 // Generated doc comments (copied from the Rust docs) aren't valid HTML; don't let doclint fail the jar.
 tasks.withType<Javadoc> { (options as StandardJavadocDocletOptions).addStringOption("Xdoclint:none", "-quiet") }
-sourceSets { main { java.srcDir("sources"); java.srcDir("loader"); resources.srcDir("native-resources") } }
+sourceSets { main { java.srcDir("sources"); java.srcDir("loader") } }
+// One jar per platform (classifier = platform id, e.g. linux-x86_64): an application depends on the
+// main jar plus the classifier of the platform it runs on, and carries no other platform's libraries.
+val nativeJars = (file("native-resources").listFiles()?.filter { it.isDirectory }?.map { it.name }?.sorted() ?: emptyList())
+    .map { platform ->
+        tasks.register<Jar>("nativeJar-$platform") {
+            archiveClassifier.set(platform)
+            from(file("native-resources/$platform")) { into(platform) }
+        }
+    }
+tasks.named("assemble") { dependsOn(nativeJars) }
 // GitHub Packages / Gitea: com.github.sorinirimies.stemmqtt. Maven Central needs a verified
 // namespace (io.github.<user>.…), passed as -PgroupId by scripts/publish_maven_central.nu.
 group = (findProperty("groupId") as String?) ?: "com.github.sorinirimies.stemmqtt"
@@ -158,9 +170,10 @@ publishing {
         create<MavenPublication>("java") {
             artifactId = "stem-mqtt-java"
             from(components["java"])
+            nativeJars.forEach { artifact(it) }
             pom {
                 name.set("stem-mqtt Java bindings")
-                description.set("UniFFI-generated Java (FFM) bindings for the stem-mqtt MQTT client and broker; native libs bundled.")
+                description.set("UniFFI-generated Java (FFM) bindings for the stem-mqtt MQTT client and broker; native libraries in one classifier jar per platform.")
                 url.set("https://github.com/OWNER/stem-mqtt")
                 licenses { license { name.set("MIT"); url.set("https://opensource.org/licenses/MIT") } }
                 developers { developer { id.set("OWNER"); name.set("Sorin Irimies") } }
@@ -212,34 +225,45 @@ System.getenv("SIGNING_KEY")?.let { key ->
 
 # Registry-specific preparation that depends on the final version/owner:
 # retarget descriptors, lay native libraries out the way the registry expects.
-def prepare-package [language: string, version: string, stage: string, owner: string, npm_name: string = ""] {
+def prepare-package [language: string, version: string, stage: string, owner: string, npm_name: string = "", natives: string = ""] {
     let spec = (spec-for $language)
     let name = (package-name $language)
+    # Release CI builds every platform's libraries (scripts/ci/native_libs.nu) under
+    # <natives>/<uniffi>/<target>/; npm and Maven package them one platform per package,
+    # replacing the host's that stage put there.
+    if $natives != "" and $spec.registry in ["npm" "maven"] {
+        natives-tree ($natives | path expand | path join $spec.uniffi) ($stage | path join "native")
+    }
     # Registry pages show a README: use the language guide, with its repo-relative links made absolute.
     if $spec.registry in ["npm" "nuget"] {
         registry-readme $language $owner | save --force ($stage | path join "README.md")
     }
     if $spec.registry == "npm" {
         let package_name = if $npm_name == "" { $"@($owner)/($name)" } else { $npm_name }
-        # The generated loader (--bundled-prebuilds) resolves prebuilds/<platform>-<arch>[-libc]/lib<crate>.<ext>
-        # inside each component, so every platform's library can sit side by side.
+        let publish_config = (open ($stage | path join "package.json") | get publishConfig)
+        # The main package carries the JavaScript; each platform's libraries get their own
+        # package under platforms/<target>/ (see bindings/npm_platforms.nu).
         let platforms = (ls ($stage | path join "native") | where type == dir | get name | path basename)
+        let targets = ($platforms | each { |p| node-prebuild-target $p })
+        rm -rf ($stage | path join "platforms")
         for platform in $platforms {
             let target = (node-prebuild-target $platform)
+            let dir = ($stage | path join "platforms" $target)
             for pair in [{ part: "client", lib: "mqtt_client" } { part: "broker", lib: "mqtt_broker" }] {
-                let dest = ($stage | path join $pair.part "prebuilds" $target)
-                mkdir $dest
-                cp ...(glob ($stage | path join "native" $platform $"*($pair.lib)*")) $dest
+                mkdir ($dir | path join $pair.part)
+                cp ...(glob ($stage | path join "native" $platform $"*($pair.lib)*")) ($dir | path join $pair.part)
+            }
+            platform-manifest $package_name $target $version $owner $publish_config | to json --indent 2 | save --force ($dir | path join "package.json")
+            cp ($env.PWD | path join "LICENSE") $dir
+        }
+        for part in [client broker] {
+            rm -rf ($stage | path join $part "prebuilds")
+            for file in (glob ($stage | path join $part "*-ffi.js")) {
+                patch-node-loader (open --raw $file) $"($package_name)-" $part | save --force $file
             }
         }
-        # Only claim the platforms that actually ship a library, so `npm install` elsewhere fails
-        # up front (EBADPLATFORM) instead of at first use.
-        let os_cpu = ($platforms | each { |p| npm-os-cpu $p })
-        let manifest = (open ($stage | path join "package.json")
-            | upsert name $package_name | upsert version $version
-            | upsert os ($os_cpu | get os | uniq)
-            | upsert cpu ($os_cpu | get cpu | uniq))
-        $manifest | to json --indent 2 | str replace --all "OWNER" $owner | save --force ($stage | path join "package.json")
+        main-manifest (open ($stage | path join "package.json")) $package_name $targets $version
+        | to json --indent 2 | str replace --all "OWNER" $owner | save --force ($stage | path join "package.json")
         cp ($env.PWD | path join "LICENSE") $stage
     }
     if $spec.registry == "nuget" {
@@ -324,6 +348,7 @@ def "main publish" [
     --target: string = "github"   # github | gitea | public
     --base-url: string = ""       # Gitea instance, e.g. http://192.168.1.44:3000
     --npm-name: string = ""       # npm package name; default stem-mqtt on npmjs.org, @<owner>/stem-mqtt-node elsewhere
+    --natives: string = ""        # <uniffi>/<rust-target>/ tree of every platform's libraries (scripts/ci/native_libs.nu)
     --dry-run
 ] {
     let language = (canonical-language $language)
@@ -335,7 +360,14 @@ def "main publish" [
     let name = (package-name $language)
 
     let npm_name = if $npm_name != "" { $npm_name } else if $target == "public" { "stem-mqtt" } else { "" }
-    prepare-package $language $version $stage $owner $npm_name
+    # Before prepare-package: the platform packages take the main package's publishConfig.
+    if $target == "public" and $spec.registry == "npm" {
+        let ep = (registry-endpoints $target $owner $base_url $repo)
+        open ($stage | path join "package.json")
+        | upsert publishConfig { registry: $ep.npm, access: "public" }
+        | save --force ($stage | path join "package.json")
+    }
+    prepare-package $language $version $stage $owner $npm_name $natives
     # Releases can be re-run (and GitHub and Gitea both release): publishing an npm version
     # that already exists would fail, so treat "already there" as done.
     if $target == "public" and $spec.registry == "npm" {
@@ -343,14 +375,6 @@ def "main publish" [
         if $published.exit_code == 0 and ($published.stdout | str trim) == $version {
             print $"($npm_name)@($version) is already on npm — nothing to publish."
             return
-        }
-    }
-    if $target == "public" {
-        let ep = (registry-endpoints $target $owner $base_url $repo)
-        if $spec.registry == "npm" {
-            open ($stage | path join "package.json")
-            | upsert publishConfig { registry: $ep.npm, access: "public" }
-            | save --force ($stage | path join "package.json")
         }
     }
 
@@ -376,11 +400,11 @@ def "main publish" [
 
 # Prove a language's package builds (compiles / packs) without publishing it.
 # Stages first if needed. Used by CI on every push.
-def "main verify" [language: string, --version: string = "0.0.0-ci", --out: string] {
+def "main verify" [language: string, --version: string = "0.0.0-ci", --out: string, --natives: string = ""] {
     let language = (canonical-language $language)
     let stage = ($out | default (default-stage $language) | path expand)
     if not ($stage | path exists) { main stage $language --out $stage }
-    prepare-package $language $version $stage "local"
+    prepare-package $language $version $stage "local" "" $natives
     for step in (build-plan $language $version $stage) {
         print $"==> ($step.note): ($step.cmd) ($step.args | str join ' ')"
         cd $step.cwd

@@ -307,10 +307,12 @@ export def publish-plan [
     let ep = (registry-endpoints $target $owner $base_url $repo)
     if $target == "public" { return (public-plan $spec $version $stage $owner $ep) }
     match $spec.registry {
-        "npm" => [
-            { cwd: $stage, cmd: "npm", note: $"publish to ($ep.npm)"
-              args: ([publish "--registry" $ep.npm] | append (if $target == "github" { ["--access" "restricted"] } else { [] })) }
-        ]
+        "npm" => {
+            let access = if $target == "github" { ["--access" "restricted"] } else { [] }
+            npm-platform-steps $stage $ep.npm $access
+            | append { cwd: $stage, cmd: "npm", note: $"publish to ($ep.npm)"
+                       args: ([publish "--registry" $ep.npm] | append $access) }
+        }
         "nuget" => [
             { cwd: $stage, cmd: "dotnet", note: "pack the NuGet package"
               args: [pack "StemMqtt.csproj" "-c" Release $"-p:Version=($version)" $"-p:PackageId=StemMqtt" "-o" "nupkg"] }
@@ -334,6 +336,17 @@ export def publish-plan [
     }
 }
 
+# The platform packages (platforms/<target>/ of a staged npm package) publish before the main
+# package, which depends on them: a main package must never point at missing ones.
+def npm-platform-steps [stage: string, registry: string, access: list<string>]: nothing -> list<record> {
+    let dir = ($stage | path join "platforms")
+    if not ($dir | path exists) { return [] }
+    ls $dir | where type == dir | get name | sort | each { |p|
+        { cwd: $p, cmd: "npm", note: $"publish ($p | path basename) to ($registry)"
+          args: ([publish "--registry" $registry] | append $access) }
+    }
+}
+
 # The Maven Central group: a verified `io.github.<user>` namespace (the GitHub registries use
 # `com.github.…`, which Central does not accept because it can't verify that domain).
 export def central-group [owner: string]: nothing -> string {
@@ -345,10 +358,11 @@ export def central-group [owner: string]: nothing -> string {
 def public-plan [spec: record, version: string, stage: string, owner: string, ep: record]: nothing -> list<record> {
     let name = (package-name $spec.language)
     match $spec.language {
-        "node" => [
-            { cwd: $stage, cmd: "npm", note: $"publish to ($ep.npm) \(npmjs.org)"
-              args: [publish "--registry" $ep.npm "--access" "public"] }
-        ]
+        "node" => {
+            npm-platform-steps $stage $ep.npm ["--access" "public"]
+            | append { cwd: $stage, cmd: "npm", note: $"publish to ($ep.npm) \(npmjs.org)"
+                       args: [publish "--registry" $ep.npm "--access" "public"] }
+        }
         "csharp" => [
             { cwd: $stage, cmd: "dotnet", note: "pack the NuGet package"
               args: [pack "StemMqtt.csproj" "-c" Release $"-p:Version=($version)" $"-p:PackageId=StemMqtt" "-o" "nupkg"] }
@@ -406,16 +420,17 @@ export def build-plan [language: string, version: string, stage: string]: nothin
         "nuget" => [{ cwd: $stage, cmd: "dotnet", note: "compile + pack the NuGet package"
                       args: [pack "StemMqtt.csproj" "-c" Release $"-p:Version=($version)" "-o" "nupkg"] }]
         "maven" => {
-            # Run the smoke test against the *packaged jar alone* (no java.library.path): that is
-            # what a consumer does, and it proves the bundled native library is found.
+            # Run the smoke test against the *packaged jars alone* (no java.library.path): the main jar
+            # plus this host's classifier jar is what a consumer has, and it proves the library is found.
             let jar = $"build/libs/stem-mqtt-java-($version).jar"
+            let native_jar = $"build/libs/stem-mqtt-java-($version)-(platform-id).jar"
             let sep = if $nu.os-info.name == "windows" { ";" } else { ":" }
             [
                 { cwd: $stage, cmd: "gradle", note: "compile + assemble the jar", args: [build $"-Pversion=($version)"] }
                 { cwd: $stage, cmd: "javac", note: "compile the smoke test against the jar"
                   args: ["--release" "22" "-cp" $jar "-d" "build/smoke" ($env.PWD | path join "tests" "bindings" "java" "Smoke.java")] }
-                { cwd: $stage, cmd: "java", note: "run the smoke test with only the packaged jar on the classpath"
-                  args: ["--enable-native-access=ALL-UNNAMED" "-cp" $"($jar)($sep)build/smoke" "Smoke"] }
+                { cwd: $stage, cmd: "java", note: "run the smoke test with only the packaged jars on the classpath"
+                  args: ["--enable-native-access=ALL-UNNAMED" "-cp" $"($jar)($sep)($native_jar)($sep)build/smoke" "Smoke"] }
             ]
         }
         "oci" => [{ cwd: $stage, cmd: "tar", note: "assemble the OCI bundle"

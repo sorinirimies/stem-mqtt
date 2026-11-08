@@ -20,27 +20,7 @@
 # ──────────────────────────────────────────────────────────────────────────────
 
 use bindings/spec.nu *
-
-# Create (or refresh) target/uniffi-<version>/ — a workspace containing only
-# the two library crates with `uniffi` pinned to exactly `version` — and
-# return its absolute path.
-def prepare-scratch-workspace [version: string]: nothing -> string {
-    let root = ($env.PWD | path join "target" $"uniffi-($version)")
-    mkdir ($root | path join "crates")
-    for crate in (ls crates | where name =~ 'mqtt-(client|broker)$' | get name) {
-        let dest = ($root | path join $crate)
-        rm -rf $dest
-        cp -r $crate $dest
-    }
-    pin-workspace-toml (open --raw Cargo.toml) $version | save --force ($root | path join "Cargo.toml")
-    # Reuse the scratch lockfile between runs so re-resolution stays offline.
-    if not ($root | path join "Cargo.lock" | path exists) {
-        cp Cargo.lock ($root | path join "Cargo.lock")
-    }
-    cd $root
-    ^cargo update -p uniffi --precise $version
-    $root
-}
+use bindings/scratch.nu [library-root]
 
 # Find a generator executable on PATH or under $BINDGEN_ROOT/bin.
 def find-tool [tool: string] {
@@ -75,7 +55,7 @@ def main [
 
     # Build the library in the workspace the generator is compatible with.
     let tool = if $spec.kind == "external" { find-tool $spec.tool } else { "" }
-    let root = if $spec.uniffi == "workspace" { $env.PWD } else { prepare-scratch-workspace $spec.uniffi }
+    let root = (library-root $spec.uniffi)
 
     print $"==> building ($crate) \(release, cdylib + staticlib\) in ($root)"
     cd $root
