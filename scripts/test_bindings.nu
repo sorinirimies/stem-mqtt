@@ -130,6 +130,10 @@ def run-ruby [spec: record, work: string] {
         nu (repo | path join scripts ci ruby_gem.nu) build $crate $version $host (native-lib $spec $crate) $generated $gems
     }
     let system_gems = (^gem env gempath | str trim)
+    # The gems' one dependency comes from rubygems.org, as for a user; the gems
+    # under test only from the local files.
+    let ffi = (do { ^gem install ffi --version "~> 1.15" --no-document --install-dir $home } | complete)
+    if $ffi.exit_code != 0 { return $ffi }
     let installed = (do { ^gem install --local --ignore-dependencies --no-document --install-dir $home ...(glob ($gems | path join "*.gem")) } | complete)
     if $installed.exit_code != 0 { return $installed }
     let smoke = (smoke-src ruby | path join "smoke.rb")
