@@ -348,6 +348,32 @@ jobs:
         working-directory: packaging/kotlin
         run: gradle test --no-daemon
 
+  # ── Elixir/Erlang: the Rustler NIF (crates/mqtt-beam) and the stem_mqtt Hex package.
+  test-elixir:
+    name: runtime-elixir
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install Nushell
+        run: |
+          V=0.116.1
+          for attempt in 1 2 3 4 5; do
+            curl -fsSL --retry 3 --retry-all-errors -o /tmp/nu.tgz https://github.com/nushell/nushell/releases/download/$V/nu-$V-x86_64-unknown-linux-gnu.tar.gz && tar -xzf /tmp/nu.tgz -C /tmp && break
+            echo "nu download failed (attempt $attempt); retrying in 15s"; sleep 15
+          done
+          test -x /tmp/nu-$V-x86_64-unknown-linux-gnu/nu
+          sudo install -m 0755 /tmp/nu-$V-x86_64-unknown-linux-gnu/nu /usr/local/bin/nu || install -m 0755 /tmp/nu-$V-x86_64-unknown-linux-gnu/nu "$HOME/.cargo/bin/nu"
+          nu --version
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "27"
+          elixir-version: "1.18"
+      - name: Build the NIF from source and run ExUnit (client, broker, Erlang API)
+        run: nu scripts/ci/elixir.nu test
+
   # ── 8e. Do the per-language packages build? (no upload, no credentials) ──────
   # Stages each language and runs its registry's build step: dotnet pack
   # (NuGet), gradle build (Maven), npm pack, or assembling the OCI bundle.
@@ -486,4 +512,4 @@ jobs:
           toolchain: "1.90"
       - uses: Swatinem/rust-cache@v2
       - name: cargo check
-        run: cargo check --workspace --exclude stem-mqtt-dashboard --locked
+        run: cargo check --workspace --exclude stem-mqtt-dashboard --exclude stem_mqtt_nif --locked

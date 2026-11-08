@@ -2,6 +2,7 @@
 members = [
     "crates/mqtt-client",
     "crates/mqtt-broker",
+    "crates/mqtt-beam",
     "demo/dashboard",
 ]
 resolver = "3"
@@ -36,6 +37,9 @@ rcgen          = { version = "0.14", default-features = false, features = ["ring
 # UniFFI language bindings
 uniffi     = { version = "0.32", features = ["tokio"] }
 
+# Erlang/Elixir NIF (crates/mqtt-beam)
+rustler    = "0.39"
+
 # Error handling / logging
 thiserror  = "2"
 tracing    = "0.1"
@@ -47,6 +51,7 @@ clap       = { version = "4", features = ["derive"] }
 
 # Internal crates
 mqtt-client = { package = "stem-mqtt-client", path = "crates/mqtt-client", version = "0.5.0" }
+mqtt-broker = { package = "stem-mqtt-broker", path = "crates/mqtt-broker" }
 
 [profile.dev]
 opt-level = 0

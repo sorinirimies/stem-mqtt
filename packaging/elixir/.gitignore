@@ -1,0 +1,6 @@
+/_build/
+/deps/
+/priv/native/
+/doc/
+erl_crash.dump
+/checksum-*.exs

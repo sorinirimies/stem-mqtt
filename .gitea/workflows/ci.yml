@@ -419,6 +419,49 @@ jobs:
         working-directory: packaging/kotlin
         run: gradle test --no-daemon
 
+  # ── Elixir/Erlang: the Rustler NIF (crates/mqtt-beam) and the stem_mqtt Hex package.
+  test-elixir:
+    name: runtime-elixir
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      # Retried: static.rust-lang.org is intermittently unreachable from the runner,
+      # and the binding jobs all start at once. `minimal` skips rustfmt/clippy/docs
+      # (these jobs only compile), which also means far fewer downloads to fail.
+      - name: Install Rust stable
+        run: |
+          export PATH="$HOME/.cargo/bin:$PATH"
+          for attempt in 1 2 3 4 5; do
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+              | sh -s -- -y --default-toolchain stable --profile minimal && break
+            echo "rustup install failed (attempt $attempt); retrying in 20s"; sleep 20
+          done
+          command -v cargo >/dev/null || { echo "rustup could not be installed"; exit 1; }
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install Nushell
+        run: |
+          V=0.116.1
+          for attempt in 1 2 3 4 5; do
+            curl -fsSL --retry 3 --retry-all-errors -o /tmp/nu.tgz https://github.com/nushell/nushell/releases/download/$V/nu-$V-x86_64-unknown-linux-gnu.tar.gz && tar -xzf /tmp/nu.tgz -C /tmp && break
+            echo "nu download failed (attempt $attempt); retrying in 15s"; sleep 15
+          done
+          test -x /tmp/nu-$V-x86_64-unknown-linux-gnu/nu
+          sudo install -m 0755 /tmp/nu-$V-x86_64-unknown-linux-gnu/nu /usr/local/bin/nu || install -m 0755 /tmp/nu-$V-x86_64-unknown-linux-gnu/nu "$HOME/.cargo/bin/nu"
+          nu --version
+
+      # (retried once: the runner's network to the toolchain CDNs is flaky)
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "27"
+          elixir-version: "1.18"
+      - name: Build the NIF from source and run ExUnit (client, broker, Erlang API)
+        run: nu scripts/ci/elixir.nu test
+
   # ── 9. Do the per-language packages build? (no upload, no credentials) ───────
   # dotnet pack (NuGet), gradle build (Maven), npm pack, OCI bundle assembly.
   test-packaging:
@@ -620,4 +663,4 @@ jobs:
       - name: Cache Cargo dependencies
         uses: Swatinem/rust-cache@v2
       - name: cargo check
-        run: cargo check --workspace --exclude stem-mqtt-dashboard --locked
+        run: cargo check --workspace --exclude stem-mqtt-dashboard --exclude stem_mqtt_nif --locked

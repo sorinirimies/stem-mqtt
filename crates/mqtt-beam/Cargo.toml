@@ -1,0 +1,30 @@
+[package]
+name = "stem_mqtt_nif"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+# Rustler 0.39 needs 1.91; the NIF is not a library crate, so it is outside the 1.90 MSRV.
+rust-version = "1.91"
+description = "Erlang/Elixir NIF for stem-mqtt (shipped through the stem_mqtt Hex package)"
+publish = false
+
+[lib]
+name = "stem_mqtt_nif"
+crate-type = ["cdylib"]
+
+# The NIF API version: 2.15 loads on OTP 25 and later. Precompiled NIFs are
+# built with the default; must match `nif_versions` in packaging/elixir.
+[features]
+default = ["nif_version_2_15"]
+nif_version_2_15 = ["rustler/nif_version_2_15"]
+
+[dependencies]
+mqtt-client = { workspace = true }
+mqtt-broker = { workspace = true }
+rustler     = { workspace = true }
+tokio       = { workspace = true }
+
+[lints]
+workspace = true

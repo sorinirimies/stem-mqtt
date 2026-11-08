@@ -17,6 +17,7 @@ between them. This page holds what is common to all of them.
 | Swift | [swift.md](swift.md) | `StemMqttSwift-<version>.zip` | UniFFI (built in) | ✅ |
 | Dart | [dart.md](dart.md) | `stem_mqtt` (pub.dev) | uniffi-dart | ❌ pull-style |
 | Haskell | [haskell.md](haskell.md) | `stem-mqtt` (Hackage) | uniffi-bindgen-haskell | ❌ pull-style |
+| Elixir / Erlang | [elixir.md](elixir.md) | `stem_mqtt` (Hex) | Rustler NIF, by hand | messages to the owner |
 
 Ruby is not supported ([why](../../packaging/ruby/README.md)).
 

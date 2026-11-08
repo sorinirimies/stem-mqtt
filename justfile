@@ -183,6 +183,10 @@ install-bindgens *languages:
 bindings-third-party: (bindings-lang "go") (bindings-lang "csharp") (bindings-lang "java") (bindings-lang "dart") (bindings-lang "node") (bindings-lang "haskell")
     @echo "✅ Go, C#, Java, Dart, Node, Haskell bindings generated under bindings/"
 
+# Elixir/Erlang package (packaging/elixir): build the NIF from source, run ExUnit
+test-elixir:
+    nu scripts/ci/elixir.nu test
+
 # Runtime-test the generated bindings (real broker + clients through each language). `just test-bindings go java`
 test-bindings *languages:
     nu scripts/test_bindings.nu {{ languages }}
