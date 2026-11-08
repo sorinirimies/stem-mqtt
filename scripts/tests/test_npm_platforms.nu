@@ -29,7 +29,7 @@ def "test npm platforms: a platform package is restricted to its os, cpu and lib
 def "test npm platforms: the main package depends on every platform package, optionally" [] {
     let m = (main-manifest { name: "x", dependencies: { koffi: "^2" } } "@acme/pkg" ["win32-x64" "darwin-arm64" "linux-x64-gnu"] "2.0.0")
     assert equal $m.name "@acme/pkg"
-    assert equal $m.optionalDependencies { "@acme/pkg-darwin-arm64": "2.0.0", "@acme/pkg-linux-x64-gnu": "2.0.0", "@acme/pkg-win32-x64": "2.0.0" }
+    assert equal $m.optionalDependencies { "@acme/pkg-darwin-arm64": "2.0.0", "@acme/pkg-linux-x64-gnu": "2.0.0", "@acme/pkg-win32-x64-msvc": "2.0.0" }
     assert equal $m.os ["darwin" "linux" "win32"]
     assert equal $m.cpu ["arm64" "x64"]
     assert equal $m.dependencies.koffi "^2"
@@ -38,7 +38,9 @@ def "test npm platforms: the main package depends on every platform package, opt
 def "test npm platforms: the loader looks in the platform package first" [] {
     let out = (patch-node-loader $LOADER "stem-mqtt-" "broker")
     assert ($out starts-with 'import { createRequire as uniffiCreateRequire } from "node:module";')
-    assert ($out | str contains 'resolve(`stem-mqtt-${target}/package.json`)')
+    # The same names as platform-package-name: -msvc on Windows.
+    assert ($out | str contains 'const name = target.startsWith("win32-") ? `${target}-msvc` : target;')
+    assert ($out | str contains 'resolve(`stem-mqtt-${name}/package.json`)')
     assert ($out | str contains 'join(dirname(manifest), "broker", filename)')
     assert ($out | str contains 'libraryPath: uniffiPlatformLibrary(target, filename) ?? join(moduleDirectory, "prebuilds", target, filename),')
 }
@@ -48,12 +50,14 @@ def "test npm platforms: a changed loader is an error, not a package without a l
 }
 
 def "test npm platforms: platform package names keep the scope" [] {
-    assert equal (platform-package-name "@acme/stem-mqtt-node" "win32-x64") "@acme/stem-mqtt-node-win32-x64"
+    # Windows packages name their ABI (npmjs.org rejected stem-mqtt-win32-x64 as spam, v0.7.0).
+    assert equal (platform-package-name "@acme/stem-mqtt-node" "win32-x64") "@acme/stem-mqtt-node-win32-x64-msvc"
+    assert equal (platform-package-name "stem-mqtt" "linux-x64-gnu") "stem-mqtt-linux-x64-gnu"
 }
 
 def "test npm platforms: a platform package has a readme that points to the main package" [] {
     let readme = (platform-readme "stem-mqtt" "win32-x64" "o")
-    assert ($readme | str starts-with "# stem-mqtt-win32-x64\n")
+    assert ($readme | str starts-with "# stem-mqtt-win32-x64-msvc\n")
     assert ($readme | str contains "`npm install stem-mqtt`")
     assert ($readme | str contains "https://github.com/o/stem-mqtt")
     assert ("README.md" in (platform-manifest "stem-mqtt" "win32-x64" "1.0.0" "o" {}).files)

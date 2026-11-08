@@ -25,7 +25,7 @@ hand-written napi-rs addon `stem-mqtt-client`, which had no broker.
   (browsers can talk to the broker's WebSocket port with any MQTT.js client instead).
 - The native libraries come in one package per platform, installed automatically: `stem-mqtt` lists
   `stem-mqtt-linux-x64-gnu`, `stem-mqtt-linux-arm64-gnu`, `stem-mqtt-darwin-x64`, `stem-mqtt-darwin-arm64`
-  and `stem-mqtt-win32-x64` as optional dependencies, each restricted to its `os` / `cpu` (and glibc), so
+  and `stem-mqtt-win32-x64-msvc` as optional dependencies, each restricted to its `os` / `cpu` (and glibc), so
   npm installs only the one your machine needs. On any other platform `npm install` fails up front
   (`EBADPLATFORM`). With `--omit=optional` (or a lockfile made on another OS) the platform package is
   missing: install it explicitly, e.g. `npm install stem-mqtt-linux-x64-gnu`.

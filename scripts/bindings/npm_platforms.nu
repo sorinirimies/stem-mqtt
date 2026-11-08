@@ -8,9 +8,11 @@
 # just the one the machine needs.
 # ──────────────────────────────────────────────────────────────────────────────
 
-# The package carrying one platform's libraries.
+# The package carrying one platform's libraries: `<main>-<target>`, and on Windows
+# `<main>-<target>-msvc` (the ABI, as `-gnu` on Linux; npmjs.org's spam detection also
+# rejects the name stem-mqtt-win32-x64). The loader (patch-node-loader) does the same.
 export def platform-package-name [main: string, target: string]: nothing -> string {
-    $"($main)-($target)"
+    if ($target | str starts-with "win32-") { $"($main)-($target)-msvc" } else { $"($main)-($target)" }
 }
 
 # package.json of a platform package. `target` is `<os>-<cpu>[-<libc>]`.
@@ -77,10 +79,12 @@ export def patch-node-loader [source: string, prefix: string, part: string]: not
     let helper = ([
         'import { createRequire as uniffiCreateRequire } from "node:module";'
         ''
-        '// stem-mqtt: the native library ships in a per-platform package (an optional dependency).'
+        '// stem-mqtt: the native library ships in a per-platform package (an optional dependency),'
+        '// named <prefix><target>, with -msvc on Windows.'
         'function uniffiPlatformLibrary(target, filename) {'
+        '  const name = target.startsWith("win32-") ? `${target}-msvc` : target;'
         '  try {'
-        ('    const manifest = uniffiCreateRequire(import.meta.url).resolve(`' + $prefix + '${target}/package.json`);')
+        ('    const manifest = uniffiCreateRequire(import.meta.url).resolve(`' + $prefix + '${name}/package.json`);')
         ('    return join(dirname(manifest), "' + $part + '", filename);')
         '  } catch {'
         '    return null;'
