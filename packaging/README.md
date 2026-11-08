@@ -68,8 +68,8 @@ See [`python/README.md`](python/README.md).
 
 ### Ruby
 
-Not supported: UniFFI 0.29 has no official production Ruby backend. See
-[`ruby/README.md`](ruby/README.md).
+Per-platform gems `stem-mqtt-client` / `stem-mqtt-broker` on rubygems.org, from UniFFI's built-in
+Ruby bindings. See [`ruby/README.md`](ruby/README.md).
 
 ## Node.js / TypeScript
 

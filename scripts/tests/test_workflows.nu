@@ -87,6 +87,16 @@ def "test workflows: workspace tests exclude the nif" [] {
     }
 }
 
+# Ruby gems are built after the release (the release attaches every artifact
+# that exists when it runs) and cover exactly the platforms ruby_gem.nu maps.
+def "test workflows: ruby gems follow the release and cover every platform" [] {
+    use ../ci/ruby_gem.nu [PLATFORMS]
+    let gh = (open (root | path join .github workflows release.yml)).jobs
+    assert ("release" in $gh.build-ruby-libs.needs) "ruby artifacts would be attached to the release"
+    assert ("build-ruby-libs" in $gh.publish-ruby.needs)
+    assert equal ($gh.build-ruby-libs.strategy.matrix.include | get target | sort) ($PLATFORMS | columns | sort)
+}
+
 # The stem_mqtt Hex package downloads its NIFs from the GitHub release, so only
 # GitHub publishes it, after the release that carries them; Gitea never does.
 def "test workflows: hex publishes from github after the release with every nif" [] {

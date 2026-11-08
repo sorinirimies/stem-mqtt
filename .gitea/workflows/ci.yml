@@ -201,7 +201,7 @@ jobs:
       fail-fast: false
       max-parallel: 4
       matrix:
-        language: [python, swift, go, csharp, java, dart, node, haskell]
+        language: [python, ruby, swift, go, csharp, java, dart, node, haskell]
     steps:
       - uses: actions/checkout@v4
 
@@ -237,6 +237,10 @@ jobs:
         with:
           python-version: "3.12"
       # (retried once: the runner's network to the toolchain CDNs is flaky)
+      - uses: ruby/setup-ruby@v1
+        if: matrix.language == 'ruby'
+        with:
+          ruby-version: "3.4"
       - uses: actions/setup-go@v5
         id: setup_try_1
         continue-on-error: true

@@ -211,7 +211,7 @@ jobs:
       fail-fast: false
       matrix:
         runner: [ubuntu-latest]
-        language: [python, swift, go, csharp, java, dart, node, haskell]
+        language: [python, ruby, swift, go, csharp, java, dart, node, haskell]
         # Swiftly (setup-swift) rejects ubuntu-latest's Ubuntu 26.04 as an
         # "Unsupported Linux platform"; Swift stays on 24.04 until it does.
         exclude:
@@ -240,6 +240,10 @@ jobs:
         if: matrix.language == 'python'
         with:
           python-version: "3.12"
+      - uses: ruby/setup-ruby@v1
+        if: matrix.language == 'ruby'
+        with:
+          ruby-version: "3.4"
       - uses: actions/setup-go@v7
         id: setup_go
         continue-on-error: true

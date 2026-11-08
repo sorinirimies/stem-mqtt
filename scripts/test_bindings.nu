@@ -27,7 +27,7 @@ use bindings/hackage.nu *
 use bindings/dart_package.nu *
 use bindings/node_package.nu *
 
-const TESTED = [python swift go csharp java dart node haskell]
+const TESTED = [python ruby swift go csharp java dart node haskell]
 
 def repo []: nothing -> string { $env.FILE_PWD | path dirname }
 
@@ -112,6 +112,28 @@ def run-python [spec: record, work: string] {
     stage-libs $spec $pkg [mqtt-client mqtt-broker]
     let smoke = (smoke-src python | path join "smoke.py")
     with-env { PYTHONPATH: $stage } { do { cd $stage; ^python3 $smoke } | complete }
+}
+
+# Builds the stem-mqtt-client/-broker gems for this machine, installs them into a
+# scratch gem home and runs the smoke test against the installed gems.
+def run-ruby [spec: record, work: string] {
+    if (which ruby gem | length) < 2 { return { skip: "ruby/gem not found" } }
+    let gems = ($work | path join "gems")
+    let home = ($work | path join "gem-home")
+    rm -rf $gems $home
+    mkdir $gems
+    let host = (^rustc -vV | lines | parse "host: {t}" | get t.0)
+    let version = (open (repo | path join Cargo.toml) | get workspace.package.version)
+    for crate in [mqtt-client mqtt-broker] {
+        let module = ($crate | str replace "-" "_")
+        let generated = ($work | path join "gen" $crate $"($module).rb")
+        nu (repo | path join scripts ci ruby_gem.nu) build $crate $version $host (native-lib $spec $crate) $generated $gems
+    }
+    let system_gems = (^gem env gempath | str trim)
+    let installed = (do { ^gem install --local --ignore-dependencies --no-document --install-dir $home ...(glob ($gems | path join "*.gem")) } | complete)
+    if $installed.exit_code != 0 { return $installed }
+    let smoke = (smoke-src ruby | path join "smoke.rb")
+    with-env { GEM_HOME: $home, GEM_PATH: $"($home)(char esep)($system_gems)" } { do { ^ruby $smoke } | complete }
 }
 
 def run-go [spec: record, work: string] {
@@ -278,6 +300,7 @@ def run-swift [spec: record, work: string] {
 def run-language [spec: record, work: string] {
     match $spec.language {
         "python" => (run-python $spec $work)
+        "ruby" => (run-ruby $spec $work)
         "swift" => (run-swift $spec $work)
         "go" => (run-go $spec $work)
         "csharp" => (run-csharp $spec $work)

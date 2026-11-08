@@ -1,13 +1,16 @@
-# Ruby status
+# Ruby
 
-Ruby is not a supported release target.
+The gems `stem-mqtt-client` and `stem-mqtt-broker` (rubygems.org) wrap UniFFI's built-in Ruby
+bindings (UniFFI 0.32 ships Ruby with callbacks, async and trait interfaces).
 
-UniFFI 0.29 officially ships Kotlin, Swift, and Python backends. It does not
-ship a Ruby backend, and `uniffi-bindgen-ruby` is not available on crates.io.
-The similarly named community repository is currently a scaffold rather than a
-production generator. Previous release automation silently ignored this and
-could report success while producing no Ruby bindings.
+Each gem is built **per platform** and carries only that platform's native library
+(`x86_64-linux`, `aarch64-linux`, `x86_64-darwin`, `arm64-darwin`, `x64-mingw-ucrt`); `gem install`
+picks the one for the machine. The generated module's `ffi_lib 'mqtt_client'` is rewritten to load
+the library bundled next to it.
 
-Ruby support can be added later through a maintained generator or a dedicated
-C-ABI/Fiddle wrapper, but releases must not advertise or publish an unverified
-gem until that implementation exists.
+- Built and pushed by `build-ruby-libs` + `publish-ruby` in `.github/workflows/release.yml`
+  (`RUBY_GEM_TOKEN`), after the release so the gems are not release assets.
+- `scripts/ci/ruby_gem.nu` builds (`build`, `release`) and pushes (`publish`, skipping versions
+  rubygems.org already has).
+- `just test-bindings ruby` builds both gems for this machine, installs them into a scratch gem home
+  and runs `tests/bindings/ruby/smoke.rb` against them.

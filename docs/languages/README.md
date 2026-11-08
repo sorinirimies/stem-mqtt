@@ -9,6 +9,7 @@ between them. This page holds what is common to all of them.
 | --- | --- | --- | --- | :-: |
 | Rust | [rust.md](rust.md) | `stem-mqtt-client`, `stem-mqtt-broker` (crates.io) | native | ✅ |
 | Python | [python.md](python.md) | `stem-mqtt-client`, `stem-mqtt-broker` (PyPI) | UniFFI (built in) | ✅ |
+| Ruby | [ruby.md](ruby.md) | `stem-mqtt-client`, `stem-mqtt-broker` (RubyGems) | UniFFI (built in) | ✅ |
 | Node.js | [node.md](node.md) | `stem-mqtt` (npm) | uniffi-bindgen-node-js | ✅ |
 | Kotlin | [kotlin.md](kotlin.md) | `stem-mqtt-kotlin` / `stem-mqtt-android` (Maven) | UniFFI (built in) | ✅ |
 | Java | [java.md](java.md) | `stem-mqtt-java` (Maven) | uniffi-bindgen-java | ✅ |
@@ -18,8 +19,6 @@ between them. This page holds what is common to all of them.
 | Dart | [dart.md](dart.md) | `stem_mqtt` (pub.dev) | uniffi-dart | ❌ pull-style |
 | Haskell | [haskell.md](haskell.md) | `stem-mqtt` (Hackage) | uniffi-bindgen-haskell | ❌ pull-style |
 | Elixir / Erlang | [elixir.md](elixir.md) | `stem_mqtt` (Hex) | Rustler NIF, by hand | messages to the owner |
-
-Ruby is not supported ([why](../../packaging/ruby/README.md)).
 
 ## The model
 

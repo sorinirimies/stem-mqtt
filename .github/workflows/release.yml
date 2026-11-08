@@ -667,6 +667,111 @@ jobs:
           HEX_API_KEY: ${{ secrets.ELIXIR_HEX_TOKEN }}
         run: nu scripts/ci/elixir.nu publish ${{ needs.validate.outputs.version }}
 
+  # ── 8c. Ruby gems: one per crate per platform, each with only its own library ──
+  # After the release on purpose: the release job attaches every artifact that
+  # exists when it runs, and the gems are not release assets.
+  build-ruby-libs:
+    name: Ruby native libraries — ${{ matrix.target }}
+    needs: [validate, release]
+    runs-on: ${{ matrix.runner }}
+    env:
+      HAS_TOKEN: ${{ secrets.RUBY_GEM_TOKEN != '' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: ubuntu-latest, target: x86_64-unknown-linux-gnu, cross: false }
+          - { runner: ubuntu-latest, target: aarch64-unknown-linux-gnu, cross: true }
+          - { runner: macos-latest, target: x86_64-apple-darwin, cross: false }
+          - { runner: macos-latest, target: aarch64-apple-darwin, cross: false }
+          - { runner: windows-latest, target: x86_64-pc-windows-msvc, cross: false }
+    steps:
+      - name: Skip (no token)
+        if: env.HAS_TOKEN != 'true'
+        run: echo "⏭️  RUBY_GEM_TOKEN not set — skipping."
+      - uses: actions/checkout@v7
+        if: env.HAS_TOKEN == 'true'
+        with:
+          ref: ${{ needs.validate.outputs.ref }}
+      - uses: dtolnay/rust-toolchain@stable
+        if: env.HAS_TOKEN == 'true'
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        if: env.HAS_TOKEN == 'true'
+        with:
+          key: ruby-${{ matrix.target }}
+      - name: Install cross
+        if: env.HAS_TOKEN == 'true' && matrix.cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
+      - name: Build both libraries
+        if: env.HAS_TOKEN == 'true'
+        shell: bash
+        run: |
+          tool=cargo; [ "${{ matrix.cross }}" = "true" ] && tool=cross
+          for p in stem-mqtt-client stem-mqtt-broker; do
+            $tool rustc --release -p $p --lib --crate-type cdylib --target ${{ matrix.target }}
+          done
+          mkdir -p ruby-libs/${{ matrix.target }}
+          for f in libmqtt_client.so libmqtt_broker.so libmqtt_client.dylib libmqtt_broker.dylib mqtt_client.dll mqtt_broker.dll; do
+            [ -f "target/${{ matrix.target }}/release/$f" ] && cp "target/${{ matrix.target }}/release/$f" ruby-libs/${{ matrix.target }}/
+          done
+          ls -la ruby-libs/${{ matrix.target }}
+      - uses: actions/upload-artifact@v7
+        if: env.HAS_TOKEN == 'true'
+        with:
+          name: ruby-libs-${{ matrix.target }}
+          path: ruby-libs/
+          retention-days: 1
+
+  publish-ruby:
+    name: Publish Ruby gems
+    needs: [validate, build-ruby-libs]
+    runs-on: ubuntu-latest
+    env:
+      HAS_TOKEN: ${{ secrets.RUBY_GEM_TOKEN != '' }}
+    steps:
+      - name: Skip (no token)
+        if: env.HAS_TOKEN != 'true'
+        run: echo "⏭️  RUBY_GEM_TOKEN not set — skipping."
+      - uses: actions/checkout@v7
+        if: env.HAS_TOKEN == 'true'
+        with:
+          ref: ${{ needs.validate.outputs.ref }}
+      - uses: dtolnay/rust-toolchain@stable
+        if: env.HAS_TOKEN == 'true'
+      - uses: Swatinem/rust-cache@v2
+        if: env.HAS_TOKEN == 'true'
+      - name: Install Nushell
+        if: env.HAS_TOKEN == 'true'
+        run: |
+          V=0.116.1
+          for attempt in 1 2 3 4 5; do
+            curl -fsSL --retry 3 --retry-all-errors -o /tmp/nu.tgz https://github.com/nushell/nushell/releases/download/$V/nu-$V-x86_64-unknown-linux-gnu.tar.gz && tar -xzf /tmp/nu.tgz -C /tmp && break
+            echo "nu download failed (attempt $attempt); retrying in 15s"; sleep 15
+          done
+          test -x /tmp/nu-$V-x86_64-unknown-linux-gnu/nu
+          sudo install -m 0755 /tmp/nu-$V-x86_64-unknown-linux-gnu/nu /usr/local/bin/nu || install -m 0755 /tmp/nu-$V-x86_64-unknown-linux-gnu/nu "$HOME/.cargo/bin/nu"
+          nu --version
+      - uses: ruby/setup-ruby@v1
+        if: env.HAS_TOKEN == 'true'
+        with:
+          ruby-version: "3.4"
+      - uses: actions/download-artifact@v8
+        if: env.HAS_TOKEN == 'true'
+        with:
+          pattern: ruby-libs-*
+          path: ruby-libs/
+          merge-multiple: true
+      - name: Build the gems (Ruby code generated once; it is the same on every platform)
+        if: env.HAS_TOKEN == 'true'
+        run: nu scripts/ci/ruby_gem.nu release ${{ needs.validate.outputs.version }} ruby-libs gems
+      - name: Push the gems
+        if: env.HAS_TOKEN == 'true'
+        env:
+          GEM_HOST_API_KEY: ${{ secrets.RUBY_GEM_TOKEN }}
+        run: nu scripts/ci/ruby_gem.nu publish gems
+
   # ── 9. Publish Python wheels to PyPI ───────────────────────────────────────────
   publish-python:
     name: Publish to PyPI

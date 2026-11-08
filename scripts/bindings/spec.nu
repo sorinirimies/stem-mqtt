@@ -57,6 +57,7 @@ def _raw-specs []: nothing -> list<record> {
         { language: kotlin,  kind: builtin,  uniffi: workspace, tool: "", install: [], registry: maven, maturity: stable }
         { language: swift,   kind: builtin,  uniffi: workspace, tool: "", install: [], registry: oci,   maturity: stable }
         { language: python,  kind: builtin,  uniffi: workspace, tool: "", install: [], registry: oci,   maturity: stable }
+        { language: ruby,    kind: builtin,  uniffi: workspace, tool: "", install: [], registry: rubygems, maturity: stable }
         {
             language: go, kind: external, uniffi: "0.31.0", tool: "uniffi-bindgen-go"
             install: [uniffi-bindgen-go --git "https://github.com/NordSecurity/uniffi-bindgen-go" --tag "v0.7.1+v0.31.0"]

@@ -2,7 +2,7 @@
 
 An **MQTT 3.1.1 / 5.0 client and broker written in Rust** — async (`tokio`), TLS, WebSocket,
 QoS 0/1/2, shared subscriptions, enhanced authentication — usable as a Rust library, as a
-standalone broker binary, from **Kotlin, Swift, Python, Go, C#, Java, Dart, Node.js and
+standalone broker binary, from **Kotlin, Swift, Python, Ruby, Go, C#, Java, Dart, Node.js and
 Haskell** through generated [UniFFI](https://mozilla.github.io/uniffi-rs/) bindings, and from
 **Elixir and Erlang** through a [Rustler](https://github.com/rusterlium/rustler) NIF. Client *and*
 broker ship in every language, one generator per language, each runtime-tested against a real
@@ -139,6 +139,7 @@ release has published it to that registry.
 | Dart | `dart pub add stem_mqtt` | `package:stem_mqtt/mqtt_client.dart` |
 | Haskell | `cabal install stem-mqtt` | `import UniFFI.MqttClient` |
 | Elixir / Erlang | `{:stem_mqtt, "~> 0.5"}` (Hex) | `StemMqtt.Client` · `stem_mqtt` |
+| Ruby | `gem install stem-mqtt-client stem-mqtt-broker` | `require "stem_mqtt_client"` |
 | Swift | `StemMqttSwift-<version>.zip` from the GitHub Release | `import MqttClient` |
 
 Every language gets the same two components — a client and a broker.
@@ -159,13 +160,11 @@ language-specific notes, building from source and troubleshooting — live in
 | Dart | [dart.md](docs/languages/dart.md) | pull-style API; needs `cargo` to build |
 | Haskell | [haskell.md](docs/languages/haskell.md) | pull-style API; needs `cargo` to build |
 | Elixir / Erlang | [elixir.md](docs/languages/elixir.md) | Rustler NIF; events as messages; precompiled |
+| Ruby | [ruby.md](docs/languages/ruby.md) | per-platform gems; async calls block (fiber-aware) |
 | Swift | [swift.md](docs/languages/swift.md) | `async`/`await`; XCFrameworks for Apple platforms |
 
 Callbacks are available everywhere except Dart and Haskell, which use the
 [pull-style API](docs/languages/README.md#receiving-messages-and-events).
-
-> **Ruby** isn't supported: UniFFI has no official Ruby backend and no production-ready generator exists
-> ([`packaging/ruby`](packaging/ruby/README.md)).
 
 ## Features
 
