@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.7.0] - 2026-11-08
+### ✨ Features
+- one npm package and one Maven jar per platform **[BREAKING]**
+### 🐛 Bug Fixes
+- give setup-beam ImageOS on the step for Gitea
+### 🔄 CI
+- build the native libraries in a reusable workflow
+**Full Changelog**: https://github.com/sorinirimies/stem-mqtt/compare/v0.6.1...v0.7.0
 ## [0.6.1] - 2026-11-08
 ### 🐛 Bug Fixes
 - resolve the gem path before gem build changes directory
