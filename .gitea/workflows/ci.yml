@@ -427,10 +427,6 @@ jobs:
   test-elixir:
     name: runtime-elixir
     runs-on: ubuntu-latest
-    # erlef/setup-beam picks the OTP build from ImageOS, which GitHub's runners set
-    # and Gitea's act runner does not. 22.04 builds also run on newer Ubuntu.
-    env:
-      ImageOS: ubuntu22
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -463,7 +459,13 @@ jobs:
           nu --version
 
       # (retried once: the runner's network to the toolchain CDNs is flaky)
+      # setup-beam picks the OTP build from ImageOS. Gitea's act runner hard-codes
+      # ImageOS=ubuntu20 for ubuntu-latest, over the job env; only a step env wins.
+      # That OTP links OpenSSL 1.1, so :crypto (and `mix local.rebar`) fails on the
+      # runner's OpenSSL 3. 22.04 builds also run on newer Ubuntu.
       - uses: erlef/setup-beam@v1
+        env:
+          ImageOS: ubuntu22
         with:
           otp-version: "27"
           elixir-version: "1.18"

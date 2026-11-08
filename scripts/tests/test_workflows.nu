@@ -11,6 +11,20 @@ def runs [wf: string] {
     open $wf | get jobs | values | each {|j| $j.steps? | default [] | each {|s| $s.run? | default "" } } | flatten
 }
 
+# Gitea's act runner sets ImageOS=ubuntu20 for ubuntu-latest over the job env, so
+# setup-beam installed an OpenSSL 1.1 OTP and runtime-elixir died in
+# `mix local.rebar` (a51624f). Only a step env overrides the runner.
+def "test workflows: setup-beam on gitea sets ImageOS on the step itself" [] {
+    for wf in (glob (root | path join ".gitea" "workflows" "*.yml")) {
+        for job in (open $wf | get jobs | values) {
+            for step in ($job.steps? | default [] | where {|s| ($s.uses? | default "") | str starts-with "erlef/setup-beam" }) {
+                let image = ($step.env?.ImageOS? | default "")
+                assert ($image =~ '^ubuntu2[2-9]') $"($wf): setup-beam step has ImageOS '($image)', the runner would force ubuntu20"
+            }
+        }
+    }
+}
+
 # A GitHub 504 on the Nushell download failed whole CI and release runs (v0.4.0).
 def "test workflows: the nushell download retries and never pipes into tar" [] {
     for wf in (workflows) {
