@@ -90,9 +90,9 @@ def main [
 
     # ── 3. Tests ──────────────────────────────────────────────────────────────
     if not $skip_test {
-        step "cargo test --workspace --all-features --all-targets"
+        step "cargo test --workspace --exclude stem_mqtt_nif --all-features --all-targets"
         let test_result = (do {
-            cargo test --workspace --all-features --all-targets
+            cargo test --workspace --exclude stem_mqtt_nif --all-features --all-targets
         } | complete)
         if $test_result.exit_code != 0 {
             print (red "  ✗ Tests failed.")

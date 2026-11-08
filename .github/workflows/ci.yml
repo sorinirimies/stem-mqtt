@@ -95,7 +95,7 @@ jobs:
         run: cargo generate-lockfile
 
       - name: cargo test --workspace
-        run: cargo test --workspace --all-features --all-targets
+        run: cargo test --workspace --exclude stem_mqtt_nif --all-features --all-targets
 
   # ── 4. Build (dev) ───────────────────────────────────────────────────────────
   build:

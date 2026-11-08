@@ -14,7 +14,9 @@ publish = false
 name = "stem_mqtt_nif"
 crate-type = ["cdylib"]
 # No Rust tests: a test executable cannot link the `enif_*` symbols the BEAM
-# provides at load time. ExUnit tests the NIF (packaging/elixir, just test-elixir).
+# provides at load time (Linux refuses; macOS defers), and `--all-targets`
+# builds one despite `test = false`, so every `cargo test --workspace`
+# excludes this crate. ExUnit tests the NIF (packaging/elixir, just test-elixir).
 test = false
 doctest = false
 

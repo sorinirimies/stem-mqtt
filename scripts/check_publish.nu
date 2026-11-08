@@ -72,7 +72,7 @@ def main [] {
     # ── 5. Cargo test (workspace) ─────────────────────────────────────────────
     print "── Step 5: Cargo test (workspace) ──"
     print "  🧪 Running cargo test --workspace..."
-    let test_result = (do { cargo test --workspace } | complete)
+    let test_result = (do { cargo test --workspace --exclude stem_mqtt_nif } | complete)
     if $test_result.exit_code != 0 {
         print "  ❌ Tests failed:"
         # cargo prints the failing tests and their panics to stdout.

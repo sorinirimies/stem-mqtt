@@ -75,6 +75,18 @@ def "test workflows: both hosts publish the public registries" [] {
     assert equal (open (root | path join .github workflows publish-npm.yml)) (open (root | path join .gitea workflows publish-npm.yml))
 }
 
+# Regression: on Linux, `cargo test --workspace --all-targets` failed to link a
+# test executable for the NIF (undefined enif_* symbols).
+def "test workflows: workspace tests exclude the nif" [] {
+    let files = [.github/workflows/ci.yml .gitea/workflows/ci.yml .gitea/workflows/deps-update.yml justfile scripts/ci/quality_gate.nu scripts/check_publish.nu]
+    for f in $files {
+        let lines = open --raw (root | path join $f) | lines | where {|l| $l =~ 'cargo test --workspace' and $l !~ 'name:|print' }
+        for l in $lines {
+            assert ($l | str contains "--exclude stem_mqtt_nif") $"($f): ($l | str trim)"
+        }
+    }
+}
+
 # The stem_mqtt Hex package downloads its NIFs from the GitHub release, so only
 # GitHub publishes it, after the release that carries them; Gitea never does.
 def "test workflows: hex publishes from github after the release with every nif" [] {

@@ -95,7 +95,7 @@ run-example name:
 
 # Run the full workspace test suite
 test:
-    cargo test --workspace --locked --all-features --all-targets
+    cargo test --workspace --exclude stem_mqtt_nif --locked --all-features --all-targets
 
 # Test only the client + protocol codec
 test-client:
@@ -490,7 +490,7 @@ update-deps:
     @echo "🔍 Running quality gate…"
     cargo fmt --all -- --check
     cargo clippy --workspace --all-targets --all-features -- -D warnings
-    cargo test --workspace --locked --all-features --all-targets
+    cargo test --workspace --exclude stem_mqtt_nif --locked --all-features --all-targets
     @echo "✅ All checks passed — committing dependency updates…"
     git add Cargo.lock
     git diff --cached --quiet || git commit -m "chore: update dependencies"

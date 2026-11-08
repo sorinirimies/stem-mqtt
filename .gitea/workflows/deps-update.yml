@@ -90,7 +90,7 @@ jobs:
 
       - name: Run tests
         if: steps.check.outputs.has_changes == 'true'
-        run: cargo test --workspace --all-features --all-targets
+        run: cargo test --workspace --exclude stem_mqtt_nif --all-features --all-targets
 
       # The quality gate already passed above — safe to push directly.
       - name: Commit and push dependency updates
