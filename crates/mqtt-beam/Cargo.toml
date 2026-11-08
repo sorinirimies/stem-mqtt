@@ -13,6 +13,10 @@ publish = false
 [lib]
 name = "stem_mqtt_nif"
 crate-type = ["cdylib"]
+# No Rust tests: a test executable cannot link the `enif_*` symbols the BEAM
+# provides at load time. ExUnit tests the NIF (packaging/elixir, just test-elixir).
+test = false
+doctest = false
 
 # The NIF API version: 2.15 loads on OTP 25 and later. Precompiled NIFs are
 # built with the default; must match `nif_versions` in packaging/elixir.

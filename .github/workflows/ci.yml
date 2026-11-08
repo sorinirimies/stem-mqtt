@@ -70,7 +70,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@cargo-llvm-cov
       - name: Enforce minimum line coverage
-        run: cargo llvm-cov --workspace --exclude stem-mqtt-dashboard --summary-only --fail-under-lines 88
+        run: cargo llvm-cov --workspace --exclude stem-mqtt-dashboard --exclude stem_mqtt_nif --summary-only --fail-under-lines 88
 
   # ── 3. Tests ─────────────────────────────────────────────────────────────────
   test:
