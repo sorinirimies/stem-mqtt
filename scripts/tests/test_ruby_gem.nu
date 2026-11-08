@@ -3,7 +3,7 @@
 # Tests for scripts/ci/ruby_gem.nu (per-platform Ruby gems).
 
 use std/assert
-use ../ci/ruby_gem.nu [PLATFORMS gem_platform patch_loader gemspec lib_file published]
+use ../ci/ruby_gem.nu [PLATFORMS gem_platform patch_loader gemspec lib_file published gem_output]
 use runner.nu run-tests
 
 def "test ruby_gem: rust targets map to rubygems platforms" [] {
@@ -44,6 +44,15 @@ def "test ruby_gem: a version is published per platform" [] {
     assert (published $versions "1.0.0" "x86_64-linux")
     assert (not (published $versions "1.0.0" "x64-mingw-ucrt"))
     assert (not (published $versions "1.0.1" "x86_64-linux"))
+}
+
+# Regression: v0.6.0's release passed a relative out_dir, which `gem build`
+# resolved inside the staging directory.
+def "test ruby_gem: the gem path is absolute before gem build changes directory" [] {
+    let out = (gem_output "gems" "stem-mqtt-client" "1.0.0" "x86_64-linux")
+    assert ($out | path type | is-empty)
+    assert ($out starts-with "/")
+    assert equal $out ($env.PWD | path join gems "stem-mqtt-client-1.0.0-x86_64-linux.gem")
 }
 
 def main [] { run-tests }

@@ -77,7 +77,8 @@ def "main build" [crate: string, version: string, target: string, native_lib: st
     patch_loader (open --raw $generated) $g.module | save --force ($lib_dir | path join $"($g.module).rb")
     $"require_relative \"($g.entry)/($g.module)\"\n" | save --force ($stage | path join lib $"($g.entry).rb")
     gemspec $crate $version $platform | save --force ($stage | path join $"($g.gem).gemspec")
-    do { cd $stage; ^gem build $"($g.gem).gemspec" --output ($out_dir | path expand | path join $"($g.gem)-($version)-($platform).gem") }
+    let output = (gem_output $out_dir $g.gem $version $platform)
+    do { cd $stage; ^gem build $"($g.gem).gemspec" --output $output }
     rm -rf $stage
 }
 
@@ -113,6 +114,12 @@ def "main release" [version: string, libs_dir: string, out_dir: string] {
     }
     rm -rf $gen
     print (ls ($out_dir | path join "*.gem" | into glob) | select name size)
+}
+
+# The absolute path of a built gem. Resolved before `gem build` runs inside the
+# staging directory, where a relative `out_dir` would point elsewhere.
+export def gem_output [out_dir: string, gem: string, version: string, platform: string]: nothing -> string {
+    $out_dir | path expand | path join $"($gem)-($version)-($platform).gem"
 }
 
 # Whether rubygems.org has `gem` at `version` for `platform`.
