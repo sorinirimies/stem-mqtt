@@ -19,6 +19,10 @@ export def from_gitea [releases: list]: nothing -> list {
     $releases | each {|r| { tag: $r.tag_name, release: $r.id, assets: ($r.assets? | default [] | each {|a| { name: $a.name, id: $a.id } }) } }
 }
 
+# Assets every release keeps: the Hex package `stem_mqtt` downloads its precompiled
+# NIF from the release of the installed version, so old versions need theirs.
+export const PERMANENT = '^libstem_mqtt_nif-'
+
 # The assets to delete, one record per asset. Refuses when <keep> is unknown or has
 # no assets, so a typo or a failed upload can't leave no binaries anywhere.
 export def doomed [releases: list, keep: string]: nothing -> list {
@@ -32,6 +36,7 @@ export def doomed [releases: list, keep: string]: nothing -> list {
     $releases | where tag != $keep
     | each {|r| $r.assets | each {|a| { tag: $r.tag, release: ($r.release? | default $r.tag), name: $a.name, id: $a.id } } }
     | flatten
+    | where name !~ $PERMANENT
 }
 
 # The newest release tag by version (`v1.10.0` > `v1.9.0`; a pre-release sorts below its

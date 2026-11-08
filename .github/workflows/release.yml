@@ -275,6 +275,54 @@ jobs:
             mqtt-client-*.zip
           retention-days: 1
 
+  # ── 3b. Precompiled NIFs for the stem_mqtt Hex package (crates/mqtt-beam) ─────
+  # Named as RustlerPrecompiled expects; attached to the release by the release job
+  # and never pruned (old Hex versions download from their own release).
+  build-nif:
+    name: Build NIF — ${{ matrix.target }}
+    needs: [validate, test]
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: ubuntu-latest, target: x86_64-unknown-linux-gnu, cross: false, lib: libstem_mqtt_nif.so, final: libstem_mqtt_nif, ext: so }
+          - { runner: ubuntu-latest, target: aarch64-unknown-linux-gnu, cross: true, lib: libstem_mqtt_nif.so, final: libstem_mqtt_nif, ext: so }
+          - { runner: macos-latest, target: x86_64-apple-darwin, cross: false, lib: libstem_mqtt_nif.dylib, final: libstem_mqtt_nif, ext: so }
+          - { runner: macos-latest, target: aarch64-apple-darwin, cross: false, lib: libstem_mqtt_nif.dylib, final: libstem_mqtt_nif, ext: so }
+          - { runner: windows-latest, target: x86_64-pc-windows-msvc, cross: false, lib: stem_mqtt_nif.dll, final: stem_mqtt_nif, ext: dll }
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.validate.outputs.ref }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: nif-${{ matrix.target }}
+      - name: Install cross
+        if: matrix.cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
+      - name: Build (native)
+        if: ${{ !matrix.cross }}
+        run: cargo build --release -p stem_mqtt_nif --target ${{ matrix.target }}
+      - name: Build (cross)
+        if: matrix.cross
+        run: cross build --release -p stem_mqtt_nif --target ${{ matrix.target }}
+      # <lib>-v<version>-nif-2.15-<target>.<so|dll>.tar.gz; macOS NIFs end in .so too.
+      - name: Package
+        shell: bash
+        run: |
+          name="${{ matrix.final }}-v${{ needs.validate.outputs.version }}-nif-2.15-${{ matrix.target }}.${{ matrix.ext }}"
+          cp "target/${{ matrix.target }}/release/${{ matrix.lib }}" "$name"
+          tar czf "$name.tar.gz" "$name"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: nif-${{ matrix.target }}
+          path: "*stem_mqtt_nif-v*.tar.gz"
+          retention-days: 1
+
   # ── 4. UniFFI source bindings (official backends) ────────────────────────────
   bindings:
     name: UniFFI bindings — ${{ matrix.language }}
@@ -488,7 +536,7 @@ jobs:
   # ── 7. GitHub Release ──────────────────────────────────────────────────────────
   release:
     name: Create GitHub Release
-    needs: [validate, build-broker, build-client, bindings, build-python, test-python, build-kotlin, build-swift]
+    needs: [validate, build-broker, build-client, build-nif, bindings, build-python, test-python, build-kotlin, build-swift]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -577,6 +625,47 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
         run: nu scripts/ci/publish_crate.nu stem-mqtt-broker ${{ needs.validate.outputs.version }} --readme-dir crates/mqtt-broker --wait 0
+
+  # ── 8b. Publish stem_mqtt to Hex (GitHub only: the NIFs are downloaded from here) ─
+  publish-hex:
+    name: Publish to Hex
+    needs: [validate, release]
+    runs-on: ubuntu-latest
+    env:
+      HAS_TOKEN: ${{ secrets.ELIXIR_HEX_TOKEN != '' }}
+    steps:
+      - name: Skip (no token)
+        if: env.HAS_TOKEN != 'true'
+        run: echo "⏭️  ELIXIR_HEX_TOKEN not set — skipping."
+      - uses: actions/checkout@v7
+        if: env.HAS_TOKEN == 'true'
+        with:
+          ref: ${{ needs.validate.outputs.ref }}
+      - uses: dtolnay/rust-toolchain@stable
+        if: env.HAS_TOKEN == 'true'
+      - uses: Swatinem/rust-cache@v2
+        if: env.HAS_TOKEN == 'true'
+      - name: Install Nushell
+        if: env.HAS_TOKEN == 'true'
+        run: |
+          V=0.116.1
+          for attempt in 1 2 3 4 5; do
+            curl -fsSL --retry 3 --retry-all-errors -o /tmp/nu.tgz https://github.com/nushell/nushell/releases/download/$V/nu-$V-x86_64-unknown-linux-gnu.tar.gz && tar -xzf /tmp/nu.tgz -C /tmp && break
+            echo "nu download failed (attempt $attempt); retrying in 15s"; sleep 15
+          done
+          test -x /tmp/nu-$V-x86_64-unknown-linux-gnu/nu
+          sudo install -m 0755 /tmp/nu-$V-x86_64-unknown-linux-gnu/nu /usr/local/bin/nu || install -m 0755 /tmp/nu-$V-x86_64-unknown-linux-gnu/nu "$HOME/.cargo/bin/nu"
+          nu --version
+      - uses: erlef/setup-beam@v1
+        if: env.HAS_TOKEN == 'true'
+        with:
+          otp-version: "27"
+          elixir-version: "1.18"
+      - name: Checksum the release NIFs, test against them, publish
+        if: env.HAS_TOKEN == 'true'
+        env:
+          HEX_API_KEY: ${{ secrets.ELIXIR_HEX_TOKEN }}
+        run: nu scripts/ci/elixir.nu publish ${{ needs.validate.outputs.version }}
 
   # ── 9. Publish Python wheels to PyPI ───────────────────────────────────────────
   publish-python:

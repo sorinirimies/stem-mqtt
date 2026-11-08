@@ -12,6 +12,14 @@ The release workflow builds:
 - `mqtt-client` native `cdylib`/`staticlib` for the same desktop targets
 - crates.io packages `stem-mqtt-client` then `stem-mqtt-broker`
 
+## Elixir and Erlang (Hex)
+
+`packaging/elixir` is the Hex package `stem_mqtt`: Elixir and Erlang modules over a Rustler NIF
+(`crates/mqtt-beam`). The GitHub release builds the NIF per target (`build-nif`); `publish-hex` then
+checksums those release assets, runs ExUnit against them and publishes (`ELIXIR_HEX_TOKEN`). Only
+GitHub publishes to Hex, because the package downloads its NIFs from the GitHub release; the NIF
+assets are exempt from release pruning. `just test-elixir` builds from source and runs the tests.
+
 ## UniFFI targets
 
 UniFFI itself generates Kotlin, Swift and Python. Go, C#, Java, Dart, Node.js

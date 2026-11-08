@@ -6,6 +6,7 @@
 
 use std/assert
 use runner.nu *
+use ../bump_version.nu [set_mix_version]
 
 def "test version: matches semver shape" [] {
     let version = (open Cargo.toml | get workspace.package.version)
@@ -45,6 +46,18 @@ def "test version: crates.io package names are stem-prefixed since mqtt-client a
     # but must resolve to the real, renamed package.
     let aliased_package = (open Cargo.toml | get workspace.dependencies.mqtt-client.package)
     assert equal $aliased_package "stem-mqtt-client"
+}
+
+# Hex users get the version from mix.exs, so it must follow the workspace.
+def "test version: the Hex package has the workspace version" [] {
+    let version = (open Cargo.toml | get workspace.package.version)
+    let mix = (open --raw packaging/elixir/mix.exs)
+    assert ($mix | str contains $'@version "($version)"') "packaging/elixir/mix.exs @version drifted from Cargo.toml"
+}
+
+def "test version: set_mix_version rewrites only @version" [] {
+    let mix = "  @version \"0.1.0\"\n  @source_url \"x\"\n  version: @version,\n"
+    assert equal (set_mix_version $mix "1.2.3") "  @version \"1.2.3\"\n  @source_url \"x\"\n  version: @version,\n"
 }
 
 def main [] { run-tests }

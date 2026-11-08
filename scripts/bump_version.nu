@@ -52,6 +52,18 @@ def update_internal_dep_version [version: string] {
     print $"(ansi green)✓(ansi reset) Updated mqtt-client dependency → ($version)"
 }
 
+# `mix.exs` text with its `@version` set to `version`.
+export def set_mix_version [text: string, version: string]: nothing -> string {
+    $text | str replace --regex '(?m)^(\s*@version\s+)"[^"]+"' $'${1}"($version)"'
+}
+
+# The Hex package carries its own version: Hex users never see Cargo.toml.
+def update_mix_version [version: string] {
+    let path = "packaging/elixir/mix.exs"
+    set_mix_version (open --raw $path) $version | save --force $path
+    print $"(ansi green)✓(ansi reset) Updated ($path) → ($version)"
+}
+
 # Update the crates.io version badge in README.md (if the badge exists).
 def update_readme_badge [version: string] {
     if not ("README.md" | path exists) {
@@ -105,6 +117,7 @@ def main [
     update_workspace_version $new_version
     update_internal_dep_version $new_version
     update_readme_badge $new_version
+    update_mix_version $new_version
 
     print ""
     print $"(ansi cyan)── cargo fmt ───────────────────────────────────────────────(ansi reset)"

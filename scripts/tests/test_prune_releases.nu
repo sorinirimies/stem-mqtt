@@ -34,4 +34,13 @@ def "test prune releases: newest compares versions not text" [] {
     assert equal (newest [{ tag: "nightly" }]) null
 }
 
+# Hex installs of an older stem_mqtt download the NIF from that version's release.
+def "test prune releases: precompiled NIFs stay on every release" [] {
+    let gh = [
+        { tagName: "v2", assets: [{ name: "a.zip" }] }
+        { tagName: "v1", assets: [{ name: "a.zip" } { name: "libstem_mqtt_nif-v1-nif-2.15-x86_64-unknown-linux-gnu.so.tar.gz" }] }
+    ]
+    assert equal (doomed (from_gh $gh) "v2" | get name) ["a.zip"]
+}
+
 def main [] { run-tests }

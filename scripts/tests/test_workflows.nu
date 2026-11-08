@@ -75,6 +75,20 @@ def "test workflows: both hosts publish the public registries" [] {
     assert equal (open (root | path join .github workflows publish-npm.yml)) (open (root | path join .gitea workflows publish-npm.yml))
 }
 
+# The stem_mqtt Hex package downloads its NIFs from the GitHub release, so only
+# GitHub publishes it, after the release that carries them; Gitea never does.
+def "test workflows: hex publishes from github after the release with every nif" [] {
+    let gh = (open (root | path join .github workflows release.yml)).jobs
+    assert ("build-nif" in $gh.release.needs) "the release does not wait for the NIFs"
+    assert ("release" in $gh.publish-hex.needs) "hex publishes before the release exists"
+    let native = open --raw (root | path join packaging elixir lib stem_mqtt native.ex)
+    let built = $gh.build-nif.strategy.matrix.include | get target | sort
+    let listed = $native | parse --regex '(?s)targets: ~w\((?<t>[^)]*)\)' | get 0.t | split row --regex '\s+' | where $it != "" | sort
+    assert equal $listed $built "native.ex targets and the build-nif matrix differ"
+    let gitea = open --raw (root | path join .gitea workflows release.yml)
+    assert (not ($gitea | str contains "elixir.nu publish")) "gitea must not publish to hex"
+}
+
 # v0.4.1: `gradle publish` for GitHub Packages also staged unsigned artifacts, and
 # Maven Central refused the bundle ("missing: stem-mqtt-kotlin-0.4.1.jar.asc").
 def "test workflows: maven central stages only signed artifacts" [] {
