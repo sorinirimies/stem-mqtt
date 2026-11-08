@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.1] - 2026-11-08
+### 🐛 Bug Fixes
+- resolve the gem path before gem build changes directory
+**Full Changelog**: https://github.com/sorinirimies/stem-mqtt/compare/v0.6.0...v0.6.1
 ## [0.6.0] - 2026-11-08
 ### ✨ Features
 - Elixir and Erlang through a Rustler NIF
