@@ -671,44 +671,12 @@ jobs:
   # After the release on purpose: the release job attaches every artifact that
   # exists when it runs, and the gems are not release assets.
   # Both native libraries for every target, once per UniFFI release a packaged binding needs
-  # (the workspace's, and the 0.31 the Node generator is pinned to). Ruby, npm and Maven build
-  # one package per platform from these. After `release`: its artifacts are not release assets.
+  # (native-libs.yml). After `release`: its artifacts are not release assets.
   build-native-libs:
-    name: Native libraries — ${{ matrix.uniffi }} / ${{ matrix.target }}
     needs: [validate, release]
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      fail-fast: false
-      matrix:
-        uniffi: [workspace, "0.31.0"]
-        target: [x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu, x86_64-apple-darwin, aarch64-apple-darwin, x86_64-pc-windows-msvc]
-        include:
-          - { target: x86_64-unknown-linux-gnu, runner: ubuntu-latest }
-          - { target: aarch64-unknown-linux-gnu, runner: ubuntu-24.04-arm }
-          - { target: x86_64-apple-darwin, runner: macos-latest }
-          - { target: aarch64-apple-darwin, runner: macos-latest }
-          - { target: x86_64-pc-windows-msvc, runner: windows-latest }
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ needs.validate.outputs.ref }}
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: native-${{ matrix.uniffi }}-${{ matrix.target }}
-      - uses: hustcer/setup-nu@v3
-        with:
-          version: "0.116.1"
-      - name: Build both libraries
-        run: nu scripts/ci/native_libs.nu build ${{ matrix.uniffi }} ${{ matrix.target }} native-libs/${{ matrix.uniffi }}
-      - uses: actions/upload-artifact@v7
-        with:
-          name: native-${{ matrix.uniffi }}-${{ matrix.target }}
-          path: native-libs/
-          if-no-files-found: error
-          retention-days: 1
+    uses: ./.github/workflows/native-libs.yml
+    with:
+      ref: ${{ needs.validate.outputs.ref }}
 
   publish-ruby:
     name: Publish Ruby gems

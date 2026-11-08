@@ -95,8 +95,9 @@ def "test workflows: native libraries follow the release and cover every platfor
     use ../ci/native_libs.nu [TARGETS]
     use ../bindings/spec.nu [spec-for]
     let gh = (open (root | path join .github workflows release.yml)).jobs
-    let job = $gh.build-native-libs
-    assert ("release" in $job.needs) "native library artifacts would be attached to the release"
+    assert ("release" in $gh.build-native-libs.needs) "native library artifacts would be attached to the release"
+    assert equal $gh.build-native-libs.uses "./.github/workflows/native-libs.yml"
+    let job = (open (root | path join .github workflows native-libs.yml)).jobs.build
     assert equal ($job.strategy.matrix.target | sort) ($PLATFORMS | columns | sort)
     assert equal ($job.strategy.matrix.target | sort) ($TARGETS | columns | sort)
     assert equal ($job.strategy.matrix.include | get target | sort) ($TARGETS | columns | sort)
