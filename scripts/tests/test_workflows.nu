@@ -83,10 +83,18 @@ def "test workflows: releases are never cancelled" [] {
 
 # Either host publishes to the public registries (npmjs, NuGet, Maven Central, Hackage,
 # Go): only Gitea's release did, and GitHub-only tags never reached npm (v0.4.1).
-def "test workflows: both hosts publish the public registries" [] {
+# Both hosts publish the public registries, except npm and Maven: their packages are one
+# per platform, and only GitHub builds every platform's libraries (Gitea's v0.7.0 release
+# would have published Linux-only packages had it been first).
+def "test workflows: both hosts publish the public registries, npm and maven from github only" [] {
     let matrix = {|h| (open (root | path join $h workflows release.yml)).jobs.publish-public.strategy.matrix.language }
-    assert equal (do $matrix .github) (do $matrix .gitea)
-    assert equal (open (root | path join .github workflows publish-npm.yml)) (open (root | path join .gitea workflows publish-npm.yml))
+    let github = (do $matrix .github)
+    assert equal (do $matrix .gitea) ($github | where $it not-in [node java])
+    assert ("node" in $github and "java" in $github)
+    assert not (root | path join .gitea workflows publish-npm.yml | path exists)
+    let npm = (open (root | path join .github workflows publish-npm.yml))
+    assert ($npm.jobs.build-native-libs.uses | str ends-with "native-libs.yml")
+    assert ($npm.jobs.publish.steps | any {|s| ($s.run? | default "") | str contains "--natives native-libs" })
 }
 
 # Regression: on Linux, `cargo test --workspace --all-targets` failed to link a

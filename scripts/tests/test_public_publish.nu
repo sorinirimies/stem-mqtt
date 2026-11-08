@@ -6,6 +6,7 @@
 
 use std/assert
 use runner.nu *
+use ../publish_packages.nu [needs-natives]
 use ../bindings/spec.nu *
 use ../publish_maven_central.nu [upload-args missing-files central-bearer central-pom-urls]
 use ../bindings/go_module.nu *
@@ -198,6 +199,14 @@ def "test public: the Node package shares one runtime between client and broker"
     let err = (try { assemble-node-package ($bad | path join "client") ($bad | path join "broker") ($root | path join "pkg2"); "" } catch { |e| $e.msg })
     assert ($err | str contains "differ")
     rm -rf $root
+}
+
+def "test public publish: npm and maven need the libraries of every platform" [] {
+    assert (needs-natives "npm" "public" "")
+    assert (needs-natives "maven" "public" "")
+    assert not (needs-natives "npm" "public" "native-libs")
+    assert not (needs-natives "npm" "github" "")
+    assert not (needs-natives "nuget" "public" "")
 }
 
 def main [] { run-tests }

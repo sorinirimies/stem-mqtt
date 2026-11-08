@@ -5,8 +5,8 @@ name: Publish npm
 # it when the version is already on npm), so the two never conflict.
 #
 # Secret: NPM_TOKEN — an npm granular access token with publish rights and "bypass 2FA".
-# This runner is Linux, so the package carries the Linux x86_64 prebuild (package.json `os`/`cpu`
-# say so; `npm install` elsewhere fails with EBADPLATFORM).
+# Like the release: every platform's libraries are built (native-libs.yml) and published as
+# one package per platform, before the JavaScript-only main package that depends on them.
 
 on:
   workflow_dispatch:
@@ -29,8 +29,14 @@ env:
   PUBLIC_OWNER: sorinirimies
 
 jobs:
+  build-native-libs:
+    uses: ./.github/workflows/native-libs.yml
+    with:
+      ref: ${{ github.sha }}
+
   publish:
     name: Test and publish stem-mqtt
+    needs: [build-native-libs]
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -94,6 +100,13 @@ jobs:
       - name: Stage the package
         run: nu scripts/publish_packages.nu stage node
 
+      # Every platform's libraries, one npm package each.
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: native-*
+          path: native-libs/
+          merge-multiple: true
+
       - name: Publish stem-mqtt
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -103,4 +116,4 @@ jobs:
           fi
           flag=""; [ "${{ github.event.inputs.dry_run }}" = "true" ] && flag="--dry-run"
           nu scripts/publish_packages.nu publish node "${{ steps.version.outputs.version }}" \
-            --target public --owner "$PUBLIC_OWNER" $flag
+            --target public --owner "$PUBLIC_OWNER" --natives native-libs $flag

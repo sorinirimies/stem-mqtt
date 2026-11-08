@@ -654,7 +654,9 @@ jobs:
       fail-fast: false
       max-parallel: 2
       matrix:
-        language: [node, csharp, java, haskell, go]
+        # Not node or java: npm and Maven ship one package per platform, and only GitHub's
+        # release builds every platform's libraries (native-libs.yml).
+        language: [csharp, haskell, go]
     env:
       HAS_TOKEN: ${{ (matrix.language == 'node' && secrets.NPM_TOKEN != '') || (matrix.language == 'csharp' && secrets.NUGET_API_KEY != '') || (matrix.language == 'java' && (secrets.MAVEN_CENTRAL_PASSWORD != '' || secrets.SONATYPE_TOKEN != '')) || (matrix.language == 'haskell' && secrets.HACKAGE_TOKEN != '') || (matrix.language == 'go' && secrets.GO_MODULE_TOKEN != '') }}
     steps:

@@ -11,14 +11,16 @@ nu scripts/publish_packages.nu publish <language> <version> --dry-run  # print t
 
 ## Public registries
 
-The Gitea release workflow publishes to the indexes people install from (`--target public`). Each job needs
-its own repository secret and **skips quietly without it**:
+The release workflows publish to the indexes people install from (`--target public`); a version the other
+host published first counts as done. npm and Maven Central go out from GitHub only: their packages are one per
+platform (`--natives`), and only GitHub's release builds every platform's libraries (`native-libs.yml`).
+Each job needs its own repository secret and **skips quietly without it**:
 
 | Language | Registry | Package | Secret(s) | Notes |
 | --- | --- | --- | --- | --- |
 | Rust | crates.io | `stem-mqtt-client`, `stem-mqtt-broker` | `CRATES_IO_TOKEN` | |
 | Python | PyPI | `stem-mqtt-client`, `stem-mqtt-broker` | `PYPI_API_TOKEN` | manylinux_2_28 wheels (zig) |
-| Node.js | npmjs.org | `stem-mqtt` | `NPM_TOKEN` | granular token with *bypass 2FA*; Linux x86_64 prebuild today |
+| Node.js | npmjs.org | `stem-mqtt` | `NPM_TOKEN` | granular token with *bypass 2FA*; plus `stem-mqtt-<platform>` packages, published first |
 | C# | NuGet.org | `StemMqtt` | `NUGET_API_KEY` | |
 | Kotlin / Java | Maven Central | `io.github.<owner>.stemmqtt:stem-mqtt-kotlin` / `…-java` | `SONATYPE_TOKEN` (the Portal's `settings.xml` snippet, pasted as is; set on both GitHub and Gitea) or `MAVEN_CENTRAL_USERNAME` + `MAVEN_CENTRAL_PASSWORD`, `SIGNING_KEY`, `SIGNING_PASSWORD` | verify the `io.github.<owner>` namespace first |
 | Haskell | Hackage | `stem-mqtt` | `HACKAGE_TOKEN` | source package, builds the bundled Rust with `cargo` |
@@ -26,9 +28,10 @@ its own repository secret and **skips quietly without it**:
 | Go | Go modules | `github.com/<owner>/stem-mqtt-go` | `GO_MODULE_TOKEN` | pushes the module to its own repo and tags it |
 | Swift | — | release asset (XCFrameworks) | — | needs macOS |
 
-The Haskell and Dart packages are exactly what their runtime tests exercise. The Node, C#, Java, Kotlin and
-Go packages bundle or expect native libraries only for the platforms the release runner builds (Linux x86_64
-today); other platforms use the release assets or a source build. Maven Central and Hackage releases cannot
+The Haskell and Dart packages are exactly what their runtime tests exercise. npm and Maven carry every
+platform the release builds (Linux x86_64 and aarch64, macOS x86_64 and arm64, Windows x86_64), one package or
+classifier jar each. The C#, Kotlin and Go packages bundle or expect native libraries only for Linux x86_64;
+other platforms use the release assets or a source build. `publish-npm.yml` publishes npm without a release. Maven Central and Hackage releases cannot
 be deleted — read the job logs of the first release.
 
 ## Project registries

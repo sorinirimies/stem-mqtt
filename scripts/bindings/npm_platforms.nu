@@ -22,7 +22,7 @@ export def platform-manifest [main: string, target: string, version: string, own
         description: $"Native libraries of ($main) for ($target)"
         os: [($parts | first)]
         cpu: [($parts | get 1)]
-        files: ["client" "broker" "LICENSE"]
+        files: ["client" "broker" "README.md" "LICENSE"]
         license: "MIT"
         author: "Sorin Irimies"
         homepage: $"https://github.com/($owner)/stem-mqtt#readme"
@@ -34,6 +34,22 @@ export def platform-manifest [main: string, target: string, version: string, own
         "musl" => ($base | insert libc ["musl"])
         _ => $base
     }
+}
+
+# README.md of a platform package: what it is, and that it is not installed by hand.
+# (npmjs.org's spam detection rejected a binaries-only package without one, v0.7.0.)
+export def platform-readme [main: string, target: string, owner: string]: nothing -> string {
+    [
+        $"# (platform-package-name $main $target)"
+        ""
+        $"The native client and broker libraries of [($main)]\(https://www.npmjs.com/package/($main)\) for `($target)`."
+        ""
+        $"Do not install it directly: `npm install ($main)` picks the package for your platform"
+        "from its optional dependencies."
+        ""
+        $"Source and documentation: https://github.com/($owner)/stem-mqtt"
+        ""
+    ] | str join "\n"
 }
 
 # The main package's manifest: the platform packages as optional dependencies, and only the

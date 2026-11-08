@@ -3,7 +3,7 @@
 # Tests for scripts/bindings/npm_platforms.nu (one npm package per platform).
 
 use std/assert
-use ../bindings/npm_platforms.nu [platform-package-name platform-manifest main-manifest patch-node-loader]
+use ../bindings/npm_platforms.nu [platform-package-name platform-manifest main-manifest patch-node-loader platform-readme]
 use runner.nu run-tests
 
 const LOADER = 'function defaultBundledLibrary() {
@@ -21,7 +21,7 @@ def "test npm platforms: a platform package is restricted to its os, cpu and lib
     assert equal $m.cpu ["arm64"]
     assert equal $m.libc ["glibc"]
     assert equal $m.publishConfig.access "public"
-    assert equal $m.files ["client" "broker" "LICENSE"]
+    assert equal $m.files ["client" "broker" "README.md" "LICENSE"]
     let mac = (platform-manifest "stem-mqtt" "darwin-arm64" "1.2.3" "acme" { registry: "r" })
     assert ("libc" not-in ($mac | columns))
 }
@@ -49,6 +49,14 @@ def "test npm platforms: a changed loader is an error, not a package without a l
 
 def "test npm platforms: platform package names keep the scope" [] {
     assert equal (platform-package-name "@acme/stem-mqtt-node" "win32-x64") "@acme/stem-mqtt-node-win32-x64"
+}
+
+def "test npm platforms: a platform package has a readme that points to the main package" [] {
+    let readme = (platform-readme "stem-mqtt" "win32-x64" "o")
+    assert ($readme | str starts-with "# stem-mqtt-win32-x64\n")
+    assert ($readme | str contains "`npm install stem-mqtt`")
+    assert ($readme | str contains "https://github.com/o/stem-mqtt")
+    assert ("README.md" in (platform-manifest "stem-mqtt" "win32-x64" "1.0.0" "o" {}).files)
 }
 
 def main [] { run-tests }

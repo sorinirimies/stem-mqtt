@@ -39,7 +39,7 @@ use bindings/source.nu *
 use bindings/hackage.nu *
 use bindings/dart_package.nu *
 use bindings/node_package.nu *
-use bindings/npm_platforms.nu [platform-manifest main-manifest patch-node-loader]
+use bindings/npm_platforms.nu [platform-manifest platform-readme main-manifest patch-node-loader]
 use ci/native_libs.nu [natives-tree]
 
 def default-stage [language: string]: nothing -> string {
@@ -225,6 +225,13 @@ System.getenv("SIGNING_KEY")?.let { key ->
 
 # Registry-specific preparation that depends on the final version/owner:
 # retarget descriptors, lay native libraries out the way the registry expects.
+# npm and Maven on the public registries ship one package per platform, so publishing
+# them needs every platform's libraries; without, the host's alone would go out as if
+# they were all (and the other host's release could publish that first).
+export def needs-natives [registry: string, target: string, natives: string]: nothing -> bool {
+    $target == "public" and $registry in ["npm" "maven"] and $natives == ""
+}
+
 def prepare-package [language: string, version: string, stage: string, owner: string, npm_name: string = "", natives: string = ""] {
     let spec = (spec-for $language)
     let name = (package-name $language)
@@ -254,6 +261,7 @@ def prepare-package [language: string, version: string, stage: string, owner: st
                 cp ...(glob ($stage | path join "native" $platform $"*($pair.lib)*")) ($dir | path join $pair.part)
             }
             platform-manifest $package_name $target $version $owner $publish_config | to json --indent 2 | save --force ($dir | path join "package.json")
+            platform-readme $package_name $target $owner | save --force ($dir | path join "README.md")
             cp ($env.PWD | path join "LICENSE") $dir
         }
         for part in [client broker] {
@@ -359,6 +367,9 @@ def "main publish" [
     let spec = (spec-for $language)
     let name = (package-name $language)
 
+    if (needs-natives $spec.registry $target $natives) {
+        error make { msg: $"publishing ($language) to the public registry needs --natives: every platform's libraries \(native-libs.yml builds them\)" }
+    }
     let npm_name = if $npm_name != "" { $npm_name } else if $target == "public" { "stem-mqtt" } else { "" }
     # Before prepare-package: the platform packages take the main package's publishConfig.
     if $target == "public" and $spec.registry == "npm" {

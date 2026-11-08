@@ -9,7 +9,9 @@
 
 # True when a failed publish only means "this version is already there".
 export def already-there [output: string]: nothing -> bool {
-    $output =~ '(?i)409 Conflict|status code:? 409|Cannot publish over existing version|EPUBLISHCONFLICT|already exists'
+    # npmjs.org answers a re-publish with 403 "cannot publish over the previously
+    # published versions" (a v0.7.0 re-run stopped at the first platform package).
+    $output =~ '(?i)409 Conflict|status code:? 409|Cannot publish over existing version|cannot publish over the previously published versions|EPUBLISHCONFLICT|already exists'
 }
 
 # Runs `cmd` and maps an "already published" failure to success.
