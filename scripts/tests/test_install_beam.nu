@@ -1,5 +1,5 @@
 use std/assert
-use ../ci/install_beam.nu [os-build arch-build otp-url elixir-url OTP ELIXIR]
+use ../ci/install_beam.nu [os-build arch-build otp-url elixir-url place OTP ELIXIR]
 use runner.nu run-tests
 
 const JAMMY = 'PRETTY_NAME="Ubuntu 22.04.5 LTS"
@@ -31,6 +31,21 @@ def "test install beam: urls of the pinned builds" [] {
     assert equal (otp-url "amd64" "ubuntu-24.04") $"https://builds.hex.pm/builds/otp/amd64/ubuntu-24.04/OTP-($OTP).tar.gz"
     assert equal (elixir-url "1.18.6" "27.3.4.10") "https://builds.hex.pm/builds/elixir/v1.18.6-otp-27.zip"
     assert ((elixir-url) | str ends-with $"v($ELIXIR)-otp-27.zip")
+}
+
+# Regression: on a fresh Gitea runner ~/.local/beam did not exist and mv failed.
+def "test install beam: place creates the parents and replaces the old install" [] {
+    let tmp = (mktemp -d)
+    let to = ($tmp | path join home .local beam otp)
+    for content in ["old" "new"] {
+        let from = ($tmp | path join $"OTP-($content)")
+        mkdir $from
+        $content | save ($from | path join release)
+        place $from $to
+        assert equal (open ($to | path join release)) $content
+        assert not ($from | path exists)
+    }
+    rm -rf $tmp
 }
 
 def main [] { run-tests }

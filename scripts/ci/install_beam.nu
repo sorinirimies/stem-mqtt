@@ -49,6 +49,14 @@ export def elixir-url [version: string = $ELIXIR, otp: string = $OTP]: nothing -
     $"https://builds.hex.pm/builds/elixir/v($version)-otp-($otp | split row '.' | first).zip"
 }
 
+# Move a directory to `to`, replacing what is there and creating its parents (a fresh
+# runner has no ~/.local/beam: the first Gitea run failed in mv).
+export def place [from: string, to: string] {
+    mkdir ($to | path dirname)
+    rm -rf $to
+    mv $from $to
+}
+
 # Download with retries: the runner's network to the CDNs is flaky.
 def fetch [url: string, file: string] {
     for attempt in 1..5 {
@@ -60,25 +68,28 @@ def fetch [url: string, file: string] {
     error make --unspanned { msg: $"could not download ($url)" }
 }
 
-def main [--root: string = ""] {
+def main [
+    --root: string = ""                     # default ~/.local/beam
+    --os-release: string = "/etc/os-release" # which OS to pick the build for
+    --machine: string = ""                  # default `uname -m`
+] {
     let root = if $root != "" { $root } else { $env.HOME | path join .local beam }
-    let os = (os-build (open --raw /etc/os-release))
-    let arch = (arch-build (^uname -m | str trim))
+    let os = (os-build (open --raw $os_release))
+    let arch = (arch-build (if $machine != "" { $machine } else { ^uname -m | str trim }))
     let tmp = (mktemp -d)
 
     print $"▶ Erlang/OTP ($OTP) for ($arch)/($os)"
     let otp_dir = ($root | path join otp)
     fetch (otp-url $arch $os) ($tmp | path join otp.tar.gz)
     ^tar -xzf ($tmp | path join otp.tar.gz) -C $tmp
-    rm -rf $otp_dir
-    mv ($tmp | path join $"OTP-($OTP)") $otp_dir
+    place ($tmp | path join $"OTP-($OTP)") $otp_dir
     do { cd $otp_dir; ^./Install -minimal $otp_dir }
 
     print $"▶ Elixir ($ELIXIR)"
     let elixir_dir = ($root | path join elixir)
     fetch (elixir-url) ($tmp | path join elixir.zip)
-    rm -rf $elixir_dir
-    ^unzip -q ($tmp | path join elixir.zip) -d $elixir_dir
+    ^unzip -q ($tmp | path join elixir.zip) -d ($tmp | path join elixir)
+    place ($tmp | path join elixir) $elixir_dir
     rm -rf $tmp
 
     let bins = [($otp_dir | path join bin) ($elixir_dir | path join bin)]
