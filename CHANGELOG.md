@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.8.0] - 2026-11-09
+### ✨ Features
+- C, C++, Zig and Lua bindings, runtime-tested in CI
+### 🐛 Bug Fixes
+- finish npm releases that stopped half way, and only from GitHub
+- name the Windows platform packages <name>-win32-<cpu>-msvc
+- install the BEAM on Gitea without setup-beam
+- install_beam.nu creates ~/.local/beam before moving into it
+- log the bound port, and start the CLI test brokers on port 0
+### 📦 Build
+- uniffi-bindgen-lua 0.1.2, the release with the dispatcher fix
+### 🔄 CI
+- bump actions/checkout from 4 to 7 (#18)
+**Full Changelog**: https://github.com/sorinirimies/stem-mqtt/compare/v0.7.0...v0.8.0
 ## [0.7.0] - 2026-11-08
 ### ✨ Features
 - one npm package and one Maven jar per platform **[BREAKING]**
