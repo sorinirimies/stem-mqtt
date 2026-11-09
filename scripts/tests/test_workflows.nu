@@ -231,4 +231,13 @@ def "test workflows: gitea checks the msrv like github" [] {
     assert equal (do $checks $gt) (do $checks $gh)
 }
 
+# Every language test_bindings.nu smoke-tests runs in CI, on both hosts.
+def "test workflows: every smoke-tested language runs in ci on both hosts" [] {
+    use ../test_bindings.nu [TESTED]
+    for host in [.github .gitea] {
+        let matrix = (open (root | path join $host workflows ci.yml)).jobs.test-bindings-runtime.strategy.matrix.language
+        assert equal ($matrix | sort) ($TESTED | sort) $"($host) runtime matrix"
+    }
+}
+
 def main [] { run-tests }

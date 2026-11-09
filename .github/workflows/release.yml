@@ -323,7 +323,7 @@ jobs:
           path: "*stem_mqtt_nif-v*.tar.gz"
           retention-days: 1
 
-  # ── 4. UniFFI source bindings (official backends) ────────────────────────────
+  # ── 4. UniFFI source bindings (official backends, C, C++, Zig, Lua) ──────────
   bindings:
     name: UniFFI bindings — ${{ matrix.language }}
     needs: [validate, test]
@@ -331,7 +331,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        language: [kotlin, swift, python]
+        # C, C++, Zig and Lua: generated sources, built into the user's program and linked
+        # to the libraries of the mqtt-client-/mqtt-broker-<version>-<target> archives.
+        language: [kotlin, swift, python, c, cpp, zig, lua]
     steps:
       - uses: actions/checkout@v7
         with:
@@ -350,6 +352,8 @@ jobs:
           sudo install -m 0755 /tmp/nu-$V-x86_64-unknown-linux-gnu/nu /usr/local/bin/nu || install -m 0755 /tmp/nu-$V-x86_64-unknown-linux-gnu/nu "$HOME/.cargo/bin/nu"
           nu --version
 
+      - name: Install the ${{ matrix.language }} generator
+        run: nu scripts/install_bindgens.nu ${{ matrix.language }}
       - name: Generate bindings (mqtt-client)
         run: nu scripts/generate_bindings.nu ${{ matrix.language }} mqtt-client
 

@@ -92,6 +92,30 @@ def _raw-specs []: nothing -> list<record> {
             # message string; both fixed by this patch (see packaging/haskell/).
             patch: "packaging/haskell/uniffi-bindgen-haskell.patch", crate_path: "crates/uniffi-bindgen-haskell"
         }
+        # Sources compiled into the user's program, linked to the release libraries: they ship as
+        # release assets (bindings-<language>.zip), not through a package registry.
+        {
+            language: c, kind: external, uniffi: workspace, tool: "uniffi-bindgen-c"
+            install: [uniffi-bindgen-c --version "0.1.1"]
+            registry: oci, maturity: experimental
+        }
+        {
+            language: cpp, kind: external, uniffi: workspace, tool: "uniffi-bindgen-cpp"
+            install: [uniffi-bindgen-cpp --version "0.3.1"]
+            registry: oci, maturity: experimental
+        }
+        {
+            language: zig, kind: external, uniffi: workspace, tool: "uniffi-bindgen-zig"
+            install: [uniffi-bindgen-zig --version "0.1.1"]
+            registry: oci, maturity: experimental
+        }
+        {
+            language: lua, kind: external, uniffi: workspace, tool: "uniffi-bindgen-lua"
+            # 0.1.1 deadlocked when Lua waited in one module (a client's connect) while Rust
+            # called back into another (the broker's auth provider); fixed on main, not released yet.
+            install: [uniffi-bindgen-lua --git "https://github.com/sorinirimies/uniffi-bindgen-lua" --rev "f82338a6ef467acea88b1226b87a0b33daeacfdb"]
+            registry: oci, maturity: experimental
+        }
     ]
 }
 
@@ -101,6 +125,7 @@ export def canonical-language [name: string]: nothing -> string {
         "cs" | "c#" | "dotnet" => "csharp"
         "js" | "node-js" | "nodejs" => "node"
         "hs" => "haskell"
+        "c++" | "cxx" => "cpp"
         "kt" => "kotlin"
         "py" => "python"
         $other => $other
@@ -172,6 +197,8 @@ export def generator-args [language: string, lib: string, out: string, lib_name:
             "--cabal-header" ($repo | path join "packaging" "haskell" "cabal-header.txt")
             "--cabal-native-library" $lib_name
         ]
+        # --crate: library mode would also emit the crates the library depends on.
+        "c" | "cpp" | "zig" | "lua" => ["generate" $lib "--out-dir" $out "--crate" $lib_name]
         $other => { error make { msg: $"no external generator arguments defined for '($other)'" } }
     }
 }

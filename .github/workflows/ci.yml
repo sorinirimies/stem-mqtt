@@ -211,7 +211,7 @@ jobs:
       fail-fast: false
       matrix:
         runner: [ubuntu-latest]
-        language: [python, ruby, swift, go, csharp, java, dart, node, haskell]
+        language: [python, ruby, swift, go, csharp, java, dart, node, haskell, c, cpp, zig, lua]
         # Swiftly (setup-swift) rejects ubuntu-latest's Ubuntu 26.04 as an
         # "Unsupported Linux platform"; Swift stays on 24.04 until it does.
         exclude:
@@ -303,6 +303,14 @@ jobs:
           gpg --keyserver hkps://keyserver.ubuntu.com --recv-keys E813C892820A6FA13755B268F167DF1ACF9CE069
       - uses: swift-actions/setup-swift@v3
         if: matrix.language == 'swift'
+      # C and C++ use the runner's compilers; Zig and Lua need theirs.
+      - uses: mlugg/setup-zig@v2
+        if: matrix.language == 'zig'
+        with:
+          version: "0.17.1"
+      - name: Install Lua 5.4 and its headers
+        if: matrix.language == 'lua'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends lua5.4 liblua5.4-dev
       # The generators are `cargo install`ed from git; cache them (keyed by their pins).
       - name: Restore generator cache
         if: matrix.language != 'python'

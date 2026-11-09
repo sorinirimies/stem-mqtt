@@ -6,7 +6,7 @@
 use std/assert
 use runner.nu *
 use ../bindings/spec.nu *
-use ../test_bindings.nu classify
+use ../test_bindings.nu [classify native-smoke-args lua-module-args]
 use ../bindings/updates.nu *
 
 def "test bindgens: every requested language is supported" [] {
@@ -248,6 +248,33 @@ def "test bindgens: the default target is unchanged GitHub Packages" [] {
     let oci = (publish-plan go "1.0.0" "d" "acme" | first)
     assert ($oci.args | any { |a| $a == "ghcr.io/acme/stem-mqtt-go:1.0.0" })
     assert (not ("--plain-http" in $oci.args))
+}
+
+def "test bindgens: c and cpp smoke tests build with the generated sources of both components" [] {
+    let tmp = (mktemp -d)
+    for crate in [mqtt-client mqtt-broker] {
+        let lib = ($crate | str replace "-" "_")
+        mkdir ($tmp | path join $crate)
+        for ext in [c h cpp hpp] { "" | save ($tmp | path join $crate $"($lib).($ext)") }
+    }
+    let c = (native-smoke-args c "smoke.c" $tmp "/stage")
+    assert ("-std=c11" in $c)
+    assert ($c | any { |a| $a ends-with "mqtt_client.c" })
+    assert ($c | any { |a| $a ends-with "mqtt_broker.c" })
+    assert not ($c | any { |a| $a ends-with ".cpp" })
+    assert ("-lmqtt_client" in $c and "-lmqtt_broker" in $c and "-Wl,-rpath,/stage" in $c)
+    let cpp = (native-smoke-args cpp "smoke.cpp" $tmp "/stage")
+    assert ("-std=c++17" in $cpp)
+    assert equal ($cpp | where { |a| $a ends-with ".cpp" } | length) 3
+    rm -rf $tmp
+}
+
+def "test bindgens: lua modules link their own library, with lua symbols resolved by the interpreter" [] {
+    let linux = (lua-module-args "/gen/mqtt-client" "/usr/include/lua5.4" "mqtt_client" "/stage" "linux")
+    assert ("/gen/mqtt-client/mqtt_client.c" in $linux)
+    assert ("-lmqtt_client" in $linux and "-fPIC" in $linux)
+    assert equal ($linux | last) "/stage/mqtt_client.so"
+    assert ("dynamic_lookup" in (lua-module-args "/g" "/i" "mqtt_broker" "/s" "macos"))
 }
 
 def main [] { run-tests }

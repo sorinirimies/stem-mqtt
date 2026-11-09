@@ -27,7 +27,7 @@ use bindings/hackage.nu *
 use bindings/dart_package.nu *
 use bindings/node_package.nu *
 
-const TESTED = [python ruby swift go csharp java dart node haskell]
+export const TESTED = [python ruby swift go csharp java dart node haskell c cpp zig lua]
 
 def repo []: nothing -> string { $env.FILE_PWD | path dirname }
 
@@ -301,6 +301,82 @@ def run-swift [spec: record, work: string] {
     do { cd $stage; ^swift run smoke } | complete
 }
 
+# ── C, C++, Zig, Lua: the generated sources build with the smoke test ───────
+
+# Compiler arguments building the C or C++ smoke test with the generated sources of both
+# components (in `gen/<crate>/`), linked to both libraries in `stage`. Pure → unit-tested.
+export def native-smoke-args [language: string, smoke: string, gen: string, stage: string]: nothing -> list<string> {
+    let ext = if $language == "cpp" { "cpp" } else { "c" }
+    let std = if $language == "cpp" { "-std=c++17" } else { "-std=c11" }
+    let dirs = ([mqtt-client mqtt-broker] | each { |c| $gen | path join $c })
+    [$std "-Wall" "-Wextra" "-Werror" "-pthread"
+     ...($dirs | each { |d| $"-I($d)" })
+     $smoke
+     ...($dirs | each { |d| glob ($d | path join $"*.($ext)") } | flatten | sort)
+     $"-L($stage)" "-lmqtt_client" "-lmqtt_broker" $"-Wl,-rpath,($stage)" "-o" ($stage | path join "smoke")]
+}
+
+def run-native [language: string, compiler: string, smoke: string, spec: record, work: string] {
+    if (which $compiler | is-empty) { return { skip: $"($compiler) not found" } }
+    let stage = ($work | path join "stage")
+    rm -rf $stage
+    stage-libs $spec $stage [mqtt-client mqtt-broker]
+    let built = (do { ^$compiler ...(native-smoke-args $language $smoke ($work | path join "gen") $stage) } | complete)
+    if $built.exit_code != 0 { return $built }
+    do { ^($stage | path join "smoke") } | complete
+}
+
+def run-c [spec: record, work: string] {
+    run-native c ($env.CC? | default "cc") (smoke-src c | path join "smoke.c") $spec $work
+}
+
+def run-cpp [spec: record, work: string] {
+    run-native cpp ($env.CXX? | default "c++") (smoke-src cpp | path join "smoke.cpp") $spec $work
+}
+
+# Zig imports files next to the importer: the smoke test and both components share a directory.
+def run-zig [spec: record, work: string] {
+    if (which zig | is-empty) { return { skip: "zig not found" } }
+    let stage = ($work | path join "stage")
+    rm -rf $stage
+    stage-libs $spec $stage [mqtt-client mqtt-broker]
+    for crate in [mqtt-client mqtt-broker] { cp ...(glob ($work | path join "gen" $crate "*.zig")) $stage }
+    cp (smoke-src zig | path join "smoke.zig") $stage
+    do { cd $stage; ^zig run smoke.zig "-lc" $"-L($stage)" "-lmqtt_client" "-lmqtt_broker" "-rpath" $stage } | complete
+}
+
+# A Lua interpreter and the headers of the same version: $LUA_INCLUDE, else the usual places.
+export def lua-toolchain [os: string]: nothing -> any {
+    let bin = ([lua5.4 lua5.5 lua] | where { |b| which $b | is-not-empty } | get 0? | default "")
+    let dirs = ([($env.LUA_INCLUDE? | default "") "/usr/include/lua5.4" "/usr/include/lua5.5" "/opt/homebrew/opt/lua/include/lua" "/usr/local/opt/lua/include/lua"]
+        | where { |d| $d != "" and ($d | path join "lua.h" | path exists) })
+    if $bin == "" or ($dirs | is-empty) { null } else { { bin: $bin, include: ($dirs | first) } }
+}
+
+# Compiler arguments building one component's Lua C module (`<lib>.so`, Lua's default cpath
+# suffix on macOS too) linked to its library in `stage`. Pure → unit-tested.
+export def lua-module-args [gen: string, include: string, lib: string, stage: string, os: string]: nothing -> list<string> {
+    let platform = if $os == "macos" { ["-shared" "-undefined" "dynamic_lookup"] } else { ["-shared" "-fPIC" "-pthread"] }
+    ["-std=c11" "-Wall" "-Wextra" "-Werror" ...$platform $"-I($gen)" $"-I($include)" ($gen | path join $"($lib).c")
+     $"-L($stage)" $"-l($lib)" $"-Wl,-rpath,($stage)" "-o" ($stage | path join $"($lib).so")]
+}
+
+def run-lua [spec: record, work: string] {
+    let lua = (lua-toolchain $nu.os-info.name)
+    if $lua == null { return { skip: "lua with headers not found (set LUA_INCLUDE)" } }
+    let cc = ($env.CC? | default "cc")
+    let stage = ($work | path join "stage")
+    rm -rf $stage
+    stage-libs $spec $stage [mqtt-client mqtt-broker]
+    for crate in [mqtt-client mqtt-broker] {
+        let lib = (crate-for $crate).lib
+        let built = (do { ^$cc ...(lua-module-args ($work | path join "gen" $crate) $lua.include $lib $stage $nu.os-info.name) } | complete)
+        if $built.exit_code != 0 { return $built }
+    }
+    cp (smoke-src lua | path join "smoke.lua") $stage
+    do { cd $stage; ^$lua.bin smoke.lua } | complete
+}
+
 def run-language [spec: record, work: string] {
     match $spec.language {
         "python" => (run-python $spec $work)
@@ -312,6 +388,10 @@ def run-language [spec: record, work: string] {
         "dart" => (run-dart $spec $work)
         "node" => (run-node $spec $work)
         "haskell" => (run-haskell $spec $work)
+        "c" => (run-c $spec $work)
+        "cpp" => (run-cpp $spec $work)
+        "zig" => (run-zig $spec $work)
+        "lua" => (run-lua $spec $work)
         $other => { error make { msg: $"no smoke test for '($other)'" } }
     }
 }

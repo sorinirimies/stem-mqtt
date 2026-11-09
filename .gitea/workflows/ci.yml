@@ -201,7 +201,7 @@ jobs:
       fail-fast: false
       max-parallel: 4
       matrix:
-        language: [python, ruby, swift, go, csharp, java, dart, node, haskell]
+        language: [python, ruby, swift, go, csharp, java, dart, node, haskell, c, cpp, zig, lua]
     steps:
       - uses: actions/checkout@v4
 
@@ -338,6 +338,15 @@ jobs:
         if: steps.setup_try_6.outcome == 'failure'
       - uses: swift-actions/setup-swift@v2
         if: matrix.language == 'swift'
+
+      # C and C++ use the runner's compilers; Zig and Lua need theirs.
+      - uses: mlugg/setup-zig@v2
+        if: matrix.language == 'zig'
+        with:
+          version: "0.17.1"
+      - name: Install Lua 5.4 and its headers
+        if: matrix.language == 'lua'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends lua5.4 liblua5.4-dev
 
       # The generators are `cargo install`ed from git; cache them (keyed by their pins).
       - name: Restore generator cache

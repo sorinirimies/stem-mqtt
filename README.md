@@ -2,8 +2,8 @@
 
 An **MQTT 3.1.1 / 5.0 client and broker written in Rust** — async (`tokio`), TLS, WebSocket,
 QoS 0/1/2, shared subscriptions, enhanced authentication — usable as a Rust library, as a
-standalone broker binary, from **Kotlin, Swift, Python, Ruby, Go, C#, Java, Dart, Node.js and
-Haskell** through generated [UniFFI](https://mozilla.github.io/uniffi-rs/) bindings, and from
+standalone broker binary, from **Kotlin, Swift, Python, Ruby, Go, C#, Java, Dart, Node.js,
+Haskell, C, C++, Zig and Lua** through generated [UniFFI](https://mozilla.github.io/uniffi-rs/) bindings, and from
 **Elixir and Erlang** through a [Rustler](https://github.com/rusterlium/rustler) NIF. Client *and*
 broker ship in every language, one generator per language, each runtime-tested against a real
 broker in CI.
@@ -162,6 +162,10 @@ language-specific notes, building from source and troubleshooting — live in
 | Elixir / Erlang | [elixir.md](docs/languages/elixir.md) | Rustler NIF; events as messages; precompiled |
 | Ruby | [ruby.md](docs/languages/ruby.md) | per-platform gems; async calls block (fiber-aware) |
 | Swift | [swift.md](docs/languages/swift.md) | `async`/`await`; XCFrameworks for Apple platforms |
+| C | [c.md](docs/languages/c.md) | C11 sources + the release libraries; `_async` variants with completion callbacks |
+| C++ | [cpp.md](docs/languages/cpp.md) | C++17; `uniffi::Future`; exceptions or `uniffi::Result` |
+| Zig | [zig.md](docs/languages/zig.md) | Zig 0.17; Zig errors and allocators |
+| Lua | [lua.md](docs/languages/lua.md) | Lua C modules (smoke-tested on 5.4 and 5.5); callbacks run on the Lua thread |
 
 Callbacks are available everywhere except Dart and Haskell, which use the
 [pull-style API](docs/languages/README.md#receiving-messages-and-events).
@@ -259,7 +263,7 @@ lives in one file, [`scripts/bindings/spec.nu`](scripts/bindings/spec.nu).
 ```sh
 nu scripts/generate_bindings.nu kotlin            # kotlin | swift | python (built into UniFFI)
 nu scripts/install_bindgens.nu                    # install the pinned third-party generators
-nu scripts/generate_bindings.nu go mqtt-broker    # go | csharp | java | dart | node | haskell
+nu scripts/generate_bindings.nu go mqtt-broker    # go | csharp | java | dart | node | haskell | c | cpp | zig | lua
 just bindings-all                                 # or: just bindings-third-party
 ```
 
@@ -274,6 +278,10 @@ just bindings-all                                 # or: just bindings-third-part
 | Dart | [uniffi-dart](https://github.com/acterglobal/uniffi-dart) | ✅ client + broker through the pull-style API ¹ | experimental |
 | Node.js | [uniffi-bindgen-node-js](https://github.com/criccomini/uniffi-bindgen-node-js) | ✅ client + broker + all callbacks | experimental |
 | Haskell | [uniffi-bindgen-haskell](https://github.com/mercury/uniffi-bindgen-haskell) + [our patch](packaging/haskell) (PR [#3](https://github.com/mercury/uniffi-bindgen-haskell/pull/3)) | ✅ client + broker through the pull-style API ¹ | experimental |
+| C | [uniffi-bindgen-c](https://github.com/sorinirimies/uniffi-bindgen-c) | ✅ client + broker + all callbacks | experimental |
+| C++ | [uniffi-bindgen-cpp](https://github.com/sorinirimies/uniffi-bindgen-cpp) | ✅ client + broker + all callbacks | experimental |
+| Zig | [uniffi-bindgen-zig](https://github.com/sorinirimies/uniffi-bindgen-zig) | ✅ client + broker + all callbacks | experimental |
+| Lua | [uniffi-bindgen-lua](https://github.com/sorinirimies/uniffi-bindgen-lua) ³ | ✅ client + broker + all callbacks | experimental |
 
 ¹ Dart: foreign callbacks cannot be invoked from Rust's own threads (the VM aborts). Haskell: callback
 interfaces are exposed only as opaque handles. So `MqttMessageListener`, `MqttAuthProvider`,
@@ -286,6 +294,11 @@ lowered their arguments (generated code didn't compile), flat-error variants dro
 (decoder failed with "left N trailing bytes"), and records sharing a field name broke the public module.
 [`packaging/haskell/uniffi-bindgen-haskell.patch`](packaging/haskell/uniffi-bindgen-haskell.patch)
 fixes all three (and is proposed upstream, see [`packaging/haskell`](packaging/haskell)); `install_bindgens.nu` builds the generator from the pinned revision with the patch applied.
+³ Lua is pinned to a commit after uniffi-bindgen-lua 0.1.1, which deadlocked when Lua waited in one module
+(a client's `connect`) while Rust called back into the other (the broker's auth provider).
+
+C, C++, Zig and Lua ship as sources (`bindings-<language>.zip` on each release) that you compile into
+your program and link to the libraries of the `mqtt-client-` / `mqtt-broker-<version>-<target>` archives.
 
 **One solution per language, client and broker everywhere.** Each language has exactly one generator
 (no parallel hand-written addons), and each component is self-contained: the broker owns its own `QoS`

@@ -19,6 +19,10 @@ between them. This page holds what is common to all of them.
 | Dart | [dart.md](dart.md) | `stem_mqtt` (pub.dev) | uniffi-dart | ❌ pull-style |
 | Haskell | [haskell.md](haskell.md) | `stem-mqtt` (Hackage) | uniffi-bindgen-haskell | ❌ pull-style |
 | Elixir / Erlang | [elixir.md](elixir.md) | `stem_mqtt` (Hex) | Rustler NIF, by hand | messages to the owner |
+| C | [c.md](c.md) | `bindings-c.zip` + release libraries | uniffi-bindgen-c | ✅ |
+| C++ | [cpp.md](cpp.md) | `bindings-cpp.zip` + release libraries | uniffi-bindgen-cpp | ✅ |
+| Zig | [zig.md](zig.md) | `bindings-zig.zip` + release libraries | uniffi-bindgen-zig | ✅ |
+| Lua | [lua.md](lua.md) | `bindings-lua.zip` + release libraries | uniffi-bindgen-lua | ✅ |
 
 ## The model
 
