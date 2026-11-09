@@ -1046,7 +1046,7 @@ jobs:
         if: env.HAS_TOKEN != 'true'
         run: echo "⏭️  no registry token for ${{ matrix.language }} — skipping its public package."
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: env.HAS_TOKEN == 'true'
         with:
           ref: ${{ needs.validate.outputs.ref }}
