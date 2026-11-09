@@ -111,9 +111,9 @@ def _raw-specs []: nothing -> list<record> {
         }
         {
             language: lua, kind: external, uniffi: workspace, tool: "uniffi-bindgen-lua"
-            # 0.1.1 deadlocked when Lua waited in one module (a client's connect) while Rust
-            # called back into another (the broker's auth provider); fixed on main, not released yet.
-            install: [uniffi-bindgen-lua --git "https://github.com/sorinirimies/uniffi-bindgen-lua" --rev "f82338a6ef467acea88b1226b87a0b33daeacfdb"]
+            # 0.1.2+: 0.1.1 deadlocked when Lua waited in one module (a client's connect) while
+            # Rust called back into another (the broker's auth provider).
+            install: [uniffi-bindgen-lua --version "0.1.2"]
             registry: oci, maturity: experimental
         }
     ]

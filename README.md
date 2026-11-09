@@ -294,8 +294,8 @@ lowered their arguments (generated code didn't compile), flat-error variants dro
 (decoder failed with "left N trailing bytes"), and records sharing a field name broke the public module.
 [`packaging/haskell/uniffi-bindgen-haskell.patch`](packaging/haskell/uniffi-bindgen-haskell.patch)
 fixes all three (and is proposed upstream, see [`packaging/haskell`](packaging/haskell)); `install_bindgens.nu` builds the generator from the pinned revision with the patch applied.
-³ Lua is pinned to a commit after uniffi-bindgen-lua 0.1.1, which deadlocked when Lua waited in one module
-(a client's `connect`) while Rust called back into the other (the broker's auth provider).
+³ Lua needs uniffi-bindgen-lua 0.1.2 or later: 0.1.1 deadlocked when Lua waited in one module (a
+client's `connect`) while Rust called back into the other (the broker's auth provider).
 
 C, C++, Zig and Lua ship as sources (`bindings-<language>.zip` on each release) that you compile into
 your program and link to the libraries of the `mqtt-client-` / `mqtt-broker-<version>-<target>` archives.
