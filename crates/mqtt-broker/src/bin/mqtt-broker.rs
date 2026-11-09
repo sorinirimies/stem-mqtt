@@ -55,6 +55,8 @@ async fn main() -> anyhow::Result<()> {
 
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::new(&args.log_level))
+        // Plain text when piped (a log collector, or a test reading the port).
+        .with_ansi(std::io::IsTerminal::is_terminal(&std::io::stdout()))
         .init();
 
     let mut config = MqttBrokerConfig::new(args.bind.clone(), args.port);
@@ -70,8 +72,10 @@ async fn main() -> anyhow::Result<()> {
         .await
         .map_err(|e| anyhow::anyhow!(e.to_string()))?;
 
-    tracing::info!(bind = %args.bind, port = args.port, "mqtt-broker listening");
-    if let Some(ws_port) = args.ws_port {
+    // The ports actually bound: with `--port 0` the OS picks one.
+    let port = broker.bound_port().unwrap_or(args.port);
+    tracing::info!(bind = %args.bind, port, "mqtt-broker listening");
+    if let Some(ws_port) = broker.bound_ws_port() {
         tracing::info!(bind = %args.bind, port = ws_port, "mqtt-broker listening (WebSocket)");
     }
 

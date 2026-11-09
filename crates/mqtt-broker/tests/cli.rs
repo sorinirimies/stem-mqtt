@@ -4,48 +4,51 @@
 
 #![cfg(unix)]
 #![allow(clippy::unwrap_used)] // Test harness: a failed setup step should panic.
-use std::net::TcpListener;
+use std::io::{BufRead, BufReader};
 use std::process::{Child, Command, Stdio};
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use mqtt_client::{ConnectOptions, MqttClient, MqttVersion, QoS};
 
-fn free_port() -> u16 {
-    TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
+/// The port in the broker's "mqtt-broker listening" log line (not the WebSocket one).
+fn listening_port(line: &str) -> Option<u16> {
+    if !line.contains("mqtt-broker listening") || line.contains("WebSocket") {
+        return None;
+    }
+    line.split_whitespace()
+        .find_map(|word| word.strip_prefix("port="))?
+        .parse()
+        .ok()
 }
 
+/// Starts the broker on `--port 0` and returns once it listens, with the port the OS
+/// picked, read from its log. (Picking a free port first and passing it raced: the
+/// port was released before the broker bound it, and two tests' brokers could meet
+/// on one port; the SIGTERM test then reached the `--max-clients 1` broker and was
+/// reset.)
 fn spawn_broker(extra: &[&str]) -> (Child, u16) {
-    let port = free_port();
-    let child = Command::new(env!("CARGO_BIN_EXE_mqtt-broker"))
-        .args([
-            "--bind",
-            "127.0.0.1",
-            "--port",
-            &port.to_string(),
-            "--log-level",
-            "warn",
-        ])
+    let mut child = Command::new(env!("CARGO_BIN_EXE_mqtt-broker"))
+        .args(["--bind", "127.0.0.1", "--port", "0", "--log-level", "info"])
         .args(extra)
-        .stdout(Stdio::null())
+        .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
         .expect("the broker binary must start");
+    let stdout = child.stdout.take().unwrap();
+    let (tx, rx) = mpsc::channel();
+    // Keeps draining the log so the broker never blocks on a full pipe.
+    std::thread::spawn(move || {
+        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+            if let Some(port) = listening_port(&line) {
+                let _ = tx.send(port);
+            }
+        }
+    });
+    let port = rx
+        .recv_timeout(Duration::from_secs(10))
+        .expect("the broker logs the port it listens on");
     (child, port)
-}
-
-async fn wait_until_listening(port: u16) {
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while tokio::net::TcpStream::connect(("127.0.0.1", port))
-        .await
-        .is_err()
-    {
-        assert!(Instant::now() < deadline, "broker never started listening");
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
 }
 
 fn client(port: u16, id: &str) -> MqttClient {
@@ -55,7 +58,6 @@ fn client(port: u16, id: &str) -> MqttClient {
 #[tokio::test]
 async fn serves_clients_and_exits_cleanly_on_sigterm() {
     let (mut child, port) = spawn_broker(&[]);
-    wait_until_listening(port).await;
 
     let c = client(port, "cli-client");
     c.connect()
@@ -88,7 +90,6 @@ async fn serves_clients_and_exits_cleanly_on_sigterm() {
 #[tokio::test]
 async fn limit_flags_are_applied() {
     let (mut child, port) = spawn_broker(&["--max-packet-size", "1024", "--max-clients", "1"]);
-    wait_until_listening(port).await;
 
     let first = client(port, "first");
     first.connect().await.unwrap();
@@ -113,6 +114,28 @@ async fn limit_flags_are_applied() {
 
     child.kill().unwrap();
     let _ = child.wait();
+}
+
+// Regression: the CLI logged the requested port, so `--port 0` logged `port=0`.
+#[test]
+fn port_zero_logs_the_port_actually_bound() {
+    let (mut child, port) = spawn_broker(&[]);
+    assert_ne!(port, 0);
+    assert!(std::net::TcpStream::connect(("127.0.0.1", port)).is_ok());
+    child.kill().unwrap();
+    let _ = child.wait();
+}
+
+#[test]
+fn listening_port_reads_the_mqtt_line_only() {
+    let line =
+        "2026-11-09T06:00:00Z  INFO mqtt_broker: mqtt-broker listening bind=127.0.0.1 port=51234";
+    assert_eq!(listening_port(line), Some(51234));
+    assert_eq!(
+        listening_port(&line.replace("listening", "listening (WebSocket)")),
+        None
+    );
+    assert_eq!(listening_port("INFO shutting down"), None);
 }
 
 #[test]
