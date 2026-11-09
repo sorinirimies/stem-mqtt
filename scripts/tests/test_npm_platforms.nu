@@ -3,7 +3,7 @@
 # Tests for scripts/bindings/npm_platforms.nu (one npm package per platform).
 
 use std/assert
-use ../bindings/npm_platforms.nu [platform-package-name platform-manifest main-manifest patch-node-loader platform-readme]
+use ../bindings/npm_platforms.nu [platform-package-name platform-manifest main-manifest patch-node-loader platform-readme publishable-targets]
 use runner.nu run-tests
 
 const LOADER = 'function defaultBundledLibrary() {
@@ -53,6 +53,14 @@ def "test npm platforms: platform package names keep the scope" [] {
     # Windows packages name their ABI (npmjs.org rejected stem-mqtt-win32-x64 as spam, v0.7.0).
     assert equal (platform-package-name "@acme/stem-mqtt-node" "win32-x64") "@acme/stem-mqtt-node-win32-x64-msvc"
     assert equal (platform-package-name "stem-mqtt" "linux-x64-gnu") "stem-mqtt-linux-x64-gnu"
+}
+
+# Regression: npmjs.org's spam detection rejected stem-mqtt-win32-x64-msvc (v0.8.0), and the
+# release stopped before the main package, which stayed at 0.6.1.
+def "test npm platforms: npmjs leaves out the held back windows package, other registries keep it" [] {
+    let targets = [darwin-arm64 linux-x64-gnu win32-x64]
+    assert equal (publishable-targets $targets true) [darwin-arm64 linux-x64-gnu]
+    assert equal (publishable-targets $targets false) $targets
 }
 
 def "test npm platforms: a platform package has a readme that points to the main package" [] {

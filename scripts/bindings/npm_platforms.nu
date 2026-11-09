@@ -15,6 +15,18 @@ export def platform-package-name [main: string, target: string]: nothing -> stri
     if ($target | str starts-with "win32-") { $"($main)-($target)-msvc" } else { $"($main)-($target)" }
 }
 
+# Targets left out of the public (npmjs.org) package: its spam detection rejects the Windows
+# package name (stem-mqtt-win32-x64 at v0.7.0, stem-mqtt-win32-x64-msvc at v0.8.0) until npm
+# support clears it. Without it the main package lists no Windows platform, so `npm install`
+# there fails up front (EBADPLATFORM) instead of every release stopping before the main package.
+# GitHub Packages and Gitea still get every platform.
+export const NPMJS_HELD_BACK = ["win32-x64"]
+
+# The targets a package publishes platform packages for: all, less NPMJS_HELD_BACK on npmjs.org.
+export def publishable-targets [targets: list<string>, public: bool]: nothing -> list<string> {
+    if $public { $targets | where { |t| $t not-in $NPMJS_HELD_BACK } } else { $targets }
+}
+
 # package.json of a platform package. `target` is `<os>-<cpu>[-<libc>]`.
 export def platform-manifest [main: string, target: string, version: string, owner: string, publish_config: record]: nothing -> record {
     let parts = ($target | split row "-")
