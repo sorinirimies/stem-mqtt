@@ -458,17 +458,11 @@ jobs:
           sudo install -m 0755 /tmp/nu-$V-x86_64-unknown-linux-gnu/nu /usr/local/bin/nu || install -m 0755 /tmp/nu-$V-x86_64-unknown-linux-gnu/nu "$HOME/.cargo/bin/nu"
           nu --version
 
-      # (retried once: the runner's network to the toolchain CDNs is flaky)
-      # setup-beam picks the OTP build from ImageOS. Gitea's act runner hard-codes
-      # ImageOS=ubuntu20 for ubuntu-latest, over the job env; only a step env wins.
-      # That OTP links OpenSSL 1.1, so :crypto (and `mix local.rebar`) fails on the
-      # runner's OpenSSL 3. 22.04 builds also run on newer Ubuntu.
-      - uses: erlef/setup-beam@v1
-        env:
-          ImageOS: ubuntu22
-        with:
-          otp-version: "27"
-          elixir-version: "1.18"
+      # Not setup-beam: it picks the OTP build from ImageOS, which Gitea's act runner
+      # forces to ubuntu20 (job or step env alike), and that OTP's :crypto needs
+      # OpenSSL 1.1. The script picks the build from /etc/os-release.
+      - name: Install Erlang/OTP and Elixir (builds.hex.pm, for the runner's Ubuntu)
+        run: nu scripts/ci/install_beam.nu
       - name: Build the NIF from source and run ExUnit (client, broker, Erlang API)
         run: nu scripts/ci/elixir.nu test
 

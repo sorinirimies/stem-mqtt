@@ -11,18 +11,16 @@ def runs [wf: string] {
     open $wf | get jobs | values | each {|j| $j.steps? | default [] | each {|s| $s.run? | default "" } } | flatten
 }
 
-# Gitea's act runner sets ImageOS=ubuntu20 for ubuntu-latest over the job env, so
-# setup-beam installed an OpenSSL 1.1 OTP and runtime-elixir died in
-# `mix local.rebar` (a51624f). Only a step env overrides the runner.
-def "test workflows: setup-beam on gitea sets ImageOS on the step itself" [] {
-    for wf in (glob (root | path join ".gitea" "workflows" "*.yml")) {
-        for job in (open $wf | get jobs | values) {
-            for step in ($job.steps? | default [] | where {|s| ($s.uses? | default "") | str starts-with "erlef/setup-beam" }) {
-                let image = ($step.env?.ImageOS? | default "")
-                assert ($image =~ '^ubuntu2[2-9]') $"($wf): setup-beam step has ImageOS '($image)', the runner would force ubuntu20"
-            }
-        }
-    }
+# Regression: setup-beam on Gitea installed the ubuntu-20.04 OTP, whatever ImageOS the
+# workflow set (job env, then step env: the act runner forces ubuntu20), and :crypto
+# failed on the runner's OpenSSL 3. Gitea installs the BEAM with install_beam.nu.
+def "test workflows: gitea installs the beam without setup-beam" [] {
+    let steps = (open (root | path join .gitea workflows ci.yml)).jobs.test-elixir.steps
+    assert not ($steps | any {|s| ($s.uses? | default "") | str starts-with "erlef/setup-beam" })
+    let install = ($steps | where {|s| ($s.run? | default "") == "nu scripts/ci/install_beam.nu" })
+    assert equal ($install | length) 1
+    let names = ($steps | each {|s| $s.run? | default "" })
+    assert (($names | enumerate | where item == "nu scripts/ci/install_beam.nu" | first).index < ($names | enumerate | where item == "nu scripts/ci/elixir.nu test" | first).index)
 }
 
 # A GitHub 504 on the Nushell download failed whole CI and release runs (v0.4.0).
