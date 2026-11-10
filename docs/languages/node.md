@@ -24,14 +24,12 @@ hand-written napi-rs addon `stem-mqtt-client`, which had no broker.
 - Node.js 16+ (ESM — use `"type": "module"` or `.mjs`). **Server-side only**; there is no browser build
   (browsers can talk to the broker's WebSocket port with any MQTT.js client instead).
 - The native libraries come in one package per platform, installed automatically: `stem-mqtt` lists
-  `stem-mqtt-linux-x64-gnu`, `stem-mqtt-linux-arm64-gnu`, `stem-mqtt-darwin-x64` and `stem-mqtt-darwin-arm64`
-  as optional dependencies, each restricted to its `os` / `cpu` (and glibc), so
+  `stem-mqtt-linux-x64-gnu`, `stem-mqtt-linux-arm64-gnu`, `stem-mqtt-darwin-x64`, `stem-mqtt-darwin-arm64`
+  and `@greenspand/stem-mqtt-win32-x64-msvc` (scoped: npmjs.org's spam detection rejects the unscoped
+  Windows name) as optional dependencies, each restricted to its `os` / `cpu` (and glibc), so
   npm installs only the one your machine needs. On any other platform `npm install` fails up front
   (`EBADPLATFORM`). With `--omit=optional` (or a lockfile made on another OS) the platform package is
   missing: install it explicitly, e.g. `npm install stem-mqtt-linux-x64-gnu`.
-- **Windows is not on npmjs.org yet**: npm's spam detection rejects the Windows package's name. Until
-  that is cleared, use the `x86_64-pc-windows-msvc` libraries from the GitHub release (see
-  `EBADPLATFORM` under Troubleshooting) or the package from GitHub Packages.
 - No compiler is needed at install time: `koffi` ships prebuilt binaries.
 
 ## Quick start
@@ -178,7 +176,7 @@ The end-to-end test is [`tests/bindings/node/smoke.mjs`](../../tests/bindings/no
   `libmqtt_client.*` / `libmqtt_broker.*` into `client/prebuilds/<platform>-<arch>/` and
   `broker/prebuilds/<platform>-<arch>/` of the installed package.
 - **`Failed to load shared library`** — the platform package was not installed (optional dependencies
-  omitted); `npm install stem-mqtt-<platform>-<arch>[-gnu]` of the same version.
+  omitted); `npm install stem-mqtt-<platform>-<arch>[-gnu]` (on Windows `@greenspand/stem-mqtt-win32-x64-msvc`) of the same version.
 - **`Duplicate type name 'RustBuffer'`** — you are using separately generated components; the published
   package shares one `runtime/` between client and broker precisely to avoid this.
 - **`SyntaxError: Cannot use import statement`** — the file isn't ESM; use `.mjs` or `"type": "module"`.

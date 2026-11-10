@@ -8,23 +8,23 @@
 # just the one the machine needs.
 # ──────────────────────────────────────────────────────────────────────────────
 
+# npmjs.org's spam detection rejects new unscoped Windows platform names (stem-mqtt-win32-x64 at
+# v0.7.0, stem-mqtt-win32-x64-msvc at v0.8.0), and npm support did not answer. Those targets go
+# under the npm account's scope instead, as napi-rs and esbuild name their platform packages.
+export const NPMJS_SCOPE = "@greenspand"
+export const NPMJS_SCOPED_TARGETS = ["win32-x64"]
+
 # The package carrying one platform's libraries: `<main>-<target>`, and on Windows
-# `<main>-<target>-msvc` (the ABI, as `-gnu` on Linux; npmjs.org's spam detection also
-# rejects the name stem-mqtt-win32-x64). The loader (patch-node-loader) does the same.
+# `<main>-<target>-msvc` (the ABI, as `-gnu` on Linux). An unscoped main package (npmjs.org) puts
+# NPMJS_SCOPED_TARGETS under NPMJS_SCOPE; scoped ones (GitHub Packages, Gitea) keep their scope.
 export def platform-package-name [main: string, target: string]: nothing -> string {
-    if ($target | str starts-with "win32-") { $"($main)-($target)-msvc" } else { $"($main)-($target)" }
+    let name = if ($target | str starts-with "win32-") { $"($main)-($target)-msvc" } else { $"($main)-($target)" }
+    if not ($main | str starts-with "@") and $target in $NPMJS_SCOPED_TARGETS { $"($NPMJS_SCOPE)/($name)" } else { $name }
 }
 
-# Targets left out of the public (npmjs.org) package: its spam detection rejects the Windows
-# package name (stem-mqtt-win32-x64 at v0.7.0, stem-mqtt-win32-x64-msvc at v0.8.0) until npm
-# support clears it. Without it the main package lists no Windows platform, so `npm install`
-# there fails up front (EBADPLATFORM) instead of every release stopping before the main package.
-# GitHub Packages and Gitea still get every platform.
-export const NPMJS_HELD_BACK = ["win32-x64"]
-
-# The targets a package publishes platform packages for: all, less NPMJS_HELD_BACK on npmjs.org.
-export def publishable-targets [targets: list<string>, public: bool]: nothing -> list<string> {
-    if $public { $targets | where { |t| $t not-in $NPMJS_HELD_BACK } } else { $targets }
+# target -> platform package, for the loader (patch-node-loader).
+export def platform-packages [main: string, targets: list<string>]: nothing -> record {
+    $targets | sort | reduce --fold {} { |t, acc| $acc | insert $t (platform-package-name $main $t) }
 }
 
 # package.json of a platform package. `target` is `<os>-<cpu>[-<libc>]`.
@@ -84,19 +84,20 @@ const LOADER_LINE = '    libraryPath: join(moduleDirectory, "prebuilds", target,
 # Make a generated `*-ffi.js` load its library from the platform package (`<prefix><target>/<part>/`),
 # falling back to the package's own prebuilds/ (how the runtime tests run it). Errors if the
 # generator's loader changed shape, rather than shipping a package that cannot find its library.
-export def patch-node-loader [source: string, prefix: string, part: string]: nothing -> string {
+export def patch-node-loader [source: string, packages: record, part: string]: nothing -> string {
     if not ($source | str contains $LOADER_LINE) {
         error make --unspanned { msg: "the generated Node loader changed: prebuilds/<target> lookup not found" }
     }
     let helper = ([
         'import { createRequire as uniffiCreateRequire } from "node:module";'
         ''
-        '// stem-mqtt: the native library ships in a per-platform package (an optional dependency),'
-        '// named <prefix><target>, with -msvc on Windows.'
+        '// stem-mqtt: the native library ships in a per-platform package (an optional dependency).'
+        ('const uniffiPlatformPackages = ' + ($packages | to json --raw) + ';')
         'function uniffiPlatformLibrary(target, filename) {'
-        '  const name = target.startsWith("win32-") ? `${target}-msvc` : target;'
+        '  const name = uniffiPlatformPackages[target];'
+        '  if (name === undefined) return null;'
         '  try {'
-        ('    const manifest = uniffiCreateRequire(import.meta.url).resolve(`' + $prefix + '${name}/package.json`);')
+        '    const manifest = uniffiCreateRequire(import.meta.url).resolve(`${name}/package.json`);'
         ('    return join(dirname(manifest), "' + $part + '", filename);')
         '  } catch {'
         '    return null;'

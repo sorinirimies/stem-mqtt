@@ -3,7 +3,7 @@
 # Tests for scripts/bindings/npm_platforms.nu (one npm package per platform).
 
 use std/assert
-use ../bindings/npm_platforms.nu [platform-package-name platform-manifest main-manifest patch-node-loader platform-readme publishable-targets]
+use ../bindings/npm_platforms.nu [platform-package-name platform-manifest main-manifest patch-node-loader platform-readme platform-packages]
 use runner.nu run-tests
 
 const LOADER = 'function defaultBundledLibrary() {
@@ -36,17 +36,17 @@ def "test npm platforms: the main package depends on every platform package, opt
 }
 
 def "test npm platforms: the loader looks in the platform package first" [] {
-    let out = (patch-node-loader $LOADER "stem-mqtt-" "broker")
+    let out = (patch-node-loader $LOADER (platform-packages "stem-mqtt" ["linux-x64-gnu" "win32-x64"]) "broker")
     assert ($out starts-with 'import { createRequire as uniffiCreateRequire } from "node:module";')
-    # The same names as platform-package-name: -msvc on Windows.
-    assert ($out | str contains 'const name = target.startsWith("win32-") ? `${target}-msvc` : target;')
-    assert ($out | str contains 'resolve(`stem-mqtt-${name}/package.json`)')
+    # The same names as platform-package-name, scope included.
+    assert ($out | str contains 'const uniffiPlatformPackages = {"linux-x64-gnu":"stem-mqtt-linux-x64-gnu","win32-x64":"@greenspand/stem-mqtt-win32-x64-msvc"};')
+    assert ($out | str contains 'resolve(`${name}/package.json`)')
     assert ($out | str contains 'join(dirname(manifest), "broker", filename)')
     assert ($out | str contains 'libraryPath: uniffiPlatformLibrary(target, filename) ?? join(moduleDirectory, "prebuilds", target, filename),')
 }
 
 def "test npm platforms: a changed loader is an error, not a package without a library" [] {
-    assert error { patch-node-loader "function other() {}" "stem-mqtt-" "client" }
+    assert error { patch-node-loader "function other() {}" {} "client" }
 }
 
 def "test npm platforms: platform package names keep the scope" [] {
@@ -57,15 +57,16 @@ def "test npm platforms: platform package names keep the scope" [] {
 
 # Regression: npmjs.org's spam detection rejected stem-mqtt-win32-x64-msvc (v0.8.0), and the
 # release stopped before the main package, which stayed at 0.6.1.
-def "test npm platforms: npmjs leaves out the held back windows package, other registries keep it" [] {
-    let targets = [darwin-arm64 linux-x64-gnu win32-x64]
-    assert equal (publishable-targets $targets true) [darwin-arm64 linux-x64-gnu]
-    assert equal (publishable-targets $targets false) $targets
+def "test npm platforms: on npmjs the windows package goes under the account scope" [] {
+    assert equal (platform-package-name "stem-mqtt" "win32-x64") "@greenspand/stem-mqtt-win32-x64-msvc"
+    let m = (main-manifest {} "stem-mqtt" ["win32-x64" "darwin-arm64"] "1.0.0")
+    assert equal $m.optionalDependencies { "@greenspand/stem-mqtt-win32-x64-msvc": "1.0.0", "stem-mqtt-darwin-arm64": "1.0.0" }
+    assert equal $m.os ["darwin" "win32"]
 }
 
 def "test npm platforms: a platform package has a readme that points to the main package" [] {
     let readme = (platform-readme "stem-mqtt" "win32-x64" "o")
-    assert ($readme | str starts-with "# stem-mqtt-win32-x64-msvc\n")
+    assert ($readme | str starts-with "# @greenspand/stem-mqtt-win32-x64-msvc\n")
     assert ($readme | str contains "`npm install stem-mqtt`")
     assert ($readme | str contains "https://github.com/o/stem-mqtt")
     assert ("README.md" in (platform-manifest "stem-mqtt" "win32-x64" "1.0.0" "o" {}).files)

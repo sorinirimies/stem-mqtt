@@ -39,7 +39,7 @@ use bindings/source.nu *
 use bindings/hackage.nu *
 use bindings/dart_package.nu *
 use bindings/node_package.nu *
-use bindings/npm_platforms.nu [publishable-targets platform-manifest platform-readme main-manifest patch-node-loader]
+use bindings/npm_platforms.nu [platform-packages platform-manifest platform-readme main-manifest patch-node-loader]
 use ci/native_libs.nu [natives-tree]
 
 def default-stage [language: string]: nothing -> string {
@@ -232,7 +232,7 @@ export def needs-natives [registry: string, target: string, natives: string]: no
     $target == "public" and $registry in ["npm" "maven"] and $natives == ""
 }
 
-def prepare-package [language: string, version: string, stage: string, owner: string, npm_name: string = "", natives: string = "", public: bool = false] {
+def prepare-package [language: string, version: string, stage: string, owner: string, npm_name: string = "", natives: string = ""] {
     let spec = (spec-for $language)
     let name = (package-name $language)
     # Release CI builds every platform's libraries (scripts/ci/native_libs.nu) under
@@ -250,9 +250,8 @@ def prepare-package [language: string, version: string, stage: string, owner: st
         let publish_config = (open ($stage | path join "package.json") | get publishConfig)
         # The main package carries the JavaScript; each platform's libraries get their own
         # package under platforms/<target>/ (see bindings/npm_platforms.nu).
-        let all = (ls ($stage | path join "native") | where type == dir | get name | path basename)
-        let targets = (publishable-targets ($all | each { |p| node-prebuild-target $p }) $public)
-        let platforms = ($all | where { |p| (node-prebuild-target $p) in $targets })
+        let platforms = (ls ($stage | path join "native") | where type == dir | get name | path basename)
+        let targets = ($platforms | each { |p| node-prebuild-target $p })
         rm -rf ($stage | path join "platforms")
         for platform in $platforms {
             let target = (node-prebuild-target $platform)
@@ -268,7 +267,7 @@ def prepare-package [language: string, version: string, stage: string, owner: st
         for part in [client broker] {
             rm -rf ($stage | path join $part "prebuilds")
             for file in (glob ($stage | path join $part "*-ffi.js")) {
-                patch-node-loader (open --raw $file) $"($package_name)-" $part | save --force $file
+                patch-node-loader (open --raw $file) (platform-packages $package_name $targets) $part | save --force $file
             }
         }
         main-manifest (open ($stage | path join "package.json")) $package_name $targets $version
@@ -379,7 +378,7 @@ def "main publish" [
         | upsert publishConfig { registry: $ep.npm, access: "public" }
         | save --force ($stage | path join "package.json")
     }
-    prepare-package $language $version $stage $owner $npm_name $natives ($target == "public")
+    prepare-package $language $version $stage $owner $npm_name $natives
     # Releases can be re-run (and GitHub and Gitea both release): publishing an npm version
     # that already exists would fail, so treat "already there" as done.
     if $target == "public" and $spec.registry == "npm" {
