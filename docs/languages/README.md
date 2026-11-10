@@ -14,7 +14,7 @@ between them. This page holds what is common to all of them.
 | Kotlin | [kotlin.md](kotlin.md) | `stem-mqtt-kotlin` / `stem-mqtt-android` (Maven) | UniFFI (built in) | ✅ |
 | Java | [java.md](java.md) | `stem-mqtt-java` (Maven) | uniffi-bindgen-java | ✅ |
 | C# | [csharp.md](csharp.md) | `StemMqtt` (NuGet) | uniffi-bindgen-cs | ✅ |
-| Go | [go.md](go.md) | `github.com/<owner>/stem-mqtt-go` | uniffi-bindgen-go | ✅ |
+| Go | [go.md](go.md) | `github.com/<owner>/stem-mqtt/go` | uniffi-bindgen-go | ✅ |
 | Swift | [swift.md](swift.md) | `StemMqttSwift-<version>.zip` | UniFFI (built in) | ✅ |
 | Dart | [dart.md](dart.md) | `stem_mqtt` (pub.dev) | uniffi-dart | ❌ pull-style |
 | Haskell | [haskell.md](haskell.md) | `stem-mqtt` (Hackage) | uniffi-bindgen-haskell | ❌ pull-style |

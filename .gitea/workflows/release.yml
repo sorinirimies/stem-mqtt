@@ -641,7 +641,7 @@ jobs:
   #   csharp   NUGET_API_KEY
   #   java     SONATYPE_TOKEN (or MAVEN_CENTRAL_USERNAME / MAVEN_CENTRAL_PASSWORD) / SIGNING_KEY / SIGNING_PASSWORD
   #   haskell  HACKAGE_TOKEN
-  #   go       GO_MODULE_TOKEN (push access to github.com/<owner>/stem-mqtt-go)
+  #   go       not here: the module is tagged on GitHub (proxy.golang.org reads it from there)
   # Kotlin → Maven Central and Python → PyPI are in their own jobs above; pub.dev is
   # published from GitHub Actions (.github/workflows/publish-pubdev.yml) because pub.dev only
   # trusts that CI.
@@ -658,7 +658,7 @@ jobs:
         # release builds every platform's libraries (native-libs.yml).
         language: [csharp, haskell, go]
     env:
-      HAS_TOKEN: ${{ (matrix.language == 'node' && secrets.NPM_TOKEN != '') || (matrix.language == 'csharp' && secrets.NUGET_API_KEY != '') || (matrix.language == 'java' && (secrets.MAVEN_CENTRAL_PASSWORD != '' || secrets.SONATYPE_TOKEN != '')) || (matrix.language == 'haskell' && secrets.HACKAGE_TOKEN != '') || (matrix.language == 'go' && secrets.GO_MODULE_TOKEN != '') }}
+      HAS_TOKEN: ${{ (matrix.language == 'node' && secrets.NPM_TOKEN != '') || (matrix.language == 'csharp' && secrets.NUGET_API_KEY != '') || (matrix.language == 'java' && (secrets.MAVEN_CENTRAL_PASSWORD != '' || secrets.SONATYPE_TOKEN != '')) || (matrix.language == 'haskell' && secrets.HACKAGE_TOKEN != '') }}
     steps:
       - name: Skip (no token)
         if: env.HAS_TOKEN != 'true'
@@ -746,7 +746,6 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
           HACKAGE_TOKEN: ${{ secrets.HACKAGE_TOKEN }}
-          GO_MODULE_TOKEN: ${{ secrets.GO_MODULE_TOKEN }}
           MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
           MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
           SONATYPE_TOKEN: ${{ secrets.SONATYPE_TOKEN }}

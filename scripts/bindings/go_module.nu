@@ -1,13 +1,18 @@
-# Assemble the public Go module (`github.com/<owner>/stem-mqtt-go`).
+# Where the public Go module lives: a `go/` subdirectory of this repository, so it needs no
+# repository of its own. Go finds a subdirectory module by the tag `<dir>/v<version>`.
+export def go-module-path [owner: string]: nothing -> string { $"github.com/($owner)/stem-mqtt/go" }
+export def go-module-tag [version: string]: nothing -> string { $"go/v($version)" }
+
+# Assemble the public Go module (`github.com/<owner>/stem-mqtt/go`).
 #
 # pkg.go.dev serves Go modules straight from a git repository + tag, so the generated Go
-# is committed to a dedicated module repository (see scripts/publish_go_module.nu). The
+# is committed under `go/` on a tag-only commit of this repository (scripts/publish_go_module.nu). The
 # generated cgo preamble only says `#include <mqtt_client.h>`; here it gains the `#cgo`
 # flags that make `go build` find the headers (shipped next to the sources) and link the
 # native library (which users install separately — release assets / `cargo build`).
 
 # <gen>     generated Go (dir holding mqtt_client/ and mqtt_broker/)
-# <module>  import path, e.g. github.com/sorinirimies/stem-mqtt-go
+# <module>  import path, e.g. github.com/sorinirimies/stem-mqtt/go
 export def build-go-module [gen: string, out: string, module: string] {
     let repo = $env.PWD
     rm -rf $out

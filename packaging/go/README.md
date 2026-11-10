@@ -1,12 +1,12 @@
-# stem-mqtt-go
+# stem-mqtt (Go)
 
 MQTT 3.1.1 / 5.0 client **and broker** for Go (cgo), with a Rust core, via generated
 [UniFFI](https://mozilla.github.io/uniffi-rs/) bindings.
 
 ```go
 import (
-    "github.com/sorinirimies/stem-mqtt-go/mqtt_broker"
-    "github.com/sorinirimies/stem-mqtt-go/mqtt_client"
+    "github.com/sorinirimies/stem-mqtt/go/mqtt_broker"
+    "github.com/sorinirimies/stem-mqtt/go/mqtt_client"
 )
 ```
 

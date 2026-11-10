@@ -21,11 +21,11 @@ Each job needs its own repository secret and **skips quietly without it**:
 | Rust | crates.io | `stem-mqtt-client`, `stem-mqtt-broker` | `CRATES_IO_TOKEN` | |
 | Python | PyPI | `stem-mqtt-client`, `stem-mqtt-broker` | `PYPI_API_TOKEN` | manylinux_2_28 wheels (zig) |
 | Node.js | npmjs.org | `stem-mqtt` | `NPM_TOKEN` | granular token with *bypass 2FA*; plus `stem-mqtt-<platform>` packages, published first |
-| C# | NuGet.org | `StemMqtt` | `NUGET_API_KEY` | |
+| C# | NuGet.org | `StemMqtt` | repository variable `NUGET_USER` (trusted publishing), or `NUGET_API_KEY` | trusted publishing: nuget.org → account → Trusted Publishing: owner, repository `stem-mqtt`, workflow `release.yml` |
 | Kotlin / Java | Maven Central | `io.github.<owner>.stemmqtt:stem-mqtt-kotlin` / `…-java` | `SONATYPE_TOKEN` (the Portal's `settings.xml` snippet, pasted as is; set on both GitHub and Gitea) or `MAVEN_CENTRAL_USERNAME` + `MAVEN_CENTRAL_PASSWORD`, `SIGNING_KEY`, `SIGNING_PASSWORD` | verify the `io.github.<owner>` namespace first |
 | Haskell | Hackage | `stem-mqtt` | `HACKAGE_TOKEN` | source package, builds the bundled Rust with `cargo` |
 | Dart | pub.dev | `stem_mqtt` | — (OIDC) | from GitHub Actions (`publish-pubdev.yml`); first release by hand |
-| Go | Go modules | `github.com/<owner>/stem-mqtt-go` | `GO_MODULE_TOKEN` | pushes the module to its own repo and tags it |
+| Go | Go modules | `github.com/<owner>/stem-mqtt/go` | none (`GITHUB_TOKEN`) | tags `go/v<version>` on a commit holding only the generated module; no separate repository |
 | Swift | — | release asset (XCFrameworks) | — | needs macOS |
 
 The Haskell and Dart packages are exactly what their runtime tests exercise. npm and Maven carry every

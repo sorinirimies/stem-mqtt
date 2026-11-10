@@ -135,7 +135,7 @@ release has published it to that registry.
 | Kotlin (JVM/Android) | `io.github.sorinirimies.stemmqtt:stem-mqtt-kotlin` (Maven Central) | `import uniffi.mqtt_client.*` |
 | Java (JDK 22+) | `io.github.sorinirimies.stemmqtt:stem-mqtt-java` (Maven Central) | `import uniffi.mqtt_client.*;` |
 | C# | `dotnet add package StemMqtt` | `using uniffi.mqtt_client;` |
-| Go | `go get github.com/sorinirimies/stem-mqtt-go` | `…/stem-mqtt-go/mqtt_client` |
+| Go | `go get github.com/sorinirimies/stem-mqtt/go` | `…/stem-mqtt/go/mqtt_client` |
 | Dart | `dart pub add stem_mqtt` | `package:stem_mqtt/mqtt_client.dart` |
 | Haskell | `cabal install stem-mqtt` | `import UniFFI.MqttClient` |
 | Elixir / Erlang | `{:stem_mqtt, "~> 0.5"}` (Hex) | `StemMqtt.Client` · `stem_mqtt` |

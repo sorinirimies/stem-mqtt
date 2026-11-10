@@ -116,13 +116,19 @@ def "test public: the Go module gets cgo flags and its own import path" [] {
         "" | save ($gen | path join $pkg $"($pkg).h")
     }
     let out = ($gen | path join "out")
-    build-go-module $gen $out "github.com/acme/stem-mqtt-go"
-    assert ((open --raw ($out | path join "go.mod")) | str contains "module github.com/acme/stem-mqtt-go")
+    build-go-module $gen $out (go-module-path "acme")
+    assert ((open --raw ($out | path join "go.mod")) | str contains "module github.com/acme/stem-mqtt/go\n")
     let broker = (open --raw ($out | path join "mqtt_broker" "mqtt_broker.go"))
     assert ($broker | str contains "// #cgo CFLAGS: -I${SRCDIR}")
     assert ($broker | str contains "// #cgo LDFLAGS: -lmqtt_broker")
     assert ($broker | str contains "// #include <mqtt_broker.h>")
     rm -rf $gen
+}
+
+def "test public: the Go module lives in go/ of the main repository, tagged go/v<version>" [] {
+    assert equal (go-module-path "acme") "github.com/acme/stem-mqtt/go"
+    # Go finds a module in a subdirectory by <dir>/v<version>: a bare v1.2.3 would not.
+    assert equal (go-module-tag "1.2.3") "go/v1.2.3"
 }
 
 def "test public: the Dart package renames the native asset id away from the generic `uniffi`" [] {
