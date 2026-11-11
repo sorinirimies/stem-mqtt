@@ -6,7 +6,7 @@
 
 use std/assert
 use runner.nu *
-use ../bump_version.nu [set_mix_version]
+use ../bump_version.nu [set_mix_version set_internal_dep_versions]
 
 def "test version: matches semver shape" [] {
     let version = (open Cargo.toml | get workspace.package.version)
@@ -22,6 +22,35 @@ def "test version: script output matches Cargo.toml directly" [] {
 def "test version: mqtt-client crate inherits workspace version" [] {
     let crate_toml = (open crates/mqtt-client/Cargo.toml)
     assert equal ($crate_toml | get package.version.workspace) true
+}
+
+def "test version: mqtt-proto crate inherits workspace version" [] {
+    let crate_toml = (open crates/mqtt-proto/Cargo.toml)
+    assert equal ($crate_toml | get package.version.workspace) true
+}
+
+def "test version: internal mqtt-proto dependency pin matches workspace version" [] {
+    let workspace_version = (open Cargo.toml | get workspace.package.version)
+    let pinned = (open Cargo.toml | get workspace.dependencies.mqtt-proto.version)
+    assert equal $pinned $workspace_version
+}
+
+def "test version: mqtt-client takes mqtt-proto from the workspace so a bump reaches it" [] {
+    assert equal (open crates/mqtt-client/Cargo.toml | get dependencies.mqtt-proto.workspace) true
+}
+
+def "test version: a bump rewrites both internal pins and nothing else" [] {
+    let before = ([
+        'tokio = { version = "1" }'
+        'mqtt-proto  = { package = "stem-mqtt-proto", path = "crates/mqtt-proto", version = "0.8.0" }'
+        'mqtt-client = { package = "stem-mqtt-client", path = "crates/mqtt-client", version = "0.8.0" }'
+        'mqtt-broker = { path = "crates/mqtt-broker", version = "0.8.0" }'
+    ] | str join "\n")
+    let after = (set_internal_dep_versions $before "0.9.0" | lines)
+    assert equal ($after | get 0) 'tokio = { version = "1" }'
+    assert ($after | get 1 | str contains 'version = "0.9.0"')
+    assert ($after | get 2 | str contains 'version = "0.9.0"')
+    assert ($after | get 3 | str contains 'version = "0.8.0"') "only the pins the script owns change"
 }
 
 def "test version: internal mqtt-client dependency pin matches workspace version" [] {

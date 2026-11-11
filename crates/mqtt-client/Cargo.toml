@@ -25,7 +25,7 @@ path = "src/bin/uniffi-bindgen.rs"
 required-features = ["uniffi/cli"]
 
 [dependencies]
-mqtt-proto = { package = "stem-mqtt-proto", path = "../mqtt-proto", version = "0.8.0" }
+mqtt-proto = { workspace = true }
 tokio     = { workspace = true }
 bytes     = { workspace = true }
 uniffi    = { workspace = true }

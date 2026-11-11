@@ -11,7 +11,7 @@
 # What it does:
 #   1. Validates the supplied semantic version string.
 #   2. Updates `workspace.package.version` in the root Cargo.toml.
-#   3. Updates the `mqtt-client` internal dependency version wherever it appears.
+#   3. Updates the `mqtt-proto` and `mqtt-client` internal dependency versions in the root Cargo.toml.
 #   4. Updates the version badge in README.md (if present).
 #   5. Runs `cargo fmt`, `cargo clippy`, and `cargo test`.
 #   6. Generates / updates the CHANGELOG via git-cliff (if installed).
@@ -37,19 +37,22 @@ def update_workspace_version [version: string] {
     print $"(ansi green)✓(ansi reset) Updated workspace.package.version → ($version)"
 }
 
-# Update the mqtt-client internal dependency version in the root Cargo.toml.
-def update_internal_dep_version [version: string] {
-    let cargo = (open Cargo.toml --raw)
-    let lines = ($cargo | lines)
-    let updated_lines = ($lines | each {|line|
-        if ($line | find --regex '^mqtt-client\s*=' | is-not-empty) {
+# `Cargo.toml` text with the `mqtt-proto` and `mqtt-client` internal dependency versions set to
+# `version` (every other line is left alone).
+export def set_internal_dep_versions [text: string, version: string]: nothing -> string {
+    $text | lines | each {|line|
+        if ($line | find --regex '^mqtt-(client|proto)\s*=' | is-not-empty) {
             $line | str replace --regex 'version\s*=\s*"[^"]+"' $'version = "($version)"'
         } else {
             $line
         }
-    })
-    $updated_lines | str join "\n" | save --force Cargo.toml
-    print $"(ansi green)✓(ansi reset) Updated mqtt-client dependency → ($version)"
+    } | str join "\n"
+}
+
+# Update the internal dependency versions (mqtt-proto, mqtt-client) in the root Cargo.toml.
+def update_internal_dep_version [version: string] {
+    set_internal_dep_versions (open Cargo.toml --raw) $version | save --force Cargo.toml
+    print $"(ansi green)✓(ansi reset) Updated mqtt-proto and mqtt-client dependencies → ($version)"
 }
 
 # `mix.exs` text with its `@version` set to `version`.
