@@ -10,6 +10,7 @@ All notable changes to this project will be documented in this file.
 - hold the Windows package back from npmjs.org so the main package publishes
 - publish the Windows package as @greenspand/stem-mqtt-win32-x64-msvc
 - bump the mqtt-proto dependency pin with the workspace version; test the old public paths
+- include mqtt-proto in the pinned-UniFFI workspaces and the source bundles
 ### 📚 Documentation
 - the codec lives in stem-mqtt-proto (READMEs, language guide, publishing order)
 ### 🔧 Chores

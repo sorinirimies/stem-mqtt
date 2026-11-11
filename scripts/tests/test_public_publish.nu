@@ -135,11 +135,11 @@ def "test public: the Dart package renames the native asset id away from the gen
     let gen = (mktemp -d)
     let root = (mktemp -d)
     "const _uniffiAssetId = \"package:uniffi/uniffi:mqtt_broker\";\n" | save ($gen | path join "mqtt_broker.dart")
-    for crate in [mqtt-client mqtt-broker] {
+    for crate in [mqtt-proto mqtt-client mqtt-broker] {
         mkdir ($root | path join "crates" $crate "src")
         "" | save ($root | path join "crates" $crate "src" "lib.rs")
     }
-    "[workspace]\nmembers = [\"crates/mqtt-client\", \"crates/mqtt-broker\", \"demo/dashboard\"]\n" | save ($root | path join "Cargo.toml")
+    "[workspace]\nmembers = [\"crates/mqtt-proto\", \"crates/mqtt-client\", \"crates/mqtt-broker\", \"demo/dashboard\"]\n" | save ($root | path join "Cargo.toml")
     "" | save ($root | path join "Cargo.lock")
     # only the template-driven parts are asserted: the lockfile pruning needs a real workspace
     let out = ($gen | path join "pkg")
@@ -147,7 +147,7 @@ def "test public: the Dart package renames the native asset id away from the gen
     if $result == "ok" {
         assert ((open --raw ($out | path join "lib" "mqtt_broker.dart")) | str contains "package:stem_mqtt/uniffi:mqtt_broker")
         assert ((open --raw ($out | path join "pubspec.yaml")) | str contains "version: 1.2.3")
-        assert ((open --raw ($out | path join "rust" "Cargo.toml")) | str contains "members = [\"crates/mqtt-client\", \"crates/mqtt-broker\"]")
+        assert ((open --raw ($out | path join "rust" "Cargo.toml")) | str contains "members = [\"crates/mqtt-proto\", \"crates/mqtt-client\", \"crates/mqtt-broker\"]")
     }
     rm -rf $gen $root
 }

@@ -48,11 +48,25 @@ def "test bindgens: workspace uniffi satisfies every generator that claims to" [
     }
 }
 
+def "test bindgens: the pinned workspace has every internal crate the libraries depend on" [] {
+    # a new crate that the client or the broker depends on must be added to the hand-kept member
+    # lists (spec.nu, rust_sources.nu, scratch.nu), or the external generators cannot build
+    let ws = (open Cargo.toml)
+    let internal = ($ws.workspace.dependencies | transpose name spec
+        | where {|r| ($r.spec | describe | str starts-with "record") and ("path" in ($r.spec | columns)) }
+        | each {|r| $r.spec.path })
+    assert (($internal | length) >= 3) "mqtt-proto, mqtt-client and mqtt-broker"
+    let pinned = (pin-workspace-toml (open --raw Cargo.toml) "0.32.0")
+    for p in $internal {
+        assert ($pinned | str contains $'"($p)"') $"($p) is a workspace dependency but not a member of the pinned workspace"
+    }
+}
+
 def "test bindgens: pin-workspace-toml pins uniffi and trims members" [] {
     let toml = (open --raw Cargo.toml)
     let pinned = (pin-workspace-toml $toml "0.32.0")
     assert ($pinned | str contains 'version = "=0.32.0"')
-    assert ($pinned | str contains 'members = ["crates/mqtt-client", "crates/mqtt-broker"]')
+    assert ($pinned | str contains 'members = ["crates/mqtt-proto", "crates/mqtt-client", "crates/mqtt-broker"]')
     assert (not ($pinned | str contains "demo/dashboard"))
 }
 

@@ -2,8 +2,8 @@
 # stem-mqtt — scratch workspaces pinned to another UniFFI release
 # ──────────────────────────────────────────────────────────────────────────────
 # Generators that need a different UniFFI release than the workspace are fed a
-# library built in target/uniffi-<version>/: the two library crates with
-# `uniffi` pinned to exactly that release. The workspace is never modified.
+# library built in target/uniffi-<version>/: the library crates (the codec, the client and the
+# broker) with `uniffi` pinned to exactly that release. The workspace is never modified.
 # ──────────────────────────────────────────────────────────────────────────────
 
 use spec.nu [pin-workspace-toml]
@@ -13,7 +13,7 @@ export def prepare-scratch-workspace [version: string, repo: string = ""]: nothi
     let repo = if $repo == "" { $env.PWD } else { $repo }
     let root = ($repo | path join "target" $"uniffi-($version)")
     mkdir ($root | path join "crates")
-    for crate in (ls ($repo | path join "crates") | where name =~ 'mqtt-(client|broker)$' | get name) {
+    for crate in (ls ($repo | path join "crates") | where name =~ 'mqtt-(proto|client|broker)$' | get name) {
         let dest = ($root | path join "crates" ($crate | path basename))
         rm -rf $dest
         cp -r $crate $dest

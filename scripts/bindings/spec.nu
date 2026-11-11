@@ -157,11 +157,11 @@ export def default-out-dir [language: string, crate: string]: nothing -> string 
     $"bindings/(canonical-language $language)/($crate)"
 }
 
-# Rewrite a workspace Cargo.toml so it contains only the two library crates
+# Rewrite a workspace Cargo.toml so it contains only the library crates (codec, client, broker)
 # and pins `uniffi` to exactly `version`. Pure text transform → unit-testable.
 export def pin-workspace-toml [toml: string, version: string]: nothing -> string {
     $toml
-    | str replace --regex '(?s)members\s*=\s*\[.*?\]' 'members = ["crates/mqtt-client", "crates/mqtt-broker"]'
+    | str replace --regex '(?s)members\s*=\s*\[.*?\]' 'members = ["crates/mqtt-proto", "crates/mqtt-client", "crates/mqtt-broker"]'
     | str replace --regex '(?m)^(uniffi\s*=\s*\{\s*version\s*=\s*")[^"]*"' ('${1}=' + $version + '"')
 }
 
