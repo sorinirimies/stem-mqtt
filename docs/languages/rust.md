@@ -1,7 +1,9 @@
 # Rust
 
-The native API: no bindings layer, no callbacks through FFI — `tokio` async all the way. The client crate
-also hosts the wire-protocol codec (`mqtt_client::protocol`) that the broker reuses. See the
+The native API: no bindings layer, no callbacks through FFI — `tokio` async all the way. The wire-protocol
+codec is its own runtime-free crate, [`stem-mqtt-proto`](../../crates/mqtt-proto/README.md) (use it directly
+for firmware or a custom transport); the client re-exports it as `mqtt_client::protocol` and the broker
+reuses it. See the
 [shared concepts](README.md) for the option records and semantics.
 
 ## Install

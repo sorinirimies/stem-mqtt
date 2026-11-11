@@ -1,7 +1,8 @@
 # mqtt-client
 
-An async, `tokio`-based MQTT 3.1.1 / MQTT 5.0 client, and the wire-protocol
-codec shared with [`mqtt-broker`](../mqtt-broker/README.md). Exposed to
+An async, `tokio`-based MQTT 3.1.1 / MQTT 5.0 client, built on the wire-protocol
+codec in [`stem-mqtt-proto`](../mqtt-proto/README.md) that it shares with
+[`mqtt-broker`](../mqtt-broker/README.md). Exposed to
 Kotlin, Swift, Python, and other languages via
 [UniFFI](https://mozilla.github.io/uniffi-rs/).
 
@@ -23,9 +24,10 @@ for every other supported language (Kotlin, Swift, Python, Go, C#, Java, Dart, N
 
 ## Layout
 
-- [`src/protocol`](src/protocol) — pure, synchronous, allocation-friendly
-  codec for the MQTT wire format. No networking or async dependencies, so
-  it is unit-tested byte-for-byte and reused as-is by `mqtt-broker`.
+- [`stem-mqtt-proto`](../mqtt-proto) — pure, synchronous, allocation-friendly
+  codec for the MQTT wire format, re-exported here as `mqtt_client::protocol`
+  (and `mqtt_client::error`). No networking or async dependencies, so it is
+  unit-tested byte-for-byte and reused as-is by `mqtt-broker`; its modules:
   - `varint` — MQTT variable byte integer encoding.
   - `packet` — the top-level `Packet` enum, fixed header, and remaining-length
     framing/dispatch.
@@ -139,7 +141,7 @@ All expect a broker listening on `127.0.0.1:1883` (run
 cargo test -p stem-mqtt-client
 ```
 
-Protocol round-trip tests live alongside each codec module (`#[cfg(test)]`).
+Protocol round-trip tests live alongside each codec module in [`stem-mqtt-proto`](../mqtt-proto) (`#[cfg(test)]`), with the robustness test, benchmark and fuzz targets. [`tests/compat_paths.rs`](tests/compat_paths.rs) checks that the paths the codec was exported under before the split still import.
 [`tests/redelivery.rs`](tests/redelivery.rs) covers client-side QoS 1/2
 redelivery and the keep-alive timing fix, against a minimal fake TCP peer
 (needed since the real broker always acks correctly/promptly, and

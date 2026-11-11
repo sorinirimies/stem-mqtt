@@ -43,6 +43,15 @@ assert_eq!(decoded, Some(publish));
 # Ok::<(), MqttError>(())
 ```
 
+## On a microcontroller
+
+The crate needs `std` (and an allocator), not `no_std`: it is meant for chips that run the ESP-IDF
+`std` environment, where you bring the transport (`std::net::TcpStream`, or TLS through mbedTLS) and
+drive the codec yourself: read bytes into a `BytesMut`, call `Packet::decode` until it returns `None`,
+write what `Packet::encode` gives you, and send a PINGREQ before the keep-alive runs out. It is checked
+to compile for `riscv32imac-esp-espidf` (ESP32-C6) and `riscv32imafc-esp-espidf` (ESP32-P4) on the
+nightly the ESP Rust toolchain pins; there is no ESP check in this repository's CI.
+
 The client crate re-exports this crate as `mqtt_client::protocol` (and `mqtt_client::error`), so
 existing code keeps compiling, and declares `QoS`, `MqttVersion` and `MqttError` to UniFFI as remote
 types: the generated bindings for Kotlin, Swift, Python and the other languages are unchanged.

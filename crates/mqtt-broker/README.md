@@ -2,9 +2,9 @@
 
 An MQTT 3.1.1 / MQTT 5.0 broker, implemented in Rust and exposed to
 Kotlin, Swift, Python, and other languages via
-[UniFFI](https://mozilla.github.io/uniffi-rs/). Reuses the wire-protocol
-codec from [`mqtt-client`](../mqtt-client/README.md)
-(`mqtt_client::protocol`) instead of duplicating it.
+[UniFFI](https://mozilla.github.io/uniffi-rs/). Built on the wire-protocol
+codec in [`stem-mqtt-proto`](../mqtt-proto/README.md), shared with
+[`mqtt-client`](../mqtt-client/README.md), instead of duplicating it.
 
 ## Installation
 

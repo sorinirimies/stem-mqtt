@@ -56,8 +56,10 @@ async fn main() -> anyhow::Result<()> {
 ```
 
 Just want a broker? `cargo install stem-mqtt-broker && mqtt-broker --port 1883`
-Need only the wire format (for firmware, a proxy, a test tool)? [`stem-mqtt-proto`](crates/mqtt-proto/README.md) is the runtime-free codec the client and broker are built on.
 (see [Running the broker](#running-the-broker)).
+
+Need only the wire format (for firmware, a proxy, a test tool)? [`stem-mqtt-proto`](crates/mqtt-proto/README.md)
+is the runtime-free codec the client and broker are built on: no async runtime, no TLS, no sockets.
 
 Runnable examples (the `mqtt-client` ones need a broker already running):
 
@@ -73,7 +75,8 @@ cargo run -p stem-mqtt-broker --example auth_broker            # then, in anothe
 cargo run -p stem-mqtt-client --example auth_client            # one login rejected, one accepted
 ```
 
-Full crate docs: [`crates/mqtt-client`](crates/mqtt-client/README.md),
+Full crate docs: [`crates/mqtt-proto`](crates/mqtt-proto/README.md),
+[`crates/mqtt-client`](crates/mqtt-client/README.md),
 [`crates/mqtt-broker`](crates/mqtt-broker/README.md).
 
 ## Preview
@@ -126,7 +129,7 @@ Recorded with [VHS](https://github.com/charmbracelet/vhs): `just vhs-tape <name>
 ## Installation
 
 Every published package is prefixed `stem-mqtt-` (`mqtt-client` / `mqtt-broker` are taken by unrelated
-projects on crates.io and PyPI); import names in code are unchanged. A package is available once a
+projects on crates.io and PyPI; `stem-mqtt-proto` is a Rust-only crate, with no foreign-language package); import names in code are unchanged. A package is available once a
 release has published it to that registry.
 
 | Language | Install | Import |
@@ -174,13 +177,14 @@ Callbacks are available everywhere except Dart and Haskell, which use the
 
 ## Features
 
-- **MQTT 3.1.1 and MQTT 5.0** — one codec, version negotiated per connection
+- **MQTT 3.1.1 and MQTT 5.0** — one codec (`stem-mqtt-proto`), version negotiated per connection
   (`MqttVersion::V311` / `MqttVersion::V5`).
 - **QoS 0, 1, 2** — at-most-once, at-least-once, and the full exactly-once
   four-part handshake (PUBLISH → PUBREC → PUBREL → PUBCOMP), with real
   redelivery (DUP=1 resend on timeout) on both the client and broker side
   — not just a single fire-and-hope attempt.
-- **Wire codec for all control packet types** — CONNECT/CONNACK, PUBLISH and
+- **Wire codec for all control packet types**, in its own runtime-free crate (`stem-mqtt-proto`, usable
+  on a microcontroller) — CONNECT/CONNACK, PUBLISH and
   its ack chain, SUBSCRIBE/SUBACK, UNSUBSCRIBE/UNSUBACK, PING, DISCONNECT,
   and MQTT 5 AUTH — with the enhanced-authentication exchange built on top
   (see *Authentication* below).
@@ -204,7 +208,7 @@ Callbacks are available everywhere except Dart and Haskell, which use the
 - **Event observation** (`MqttBrokerEventListener`) and, for runtimes that can't receive callbacks
   (Dart, Haskell), a **pull-style API**: `enable_message_queue` / `next_message` on the client,
   `enable_event_queue` / `next_event` on the broker.
-- **UniFFI bindings** — both crates build as `cdylib`/`staticlib`
+- **UniFFI bindings** — the client and the broker build as `cdylib`/`staticlib`
   (`cargo rustc --lib --crate-type cdylib,staticlib`) and ship a
   `uniffi-bindgen` binary for Kotlin, Swift and Python; Go, C#, Java, Dart,
   Node.js and Haskell are generated through pinned community generators — all of
@@ -245,16 +249,19 @@ has a one-Pod and a Deployment + Service Kubernetes demo.
 
 | Path | Description |
 | --- | --- |
-| [`crates/mqtt-client`](crates/mqtt-client) | Async, `tokio`-based MQTT client; also hosts the wire-protocol codec (`mqtt_client::protocol`) shared with the broker. |
-| [`crates/mqtt-broker`](crates/mqtt-broker) | Standalone broker (library + `mqtt-broker` CLI), reusing the client's codec. |
+| [`crates/mqtt-proto`](crates/mqtt-proto) | The MQTT 3.1.1 / 5.0 wire codec (`stem-mqtt-proto`): pure and synchronous, no async runtime, TLS or UniFFI. Shared by the client and the broker. |
+| [`crates/mqtt-client`](crates/mqtt-client) | Async, `tokio`-based MQTT client; re-exports the codec as `mqtt_client::protocol`. |
+| [`crates/mqtt-broker`](crates/mqtt-broker) | Standalone broker (library + `mqtt-broker` CLI), built on the same codec. |
 | [`demo/`](demo) | Browser client (`web/`) and a Rust + Topcoat dashboard (`dashboard/`). |
 | [`tests/bindings`](tests/bindings) | One end-to-end smoke test per language, run by `scripts/test_bindings.nu`. |
 | [`packaging/`](packaging) | Per-language package templates, Dockerfile and Kubernetes manifests. |
 | [`scripts/`](scripts) | Nushell scripts for bindings, packaging, publishing and releases (tested in `scripts/tests`). |
-| [`fuzz/`](fuzz) | `cargo-fuzz` targets: packet decoder, encode/decode round-trip, chunked reads, varint/strings, PUBLISH, topic matching (`just fuzz <target>`). |
+| [`fuzz/`](fuzz) | `cargo-fuzz` targets (on `stem-mqtt-proto`): packet decoder, encode/decode round-trip, chunked reads, varint/strings, PUBLISH, topic matching (`just fuzz <target>`). |
 
-There is deliberately no separate "core" crate: `mqtt-client::protocol` is a pure, synchronous codec with
-no networking or async dependencies, so it is the shared foundation for both client and broker.
+`stem-mqtt-proto` is the shared foundation: a pure, synchronous codec with no networking or async
+dependencies. The client re-exports it as `mqtt_client::protocol` / `mqtt_client::error` (the paths are
+unchanged) and declares `QoS`, `MqttVersion` and `MqttError` to UniFFI as remote types, so the generated
+bindings keep their shape. Publish order: `stem-mqtt-proto`, then `stem-mqtt-client`, then `stem-mqtt-broker`.
 
 ## Generating foreign-language bindings
 
