@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.8.1] - 2026-11-11
+### ✨ Features
+- publish the Go module from a go/ subdirectory of this repo, and NuGet through trusted publishing
+- split the MQTT wire codec into the new stem-mqtt-proto crate
+### 🐛 Bug Fixes
+- hold the Windows package back from npmjs.org so the main package publishes
+- publish the Windows package as @greenspand/stem-mqtt-win32-x64-msvc
+- bump the mqtt-proto dependency pin with the workspace version; test the old public paths
+### 📚 Documentation
+- the codec lives in stem-mqtt-proto (READMEs, language guide, publishing order)
+### 🔧 Chores
+- drop the thiserror dependency that moved with the error type
+**Full Changelog**: https://github.com/sorinirimies/stem-mqtt/compare/v0.8.0...v0.8.1
 ## [0.8.0] - 2026-11-09
 ### ✨ Features
 - C, C++, Zig and Lua bindings, runtime-tested in CI
