@@ -29,7 +29,6 @@ mqtt-proto = { package = "stem-mqtt-proto", path = "../mqtt-proto", version = "0
 tokio     = { workspace = true }
 bytes     = { workspace = true }
 uniffi    = { workspace = true }
-thiserror = { workspace = true }
 tracing   = { workspace = true }
 rustls         = { workspace = true }
 tokio-rustls   = { workspace = true }

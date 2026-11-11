@@ -2160,7 +2160,6 @@ dependencies = [
  "rcgen",
  "rustls",
  "stem-mqtt-proto",
- "thiserror",
  "tokio",
  "tokio-rustls",
  "tracing",
