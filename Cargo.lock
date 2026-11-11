@@ -2190,6 +2190,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "stem-mqtt-sync"
+version = "0.8.1"
+dependencies = [
+ "bytes",
+ "stem-mqtt-broker",
+ "stem-mqtt-client",
+ "stem-mqtt-proto",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "stem_mqtt_nif"
 version = "0.8.1"
 dependencies = [

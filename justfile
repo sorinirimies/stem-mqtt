@@ -449,9 +449,9 @@ publish-dry: check-all
     cargo publish --dry-run -p stem-mqtt-proto
     @echo "mqtt-client and mqtt-broker depend on crates that are published first: see scripts/check_publish.nu"
 
-# Publish the crates in dependency order: mqtt-proto → mqtt-client → mqtt-broker.
-publish: check-all publish-proto publish-client publish-broker
-    @echo "✅ mqtt-proto, mqtt-client and mqtt-broker published to crates.io!"
+# Publish the crates in dependency order: mqtt-proto → mqtt-client → mqtt-broker → mqtt-sync.
+publish: check-all publish-proto publish-client publish-broker publish-sync
+    @echo "✅ mqtt-proto, mqtt-client, mqtt-broker and mqtt-sync published to crates.io!"
 
 # Publish mqtt-proto (mqtt-client and mqtt-broker depend on it — must go first)
 publish-proto:
@@ -471,6 +471,13 @@ publish-client:
 publish-broker:
     @echo "📦 Publishing mqtt-broker…"
     cargo publish -p stem-mqtt-broker
+    @echo "⏳ Waiting 30 s for the index to propagate…"
+    sleep 30
+
+# Publish mqtt-sync (last: its dev-dependencies are the client and the broker)
+publish-sync:
+    @echo "📦 Publishing mqtt-sync…"
+    cargo publish -p stem-mqtt-sync
 
 # Show what would be released without making any changes
 release-preview: _check-git-cliff

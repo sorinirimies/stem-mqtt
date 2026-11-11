@@ -49,17 +49,32 @@ def "test bindgens: workspace uniffi satisfies every generator that claims to" [
 }
 
 def "test bindgens: the pinned workspace has every internal crate the libraries depend on" [] {
-    # a new crate that the client or the broker depends on must be added to the hand-kept member
-    # lists (spec.nu, rust_sources.nu, scratch.nu), or the external generators cannot build
+    # A new crate that the client or the broker depends on must be added to the hand-kept member
+    # lists (spec.nu, rust_sources.nu, scratch.nu), or the external generators cannot build.
+    # Only the `members = [...]` line counts (a dependency line also contains the path).
     let ws = (open Cargo.toml)
-    let internal = ($ws.workspace.dependencies | transpose name spec
-        | where {|r| ($r.spec | describe | str starts-with "record") and ("path" in ($r.spec | columns)) }
-        | each {|r| $r.spec.path })
-    assert (($internal | length) >= 3) "mqtt-proto, mqtt-client and mqtt-broker"
-    let pinned = (pin-workspace-toml (open --raw Cargo.toml) "0.32.0")
+    let wdeps = ($ws.workspace.dependencies)
+    let internal = (
+        ["crates/mqtt-client/Cargo.toml" "crates/mqtt-broker/Cargo.toml"]
+        | each {|f|
+            open $f | get dependencies | transpose name spec
+            | where {|r|
+                let from_workspace = (($r.spec | describe | str starts-with "record") and (($r.spec | get -o workspace) == true))
+                let entry = ($wdeps | get -o $r.name)
+                $from_workspace and ($entry != null) and (($entry | describe | str starts-with "record")) and (($entry | get -o path) != null)
+            }
+            | each {|r| $wdeps | get $r.name | get path }
+        }
+        | flatten
+        | append ["crates/mqtt-client" "crates/mqtt-broker"]
+        | uniq
+    )
+    assert ("crates/mqtt-proto" in $internal) "the codec crate is one of them"
+    let members = (pin-workspace-toml (open --raw Cargo.toml) "0.32.0" | lines | where {|l| $l | str starts-with "members"} | first)
     for p in $internal {
-        assert ($pinned | str contains $'"($p)"') $"($p) is a workspace dependency but not a member of the pinned workspace"
+        assert ($members | str contains $'"($p)"') $"($p) is needed by the libraries but is not a member of the pinned workspace: ($members)"
     }
+    assert (not ($members | str contains "mqtt-sync")) "the blocking client is not part of the bindings"
 }
 
 def "test bindgens: pin-workspace-toml pins uniffi and trims members" [] {

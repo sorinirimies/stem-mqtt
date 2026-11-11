@@ -1,0 +1,28 @@
+[package]
+name = "stem-mqtt-sync"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "A small blocking MQTT 3.1.1 / 5.0 client over any std::io transport (TcpStream, TLS), built on stem-mqtt-proto. No async runtime: for firmware (ESP32 with std), tools and tests."
+readme = "README.md"
+categories = ["network-programming", "embedded"]
+keywords = ["mqtt", "mqtt5", "blocking", "iot", "embedded"]
+
+[lib]
+name = "mqtt_sync"
+
+[dependencies]
+mqtt-proto = { workspace = true }
+bytes      = { workspace = true }
+thiserror  = { workspace = true }
+
+[dev-dependencies]
+mqtt-broker = { workspace = true }
+mqtt-client = { workspace = true }
+tokio       = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }
+
+[lints]
+workspace = true

@@ -17,6 +17,7 @@ broker in CI.
 | Crate | Version | Downloads | Docs |
 | --- | --- | --- | --- |
 | `stem-mqtt-proto` | [![crates.io](https://img.shields.io/crates/v/stem-mqtt-proto.svg)](https://crates.io/crates/stem-mqtt-proto) | [![downloads](https://img.shields.io/crates/d/stem-mqtt-proto.svg)](https://crates.io/crates/stem-mqtt-proto) | [![docs.rs](https://img.shields.io/docsrs/stem-mqtt-proto)](https://docs.rs/stem-mqtt-proto) |
+| `stem-mqtt-sync` | [![crates.io](https://img.shields.io/crates/v/stem-mqtt-sync.svg)](https://crates.io/crates/stem-mqtt-sync) | [![downloads](https://img.shields.io/crates/d/stem-mqtt-sync.svg)](https://crates.io/crates/stem-mqtt-sync) | [![docs.rs](https://img.shields.io/docsrs/stem-mqtt-sync)](https://docs.rs/stem-mqtt-sync) |
 | `stem-mqtt-client` | [![crates.io](https://img.shields.io/crates/v/stem-mqtt-client.svg)](https://crates.io/crates/stem-mqtt-client) | [![downloads](https://img.shields.io/crates/d/stem-mqtt-client.svg)](https://crates.io/crates/stem-mqtt-client) | [![docs.rs](https://img.shields.io/docsrs/stem-mqtt-client)](https://docs.rs/stem-mqtt-client) |
 | `stem-mqtt-broker` | [![crates.io](https://img.shields.io/crates/v/stem-mqtt-broker.svg)](https://crates.io/crates/stem-mqtt-broker) | [![downloads](https://img.shields.io/crates/d/stem-mqtt-broker.svg)](https://crates.io/crates/stem-mqtt-broker) | [![docs.rs](https://img.shields.io/docsrs/stem-mqtt-broker)](https://docs.rs/stem-mqtt-broker) |
 
@@ -250,6 +251,7 @@ has a one-Pod and a Deployment + Service Kubernetes demo.
 | Path | Description |
 | --- | --- |
 | [`crates/mqtt-proto`](crates/mqtt-proto) | The MQTT 3.1.1 / 5.0 wire codec (`stem-mqtt-proto`): pure and synchronous, no async runtime, TLS or UniFFI. Shared by the client and the broker. |
+| [`crates/mqtt-sync`](crates/mqtt-sync) | A small **blocking** client over any `std::io` transport, built on the codec: no async runtime, runs on an ESP32 with ESP-IDF `std`. |
 | [`crates/mqtt-client`](crates/mqtt-client) | Async, `tokio`-based MQTT client; re-exports the codec as `mqtt_client::protocol`. |
 | [`crates/mqtt-broker`](crates/mqtt-broker) | Standalone broker (library + `mqtt-broker` CLI), built on the same codec. |
 | [`demo/`](demo) | Browser client (`web/`) and a Rust + Topcoat dashboard (`dashboard/`). |
