@@ -1,14 +1,14 @@
-//! `cargo bench -p stem-mqtt-client` — packet codec and topic matching.
+//! `cargo bench -p stem-mqtt-proto` — packet codec and topic matching.
 #![allow(clippy::unwrap_used)] // Benchmark harness: a failed setup step should panic.
 use bytes::{Bytes, BytesMut};
 use criterion::{
     BatchSize, BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main,
 };
-use mqtt_client::protocol::packet::Packet;
-use mqtt_client::protocol::properties::Properties;
-use mqtt_client::protocol::publish::PublishPacket;
-use mqtt_client::protocol::topic::topic_matches;
-use mqtt_client::{MqttVersion, QoS};
+use mqtt_proto::packet::Packet;
+use mqtt_proto::properties::Properties;
+use mqtt_proto::publish::PublishPacket;
+use mqtt_proto::topic::topic_matches;
+use mqtt_proto::{MqttVersion, QoS};
 
 fn publish(payload: usize, qos: QoS) -> Packet {
     Packet::Publish(PublishPacket {

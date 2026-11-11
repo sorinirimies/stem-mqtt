@@ -97,7 +97,11 @@ run-example name:
 test:
     cargo test --workspace --exclude stem_mqtt_nif --locked --all-features --all-targets
 
-# Test only the client + protocol codec
+# Test only the protocol codec (no runtime, no network)
+test-proto:
+    cargo test -p stem-mqtt-proto --all-features --all-targets
+
+# Test only the client
 test-client:
     cargo test -p stem-mqtt-client --all-features
 
@@ -230,7 +234,7 @@ deny:
 
 # Criterion benchmarks: packet codec, topic matching, fan-out, subscription index
 bench:
-    cargo bench -p stem-mqtt-client --bench codec
+    cargo bench -p stem-mqtt-proto --bench codec
     cargo bench -p stem-mqtt-broker --features bench-internals --bench fanout
 
 # Fuzz targets (needs `cargo install cargo-fuzz` + nightly)
@@ -438,18 +442,25 @@ bump version: (validate-tag version) (_check-version-changed version) check-rele
 check-publish: _check-nu
     nu scripts/check_publish.nu
 
-# Dry-run publish for both crates (in dependency order)
+# Dry-run publish (in dependency order). Only mqtt-proto can be dry-run before release: the client
+# and the broker need the crate before them to be on crates.io already.
 publish-dry: check-all
-    @echo "Dry-run: mqtt-client"
-    cargo publish --dry-run -p stem-mqtt-client
-    @echo "Dry-run: mqtt-broker"
-    cargo publish --dry-run -p stem-mqtt-broker
+    @echo "Dry-run: mqtt-proto"
+    cargo publish --dry-run -p stem-mqtt-proto
+    @echo "mqtt-client and mqtt-broker depend on crates that are published first: see scripts/check_publish.nu"
 
-# Publish both crates in dependency order: mqtt-client → mqtt-broker.
-publish: check-all publish-client publish-broker
-    @echo "✅ mqtt-client and mqtt-broker published to crates.io!"
+# Publish the crates in dependency order: mqtt-proto → mqtt-client → mqtt-broker.
+publish: check-all publish-proto publish-client publish-broker
+    @echo "✅ mqtt-proto, mqtt-client and mqtt-broker published to crates.io!"
 
-# Publish mqtt-client (mqtt-broker depends on it — must go first)
+# Publish mqtt-proto (mqtt-client and mqtt-broker depend on it — must go first)
+publish-proto:
+    @echo "📦 Publishing mqtt-proto…"
+    cargo publish -p stem-mqtt-proto
+    @echo "⏳ Waiting 30 s for the index to propagate…"
+    sleep 30
+
+# Publish mqtt-client (mqtt-broker depends on it)
 publish-client:
     @echo "📦 Publishing mqtt-client…"
     cargo publish -p stem-mqtt-client

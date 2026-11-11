@@ -136,7 +136,7 @@ def main [
 
     print ""
     print $"(ansi cyan)── cargo update ────────────────────────────────────────────(ansi reset)"
-    run-external "cargo" "update" "-p" "stem-mqtt-client" "-p" "stem-mqtt-broker"
+    run-external "cargo" "update" "-p" "stem-mqtt-proto" "-p" "stem-mqtt-client" "-p" "stem-mqtt-broker"
     print $"(ansi green)✓(ansi reset) Cargo.lock updated."
 
     print ""

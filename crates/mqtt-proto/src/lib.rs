@@ -1,31 +1,37 @@
 //! MQTT wire protocol: packet encoding/decoding for both MQTT 3.1.1 and
 //! MQTT 5.0.
 //!
-//! This module has no networking or async dependencies — it is a pure,
-//! synchronous codec so it can be unit-tested byte-for-byte and reused
-//! by both the client's connection loop and the `mqtt-broker` crate.
+//! This crate has no networking, async or TLS dependencies: it is a pure,
+//! synchronous codec so it can be unit-tested byte-for-byte and reused by the
+//! `stem-mqtt-client` connection loop, the `stem-mqtt-broker`, and firmware on
+//! embedded targets that bring their own transport.
+
+#[cfg(doctest)]
+#[doc = include_str!("../README.md")]
+struct ReadmeDoctests;
 
 pub mod ack;
 pub mod connect;
+pub mod error;
 mod macros;
 pub mod packet;
 pub mod properties;
 pub mod publish;
 pub mod subscribe;
+pub mod support;
 pub mod topic;
 pub mod varint;
 
 pub use ack::*;
 pub use connect::*;
+pub use error::{MqttError, MqttResult};
 pub use packet::*;
 pub use properties::*;
 pub use publish::*;
 pub use subscribe::*;
 
-use uniffi::Enum;
-
 /// The MQTT protocol version negotiated for a connection.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Enum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MqttVersion {
     /// MQTT 3.1.1 (protocol level 4).
     V311,
@@ -55,7 +61,7 @@ impl MqttVersion {
 }
 
 /// MQTT Quality of Service level.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Enum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum QoS {
     /// QoS 0 — fire and forget, no acknowledgement.
     AtMostOnce,

@@ -10,12 +10,12 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 bytes = "1"
-stem-mqtt-client = { path = "../crates/mqtt-client" }
+stem-mqtt-proto = { path = "../crates/mqtt-proto" }
 
-# The targets `use mqtt_client::…`, the library name of stem-mqtt-client; cargo
+# The targets `use mqtt_proto::…`, the library name of stem-mqtt-proto; cargo
 # machete matches package names only, so it would call it unused.
 [package.metadata.cargo-machete]
-ignored = ["stem-mqtt-client"]
+ignored = ["stem-mqtt-proto"]
 
 # Not part of the main workspace: fuzzing needs nightly + cargo-fuzz.
 [workspace]

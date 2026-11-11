@@ -5,8 +5,8 @@
 
 use bytes::BytesMut;
 use libfuzzer_sys::fuzz_target;
-use mqtt_client::protocol::packet::Packet;
-use mqtt_client::MqttVersion;
+use mqtt_proto::packet::Packet;
+use mqtt_proto::MqttVersion;
 
 fn drain(buf: &mut BytesMut, version: MqttVersion, out: &mut Vec<Packet>) -> bool {
     loop {

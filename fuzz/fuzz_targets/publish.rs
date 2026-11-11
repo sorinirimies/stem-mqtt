@@ -4,11 +4,11 @@
 
 use bytes::{Bytes, BytesMut};
 use libfuzzer_sys::fuzz_target;
-use mqtt_client::protocol::packet::Packet;
-use mqtt_client::protocol::properties::Properties;
-use mqtt_client::protocol::publish::PublishPacket;
-use mqtt_client::protocol::topic::is_valid_topic_name;
-use mqtt_client::{MqttVersion, QoS};
+use mqtt_proto::packet::Packet;
+use mqtt_proto::properties::Properties;
+use mqtt_proto::publish::PublishPacket;
+use mqtt_proto::topic::is_valid_topic_name;
+use mqtt_proto::{MqttVersion, QoS};
 
 fuzz_target!(|input: (u8, bool, bool, &str, Vec<u8>, u16, bool)| {
     let (q, dup, retain, topic, payload, id, v5) = input;

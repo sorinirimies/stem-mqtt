@@ -3,7 +3,7 @@
 
 use bytes::{Bytes, BytesMut};
 use libfuzzer_sys::fuzz_target;
-use mqtt_client::protocol::varint::{
+use mqtt_proto::varint::{
     decode_binary, decode_utf8_string, decode_varint, encode_binary, encode_utf8_string,
     encode_varint, peek_varint, varint_len,
 };

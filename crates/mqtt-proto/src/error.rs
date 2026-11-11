@@ -1,15 +1,12 @@
-//! Error types shared across the MQTT client (and re-used by the broker
-//! crate for the protocol codec it embeds).
+//! Error type shared by the codec, the client and the broker.
 
 /// Convenience alias for `Result<T, MqttError>`.
 pub type MqttResult<T> = Result<T, MqttError>;
 
 /// All errors that can be produced while encoding/decoding MQTT packets or
-/// operating an [`crate::client::MqttClient`].
-///
-/// Exposed to foreign languages through UniFFI as a plain error enum.
-#[derive(Debug, thiserror::Error, uniffi::Error)]
-#[uniffi(flat_error)]
+/// operating an MQTT client (`stem-mqtt-client`). The client crate exposes it to
+/// foreign languages through UniFFI as a plain error enum.
+#[derive(Debug, thiserror::Error)]
 pub enum MqttError {
     /// The peer sent a packet that violates the MQTT specification.
     #[error("malformed packet: {0}")]

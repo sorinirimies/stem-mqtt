@@ -16,6 +16,7 @@ broker in CI.
 
 | Crate | Version | Downloads | Docs |
 | --- | --- | --- | --- |
+| `stem-mqtt-proto` | [![crates.io](https://img.shields.io/crates/v/stem-mqtt-proto.svg)](https://crates.io/crates/stem-mqtt-proto) | [![downloads](https://img.shields.io/crates/d/stem-mqtt-proto.svg)](https://crates.io/crates/stem-mqtt-proto) | [![docs.rs](https://img.shields.io/docsrs/stem-mqtt-proto)](https://docs.rs/stem-mqtt-proto) |
 | `stem-mqtt-client` | [![crates.io](https://img.shields.io/crates/v/stem-mqtt-client.svg)](https://crates.io/crates/stem-mqtt-client) | [![downloads](https://img.shields.io/crates/d/stem-mqtt-client.svg)](https://crates.io/crates/stem-mqtt-client) | [![docs.rs](https://img.shields.io/docsrs/stem-mqtt-client)](https://docs.rs/stem-mqtt-client) |
 | `stem-mqtt-broker` | [![crates.io](https://img.shields.io/crates/v/stem-mqtt-broker.svg)](https://crates.io/crates/stem-mqtt-broker) | [![downloads](https://img.shields.io/crates/d/stem-mqtt-broker.svg)](https://crates.io/crates/stem-mqtt-broker) | [![docs.rs](https://img.shields.io/docsrs/stem-mqtt-broker)](https://docs.rs/stem-mqtt-broker) |
 
@@ -55,6 +56,7 @@ async fn main() -> anyhow::Result<()> {
 ```
 
 Just want a broker? `cargo install stem-mqtt-broker && mqtt-broker --port 1883`
+Need only the wire format (for firmware, a proxy, a test tool)? [`stem-mqtt-proto`](crates/mqtt-proto/README.md) is the runtime-free codec the client and broker are built on.
 (see [Running the broker](#running-the-broker)).
 
 Runnable examples (the `mqtt-client` ones need a broker already running):

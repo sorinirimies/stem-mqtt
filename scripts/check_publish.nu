@@ -17,7 +17,7 @@ def main [] {
 
     # ── 1. Documentation checks ───────────────────────────────────────────────
     print "── Step 1: Documentation checks ──"
-    let doc_crates = ["stem-mqtt-client" "stem-mqtt-broker"]
+    let doc_crates = ["stem-mqtt-proto" "stem-mqtt-client" "stem-mqtt-broker"]
 
     for crate in $doc_crates {
         print $"  📖 Checking docs for ($crate)..."
@@ -31,16 +31,18 @@ def main [] {
     }
     print ""
 
-    # ── 2. Publish dry-run for mqtt-client (published first) ─────────────────
-    print "── Step 2: Publish dry-run (mqtt-client) ──"
-    print "  📦 Running cargo publish --dry-run for mqtt-client..."
-    let publish_result = (do { cargo publish --dry-run -p stem-mqtt-client } | complete)
+    # ── 2. Publish dry-run for mqtt-proto (published first) ───────────────────
+    # Only mqtt-proto can be dry-run: the client and the broker depend on crates that are not on
+    # crates.io until the one before them has been published.
+    print "── Step 2: Publish dry-run (mqtt-proto) ──"
+    print "  📦 Running cargo publish --dry-run for mqtt-proto..."
+    let publish_result = (do { cargo publish --dry-run -p stem-mqtt-proto } | complete)
     if $publish_result.exit_code != 0 {
-        print "  ❌ Publish dry-run failed for mqtt-client:"
+        print "  ❌ Publish dry-run failed for mqtt-proto:"
         print $publish_result.stderr
         exit 1
     }
-    print "  ✅ mqtt-client publish dry-run OK"
+    print "  ✅ mqtt-proto publish dry-run OK"
     print ""
 
     # ── 3. Cargo check for every crate ────────────────────────────────────────
@@ -88,8 +90,9 @@ def main [] {
     print "  ✅ All pre-publish checks passed!"
     print ""
     print "  Publish order:"
-    print "    1. cargo publish -p stem-mqtt-client   (mqtt-broker depends on it)"
-    print "    2. cargo publish -p stem-mqtt-broker"
+    print "    1. cargo publish -p stem-mqtt-proto    (mqtt-client and mqtt-broker depend on it)"
+    print "    2. cargo publish -p stem-mqtt-client   (mqtt-broker depends on it)"
+    print "    3. cargo publish -p stem-mqtt-broker"
     print ""
     print "  Wait ~30 seconds between publishes for crates.io"
     print "  to index each crate before its dependents."

@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "crates/mqtt-proto",
     "crates/mqtt-client",
     "crates/mqtt-broker",
     "crates/mqtt-beam",
@@ -50,6 +51,7 @@ criterion  = { version = "0.5", default-features = false }
 clap       = { version = "4", features = ["derive"] }
 
 # Internal crates
+mqtt-proto = { package = "stem-mqtt-proto", path = "crates/mqtt-proto", version = "0.8.0" }
 mqtt-client = { package = "stem-mqtt-client", path = "crates/mqtt-client", version = "0.8.0" }
 mqtt-broker = { package = "stem-mqtt-broker", path = "crates/mqtt-broker" }
 

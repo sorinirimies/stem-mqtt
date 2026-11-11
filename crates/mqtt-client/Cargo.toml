@@ -25,6 +25,7 @@ path = "src/bin/uniffi-bindgen.rs"
 required-features = ["uniffi/cli"]
 
 [dependencies]
+mqtt-proto = { package = "stem-mqtt-proto", path = "../mqtt-proto", version = "0.8.0" }
 tokio     = { workspace = true }
 bytes     = { workspace = true }
 uniffi    = { workspace = true }
@@ -35,15 +36,10 @@ tokio-rustls   = { workspace = true }
 webpki-roots   = { workspace = true }
 
 [dev-dependencies]
-criterion = { workspace = true }
 tokio = { workspace = true, features = ["test-util", "macros"] }
 anyhow             = { workspace = true }
 tracing-subscriber = { workspace = true }
 rcgen              = { workspace = true }
-
-[[bench]]
-name = "codec"
-harness = false
 
 [lints]
 workspace = true

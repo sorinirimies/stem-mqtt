@@ -4,8 +4,8 @@
 
 use bytes::BytesMut;
 use libfuzzer_sys::fuzz_target;
-use mqtt_client::protocol::packet::Packet;
-use mqtt_client::MqttVersion;
+use mqtt_proto::packet::Packet;
+use mqtt_proto::MqttVersion;
 
 fuzz_target!(|data: &[u8]| {
     for version in [MqttVersion::V311, MqttVersion::V5] {

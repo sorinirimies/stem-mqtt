@@ -7,16 +7,16 @@
 //! no-nightly-required counterpart that runs in every CI build.)
 
 use bytes::{Bytes, BytesMut};
-use mqtt_client::protocol::ack::SimpleAck;
-use mqtt_client::protocol::connect::{ConnAckPacket, ConnectPacket, ConnectReasonCode, Will};
-use mqtt_client::protocol::packet::{DisconnectPacket, Packet};
-use mqtt_client::protocol::properties::{Properties, Property};
-use mqtt_client::protocol::publish::PublishPacket;
-use mqtt_client::protocol::subscribe::{
+use mqtt_proto::ack::SimpleAck;
+use mqtt_proto::connect::{ConnAckPacket, ConnectPacket, ConnectReasonCode, Will};
+use mqtt_proto::packet::{DisconnectPacket, Packet};
+use mqtt_proto::properties::{Properties, Property};
+use mqtt_proto::publish::PublishPacket;
+use mqtt_proto::subscribe::{
     SubAckPacket, SubAckReasonCode, SubscribeFilter, SubscribePacket, UnsubAckPacket,
     UnsubscribePacket,
 };
-use mqtt_client::{MqttVersion, QoS};
+use mqtt_proto::{MqttVersion, QoS};
 
 /// Tiny deterministic PRNG (xorshift64*), so failures reproduce exactly.
 struct Rng(u64);

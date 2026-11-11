@@ -332,7 +332,13 @@ jobs:
           sudo install -m 0755 /tmp/nu-$V-x86_64-unknown-linux-gnu/nu /usr/local/bin/nu || install -m 0755 /tmp/nu-$V-x86_64-unknown-linux-gnu/nu "$HOME/.cargo/bin/nu"
           nu --version
 
-      - name: Publish mqtt-client (must go first — mqtt-broker depends on it)
+      - name: Publish mqtt-proto (must go first — mqtt-client and mqtt-broker depend on it)
+        if: env.HAS_TOKEN == 'true'
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+        run: nu scripts/ci/publish_crate.nu stem-mqtt-proto ${{ needs.validate.outputs.version }} --readme-dir crates/mqtt-proto --wait 30
+
+      - name: Publish mqtt-client (after mqtt-proto; mqtt-broker depends on it)
         if: env.HAS_TOKEN == 'true'
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}

@@ -1,0 +1,29 @@
+[package]
+name = "stem-mqtt-proto"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "MQTT 3.1.1 / 5.0 wire protocol: a pure, runtime-free packet codec (no async, no TLS), shared by stem-mqtt-client and stem-mqtt-broker and usable on embedded targets."
+readme = "README.md"
+categories = ["network-programming", "embedded", "encoding"]
+keywords = ["mqtt", "mqtt5", "codec", "iot", "embedded"]
+
+[lib]
+name = "mqtt_proto"
+
+[dependencies]
+bytes     = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+criterion = { workspace = true }
+
+[[bench]]
+name = "codec"
+harness = false
+
+[lints]
+workspace = true

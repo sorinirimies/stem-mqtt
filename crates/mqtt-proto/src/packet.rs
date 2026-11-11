@@ -347,7 +347,7 @@ impl Packet {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::QoS;
+    use crate::QoS;
 
     /// The header is written right-aligned behind a reserved gap, so every
     /// remaining-length width (1–4 bytes) must come out contiguous and valid.
@@ -511,7 +511,7 @@ mod tests {
 
     #[test]
     fn response_id_covers_exactly_the_ack_packets() {
-        use crate::protocol::ack::SimpleAck;
+        use crate::ack::SimpleAck;
         let ack = SimpleAck::success(9);
         assert_eq!(Packet::PubAck(ack.clone()).response_id(), Some(9));
         assert_eq!(Packet::PubRec(ack.clone()).response_id(), Some(9));

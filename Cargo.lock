@@ -2157,9 +2157,9 @@ version = "0.8.0"
 dependencies = [
  "anyhow",
  "bytes",
- "criterion",
  "rcgen",
  "rustls",
+ "stem-mqtt-proto",
  "thiserror",
  "tokio",
  "tokio-rustls",
@@ -2179,6 +2179,15 @@ dependencies = [
  "tokio",
  "topcoat",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "stem-mqtt-proto"
+version = "0.8.0"
+dependencies = [
+ "bytes",
+ "criterion",
+ "thiserror",
 ]
 
 [[package]]

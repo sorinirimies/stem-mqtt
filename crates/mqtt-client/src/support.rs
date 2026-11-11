@@ -4,7 +4,7 @@
 //! Everything here exists to give one audited implementation of a pattern
 //! that would otherwise be copy-pasted at every call site:
 //!
-//! - [`redacted_debug!`](crate::redacted_debug) / [`Secret`] — `Debug` impls
+//! - [`redacted_debug!`](crate::redacted_debug) / [`Secret`] — (defined in `stem-mqtt-proto`, re-exported here) `Debug` impls
 //!   that never print passwords or private keys (so a stray `{:?}` or
 //!   `tracing::debug!(?options)` can't leak credentials into logs).
 //! - [`guard_callback`] — runs a foreign (Kotlin/Swift/Python/Go/…)
@@ -24,75 +24,9 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::time::Duration;
 
-use bytes::Bytes;
 use tokio::sync::Notify;
 
-/// Describes a secret value for `Debug` output without revealing it.
-///
-/// Implemented for the shapes secrets take in this workspace
-/// (`Option<_>`, `Vec<u8>`, `Bytes`, `String`). `Option` keeps its
-/// "is it set at all?" signal, which is usually what you want when
-/// debugging a configuration problem.
-pub trait Secret {
-    /// A fixed, non-revealing description of the value.
-    fn describe(&self) -> &'static str;
-}
-
-impl<T> Secret for Option<T> {
-    fn describe(&self) -> &'static str {
-        if self.is_some() {
-            "Some(<redacted>)"
-        } else {
-            "None"
-        }
-    }
-}
-
-macro_rules! always_redacted {
-    ($($ty:ty),+ $(,)?) => {
-        $( impl Secret for $ty {
-            fn describe(&self) -> &'static str { "<redacted>" }
-        } )+
-    };
-}
-always_redacted!(Vec<u8>, Bytes, String);
-
-/// `Debug` adapter used by [`redacted_debug!`](crate::redacted_debug).
-pub struct Redacted<'a, T: Secret + ?Sized>(pub &'a T);
-
-impl<T: Secret + ?Sized> std::fmt::Debug for Redacted<'_, T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.0.describe())
-    }
-}
-
-/// Implements [`Debug`](std::fmt::Debug) for a struct, printing the listed
-/// `fields` normally and the `secret` fields as `<redacted>`.
-///
-/// ```
-/// use mqtt_client::redacted_debug;
-///
-/// struct Login { user: String, password: Option<Vec<u8>> }
-/// redacted_debug!(Login { user } secret { password });
-///
-/// let l = Login { user: "bob".into(), password: Some(b"hunter2".to_vec()) };
-/// let shown = format!("{l:?}");
-/// assert!(shown.contains("bob"));
-/// assert!(!shown.contains("hunter2"));
-/// ```
-#[macro_export]
-macro_rules! redacted_debug {
-    ($ty:ident { $($field:ident),* $(,)? } secret { $($secret:ident),+ $(,)? }) => {
-        impl ::core::fmt::Debug for $ty {
-            fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-                f.debug_struct(stringify!($ty))
-                    $( .field(stringify!($field), &self.$field) )*
-                    $( .field(stringify!($secret), &$crate::support::Redacted(&self.$secret)) )+
-                    .finish()
-            }
-        }
-    };
-}
+pub use mqtt_proto::support::{Redacted, Secret};
 
 /// Run a foreign callback, converting a panic into a logged error.
 ///
