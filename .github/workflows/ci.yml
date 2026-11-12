@@ -112,6 +112,12 @@ jobs:
       - name: Build mqtt-client (dev)
         run: cargo build -p stem-mqtt-client
 
+      - name: Build mqtt-proto (dev)
+        run: cargo build -p stem-mqtt-proto
+
+      - name: Build mqtt-client-blocking (dev)
+        run: cargo build -p stem-mqtt-client-blocking
+
       - name: Build mqtt-broker (dev)
         run: cargo build -p stem-mqtt-broker
 
@@ -132,6 +138,16 @@ jobs:
 
       - name: cargo doc (mqtt-client)
         run: cargo doc --no-deps -p stem-mqtt-client --all-features
+        env:
+          RUSTDOCFLAGS: --cfg docsrs -D warnings
+
+      - name: cargo doc (mqtt-proto)
+        run: cargo doc --no-deps -p stem-mqtt-proto --all-features
+        env:
+          RUSTDOCFLAGS: --cfg docsrs -D warnings
+
+      - name: cargo doc (mqtt-client-blocking)
+        run: cargo doc --no-deps -p stem-mqtt-client-blocking --all-features
         env:
           RUSTDOCFLAGS: --cfg docsrs -D warnings
 
