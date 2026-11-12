@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.8.2] - 2026-11-12
+### ✨ Features
+- publish the Go module from a go/ subdirectory of this repo, and NuGet through trusted publishing
+### 🐛 Bug Fixes
+- hold the Windows package back from npmjs.org so the main package publishes
+- publish the Windows package as @greenspand/stem-mqtt-win32-x64-msvc
+**Full Changelog**: https://github.com/sorinirimies/stem-mqtt/compare/v0.8.0...v0.8.2
 ## [0.8.0] - 2026-11-09
 ### ✨ Features
 - C, C++, Zig and Lua bindings, runtime-tested in CI
