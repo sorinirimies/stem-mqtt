@@ -18,7 +18,7 @@ Each job needs its own repository secret and **skips quietly without it**:
 
 | Language | Registry | Package | Secret(s) | Notes |
 | --- | --- | --- | --- | --- |
-| Rust | crates.io | `stem-mqtt-proto`, `stem-mqtt-client`, `stem-mqtt-broker`, `stem-mqtt-sync` | `CRATES_IO_TOKEN` | in that order: each depends on the crates before it (the sync crate's tests use the client and the broker; `just publish`) |
+| Rust | crates.io | `stem-mqtt-proto`, `stem-mqtt-client`, `stem-mqtt-broker`, `stem-mqtt-client-blocking` | `CRATES_IO_TOKEN` | in that order: each depends on the crates before it (the sync crate's tests use the client and the broker; `just publish`) |
 | Python | PyPI | `stem-mqtt-client`, `stem-mqtt-broker` | `PYPI_API_TOKEN` | manylinux_2_28 wheels (zig) |
 | Node.js | npmjs.org | `stem-mqtt` | `NPM_TOKEN` | granular token with *bypass 2FA*; plus `stem-mqtt-<platform>` packages, published first |
 | C# | NuGet.org | `StemMqtt` | repository variable `NUGET_USER` (trusted publishing), or `NUGET_API_KEY` | trusted publishing: nuget.org → account → Trusted Publishing: owner, repository `stem-mqtt`, workflow `release.yml` |

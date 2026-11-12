@@ -1,5 +1,5 @@
 [package]
-name = "stem-mqtt-sync"
+name = "stem-mqtt-client-blocking"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
@@ -12,7 +12,7 @@ categories = ["network-programming", "embedded"]
 keywords = ["mqtt", "mqtt5", "blocking", "iot", "embedded"]
 
 [lib]
-name = "mqtt_sync"
+name = "mqtt_client_blocking"
 
 [dependencies]
 mqtt-proto = { workspace = true }

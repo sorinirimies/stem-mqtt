@@ -74,7 +74,7 @@ def "test bindgens: the pinned workspace has every internal crate the libraries 
     for p in $internal {
         assert ($members | str contains $'"($p)"') $"($p) is needed by the libraries but is not a member of the pinned workspace: ($members)"
     }
-    assert (not ($members | str contains "mqtt-sync")) "the blocking client is not part of the bindings"
+    assert (not ($members | str contains "mqtt-client-blocking")) "the blocking client is not part of the bindings"
 }
 
 def "test bindgens: pin-workspace-toml pins uniffi and trims members" [] {

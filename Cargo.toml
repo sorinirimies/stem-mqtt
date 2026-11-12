@@ -2,7 +2,7 @@
 members = [
     "crates/mqtt-proto",
     "crates/mqtt-client",
-    "crates/mqtt-sync",
+    "crates/mqtt-client-blocking",
     "crates/mqtt-broker",
     "crates/mqtt-beam",
     "demo/dashboard",

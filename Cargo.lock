@@ -2169,6 +2169,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "stem-mqtt-client-blocking"
+version = "0.8.1"
+dependencies = [
+ "bytes",
+ "stem-mqtt-broker",
+ "stem-mqtt-client",
+ "stem-mqtt-proto",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "stem-mqtt-dashboard"
 version = "0.8.1"
 dependencies = [
@@ -2187,18 +2199,6 @@ dependencies = [
  "bytes",
  "criterion",
  "thiserror",
-]
-
-[[package]]
-name = "stem-mqtt-sync"
-version = "0.8.1"
-dependencies = [
- "bytes",
- "stem-mqtt-broker",
- "stem-mqtt-client",
- "stem-mqtt-proto",
- "thiserror",
- "tokio",
 ]
 
 [[package]]

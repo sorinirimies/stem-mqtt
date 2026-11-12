@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use mqtt_broker::{MqttAuthProvider, MqttBroker, MqttBrokerConfig};
 use mqtt_client::{ConnectOptions, MqttClient, MqttVersion as AsyncVersion, QoS as AsyncQoS};
-use mqtt_sync::{Client, Error, Options, QoS, WillMessage};
+use mqtt_client_blocking::{Client, Error, Options, QoS, WillMessage};
 
 async fn start_broker() -> (MqttBroker, u16) {
     let broker = MqttBroker::new(MqttBrokerConfig::new("127.0.0.1", 0));
@@ -22,7 +22,7 @@ fn connect(port: u16, opts: Options) -> Result<Client<TcpStream>, Error> {
 }
 
 /// Poll until a message arrives (or fail after `secs`).
-fn next_message(c: &mut Client<TcpStream>, secs: u64) -> mqtt_sync::Message {
+fn next_message(c: &mut Client<TcpStream>, secs: u64) -> mqtt_client_blocking::Message {
     let deadline = Instant::now() + Duration::from_secs(secs);
     while Instant::now() < deadline {
         if let Some(m) = c.poll(Duration::from_millis(100)).unwrap() {

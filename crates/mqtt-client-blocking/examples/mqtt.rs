@@ -1,14 +1,14 @@
 //! A tiny command-line client, to watch and drive devices:
 //!
 //! ```text
-//! cargo run -p stem-mqtt-sync --example mqtt -- sub 192.168.1.23:1883 'weathertrack/#'
-//! cargo run -p stem-mqtt-sync --example mqtt -- pub 192.168.1.23:1883 weathertrack/c6-a1b2/command refresh
+//! cargo run -p stem-mqtt-client-blocking --example mqtt -- sub 192.168.1.23:1883 'weathertrack/#'
+//! cargo run -p stem-mqtt-client-blocking --example mqtt -- pub 192.168.1.23:1883 weathertrack/c6-a1b2/command refresh
 //! ```
 
 use std::net::TcpStream;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use mqtt_sync::{Client, Options, QoS};
+use mqtt_client_blocking::{Client, Options, QoS};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().skip(1).collect();

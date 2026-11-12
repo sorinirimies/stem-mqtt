@@ -8,7 +8,7 @@
 //! ```no_run
 //! use std::net::TcpStream;
 //! use std::time::Duration;
-//! use mqtt_sync::{Client, Options, QoS};
+//! use mqtt_client_blocking::{Client, Options, QoS};
 //!
 //! let stream = TcpStream::connect("192.168.1.10:1883")?;
 //! let mut client = Client::connect(stream, Options::new("weather-c6"))?;
@@ -19,7 +19,7 @@
 //!         println!("{}: {}", msg.topic, String::from_utf8_lossy(&msg.payload));
 //!     }
 //! }
-//! # Ok::<(), mqtt_sync::Error>(())
+//! # Ok::<(), mqtt_client_blocking::Error>(())
 //! ```
 //!
 //! Scope: QoS 0 and 1 for publishing, QoS 0, 1 and 2 for receiving (a QoS 2 message is delivered

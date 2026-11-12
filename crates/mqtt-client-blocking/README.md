@@ -1,13 +1,14 @@
-# stem-mqtt-sync
+# stem-mqtt-client-blocking
 
-A small **blocking** MQTT 3.1.1 / 5.0 client on top of [`stem-mqtt-proto`](../mqtt-proto). No async
+The **blocking** MQTT client of the stem-mqtt family: the small, runtime-free counterpart of the async
+[`stem-mqtt-client`](../mqtt-client). A MQTT 3.1.1 / 5.0 client on top of [`stem-mqtt-proto`](../mqtt-proto). No async
 runtime and no TLS stack of its own: it drives the codec over any `std::io` transport, so it runs on
 a PC, in a test, and on an **ESP32 with ESP-IDF `std`** (where `TcpStream` is a lwIP socket).
 
 ```rust,no_run
 use std::net::TcpStream;
 use std::time::Duration;
-use mqtt_sync::{Client, Options, QoS};
+use mqtt_client_blocking::{Client, Options, QoS};
 
 let stream = TcpStream::connect("192.168.1.10:1883")?;
 let mut client = Client::connect(stream, Options::new("weather-c6"))?;
@@ -18,7 +19,7 @@ loop {
         println!("{}: {}", msg.topic, String::from_utf8_lossy(&msg.payload));
     }
 }
-# Ok::<(), mqtt_sync::Error>(())
+# Ok::<(), mqtt_client_blocking::Error>(())
 ```
 
 You own the loop: call `poll` regularly. It receives messages, acknowledges them, and sends a
@@ -32,6 +33,13 @@ yours too: after an error, drop the client and connect again (with a growing pau
 | Session | credentials, will message, clean session, keep-alive, MQTT 3.1.1 or 5.0 |
 | Transport | anything implementing `Transport` (`Read + Write + set_read_timeout`); `TcpStream` out of the box, a TLS stream is one small impl |
 | Stats | `Client::stats()`: packets, bytes and messages each way, for a status screen |
+
+| | `stem-mqtt-client` | `stem-mqtt-client-blocking` (this crate) |
+|---|---|---|
+| Style | async (tokio), automatic reconnect, TLS built in, UniFFI bindings | blocking, you run the loop and reconnect, you bring the transport |
+| Use it for | apps, servers, phones | firmware (ESP32 `std`), small tools, tests |
+
+Both speak through [`stem-mqtt-proto`](../mqtt-proto) and talk to any broker, such as [`stem-mqtt-broker`](../mqtt-broker).
 
 ## On an ESP32
 
@@ -47,8 +55,8 @@ Checked on an ESP32-C6 (no PSRAM, about 150 KB of heap left after a Slint UI) ag
 ## Example
 
 ```text
-cargo run -p stem-mqtt-sync --example mqtt -- sub 127.0.0.1:1883 'home/#'
-cargo run -p stem-mqtt-sync --example mqtt -- pub 127.0.0.1:1883 home/kitchen/light on --retain
+cargo run -p stem-mqtt-client-blocking --example mqtt -- sub 127.0.0.1:1883 'home/#'
+cargo run -p stem-mqtt-client-blocking --example mqtt -- pub 127.0.0.1:1883 home/kitchen/light on --retain
 ```
 
 ## Tests

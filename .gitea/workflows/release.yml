@@ -350,11 +350,11 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
         run: nu scripts/ci/publish_crate.nu stem-mqtt-broker ${{ needs.validate.outputs.version }} --readme-dir crates/mqtt-broker --wait 30
 
-      - name: Publish mqtt-sync (last, its tests use the client and the broker)
+      - name: Publish mqtt-client-blocking (last, its tests use the client and the broker)
         if: env.HAS_TOKEN == 'true'
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
-        run: nu scripts/ci/publish_crate.nu stem-mqtt-sync ${{ needs.validate.outputs.version }} --readme-dir crates/mqtt-sync --wait 0
+        run: nu scripts/ci/publish_crate.nu stem-mqtt-client-blocking ${{ needs.validate.outputs.version }} --readme-dir crates/mqtt-client-blocking --wait 0
 
   # ── Per-language packages → this Gitea's own package registries ──────────────
   # Maven (Java), NuGet (C#), npm (Node) and the container registry (Go, Dart,

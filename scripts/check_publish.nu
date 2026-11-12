@@ -17,7 +17,7 @@ def main [] {
 
     # ── 1. Documentation checks ───────────────────────────────────────────────
     print "── Step 1: Documentation checks ──"
-    let doc_crates = ["stem-mqtt-proto" "stem-mqtt-client" "stem-mqtt-broker" "stem-mqtt-sync"]
+    let doc_crates = ["stem-mqtt-proto" "stem-mqtt-client" "stem-mqtt-broker" "stem-mqtt-client-blocking"]
 
     for crate in $doc_crates {
         print $"  📖 Checking docs for ($crate)..."
@@ -93,7 +93,7 @@ def main [] {
     print "    1. cargo publish -p stem-mqtt-proto    (mqtt-client and mqtt-broker depend on it)"
     print "    2. cargo publish -p stem-mqtt-client   (mqtt-broker depends on it)"
     print "    3. cargo publish -p stem-mqtt-broker"
-    print "    4. cargo publish -p stem-mqtt-sync     (its dev-dependencies are the client and the broker)"
+    print "    4. cargo publish -p stem-mqtt-client-blocking     (its dev-dependencies are the client and the broker)"
     print ""
     print "  Wait ~30 seconds between publishes for crates.io"
     print "  to index each crate before its dependents."
