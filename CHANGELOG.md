@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.8.3] - 2026-11-12
+### ♻️  Refactor
+- rename stem-mqtt-sync to stem-mqtt-client-blocking
+### ✨ Features
+- stem-mqtt-sync, a small blocking MQTT client built on stem-mqtt-proto
+### 🔄 CI
+- build and doc stem-mqtt-proto and stem-mqtt-client-blocking explicitly
+**Full Changelog**: https://github.com/sorinirimies/stem-mqtt/compare/v0.8.1...v0.8.3
 ## [0.8.1] - 2026-11-11
 ### ✨ Features
 - publish the Go module from a go/ subdirectory of this repo, and NuGet through trusted publishing
