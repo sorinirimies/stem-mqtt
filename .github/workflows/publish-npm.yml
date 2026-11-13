@@ -63,13 +63,13 @@ jobs:
           sudo install -m 0755 /tmp/nu-$V-x86_64-unknown-linux-gnu/nu /usr/local/bin/nu || install -m 0755 /tmp/nu-$V-x86_64-unknown-linux-gnu/nu "$HOME/.cargo/bin/nu"
           nu --version
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         id: node_try
         continue-on-error: true
         with:
           node-version: "22"
           registry-url: https://registry.npmjs.org
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         if: steps.node_try.outcome == 'failure'
         with:
           node-version: "22"
