@@ -1,7 +1,7 @@
 //! TLS for the blocking client over [rustls](https://docs.rs/rustls) (feature `rustls`).
 //!
 //! For PCs, Linux gateways and tests. Firmware normally uses the TLS stack of its SDK instead
-//! (see the README): implement [`Transport`](crate::Transport) for it.
+//! (see the README): implement [`Transport`] for it.
 //!
 //! ```no_run
 //! use mqtt_client_blocking::{Client, Options, tls};
