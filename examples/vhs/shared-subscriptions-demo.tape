@@ -9,15 +9,20 @@
 Output examples/vhs/generated/shared-subscriptions-demo.gif
 
 Set Theme "Catppuccin Mocha"
-Set Width 1200
-Set Height 640
-Set FontSize 15
+Set Width 960
+Set Height 600
+Set FontSize 16
 Set PlaybackSpeed 1.5
 
 # ── Start the broker in the background (hidden from recording) ──────────────
 Hide
 Type "set +m"
 Enter
+Type "demo() { cargo run -q -p stem-mqtt-client --example $1; }"
+Enter
+Type "cargo build -q -p stem-mqtt-client --examples && cargo build -q -p stem-mqtt-broker --bins --examples && echo RE''ADY"
+Enter
+Wait+Screen@300s /READY/
 Type "cargo run -q -p stem-mqtt-broker --bin mqtt-broker -- --port 1883 > /dev/null 2>&1 &"
 Enter
 Sleep 3s
@@ -26,7 +31,7 @@ Enter
 Show
 
 # ── Run the example against it ───────────────────────────────────────────────
-Type "cargo run -q -p stem-mqtt-client --example shared_subscriptions"
+Type "demo shared_subscriptions"
 Sleep 500ms
 Enter
 Sleep 6s

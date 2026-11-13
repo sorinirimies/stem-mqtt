@@ -79,7 +79,18 @@ let client = Client::connect(stream, Options::new("gateway"))?;
 * **Mutual TLS:** pass `Some(tls::ClientIdentity { cert_pem, key_pem })` as the second argument.
 * The handshake runs inside `Client::connect`; a rejected certificate is an `Error::Io` there.
 * The read timeout of `poll` is set on the TCP socket and is safe in the middle of a TLS record.
-* Try it: `cargo run -p stem-mqtt-client-blocking --features rustls --example mqtts -- sub broker.local 8883 'home/#' ca.pem`.
+* Try it against a local TLS broker (it writes a self-signed certificate to `<tmp>/stem-mqtt-tls/ca.pem`):
+
+  ```text
+  cargo run -p stem-mqtt-broker --example tls_broker
+  cargo run -p stem-mqtt-client-blocking --features rustls --example mqtts -- sub localhost 8883 'home/#' "${TMPDIR:-/tmp}/stem-mqtt-tls/ca.pem"
+  cargo run -p stem-mqtt-client-blocking --features rustls --example mqtts -- pub localhost 8883 home/light on "${TMPDIR:-/tmp}/stem-mqtt-tls/ca.pem"
+  ```
+
+  Without the CA argument the same commands fail with `InvalidCertificate(UnknownIssuer)`; the
+  [TLS demo](https://github.com/sorinirimies/stem-mqtt/blob/main/examples/vhs/tls-demo.tape) (`just vhs-tape tls-demo`) records exactly that.
+
+  ![TLS demo](https://raw.githubusercontent.com/sorinirimies/stem-mqtt/main/examples/vhs/generated/tls-demo.gif)
 
 ### Firmware (ESP32): the ESP-IDF TLS stack
 
@@ -167,6 +178,8 @@ often), and the clock: certificate validity needs SNTP time, or the handshake fa
 cargo run -p stem-mqtt-client-blocking --example mqtt -- sub 127.0.0.1:1883 'home/#'
 cargo run -p stem-mqtt-client-blocking --example mqtt -- pub 127.0.0.1:1883 home/kitchen/light on --retain
 ```
+
+Over TLS: the `mqtts` example, see [Securing a client](#securing-a-client).
 
 ## Tests
 

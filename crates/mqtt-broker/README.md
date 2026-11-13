@@ -179,6 +179,7 @@ nu ../../scripts/generate_bindings.nu kotlin
 ```sh
 cargo run -p stem-mqtt-broker --example simple_broker   # bare-minimum embedded broker
 cargo run -p stem-mqtt-broker --example auth_broker      # + MqttAuthProvider and MqttBrokerEventListener
+cargo run -p stem-mqtt-broker --example tls_broker       # TLS listener on :8883, throwaway self-signed certificate
 ```
 
 ## Testing

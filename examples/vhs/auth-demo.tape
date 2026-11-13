@@ -9,9 +9,9 @@
 Output examples/vhs/generated/auth-demo.gif
 
 Set Theme "Catppuccin Mocha"
-Set Width 1200
-Set Height 620
-Set FontSize 20
+Set Width 1000
+Set Height 520
+Set FontSize 15
 Set PlaybackSpeed 1.5
 
 # ── Start the authenticating broker in the background (hidden) ──────────────
@@ -20,6 +20,13 @@ Set PlaybackSpeed 1.5
 Hide
 Type "set +m"
 Enter
+Type "demo() { cargo run -q -p stem-mqtt-client --example $1; }"
+Enter
+Type "brokerlog() { echo; echo '── broker log ──'; grep '^\[' /tmp/stem-mqtt-auth.log; }"
+Enter
+Type "cargo build -q -p stem-mqtt-client --examples && cargo build -q -p stem-mqtt-broker --bins --examples && echo RE''ADY"
+Enter
+Wait+Screen@300s /READY/
 Type "cargo run -q -p stem-mqtt-broker --example auth_broker > /tmp/stem-mqtt-auth.log 2>&1 &"
 Enter
 Sleep 3s
@@ -28,13 +35,13 @@ Enter
 Show
 
 # ── Two login attempts ───────────────────────────────────────────────────────
-Type "cargo run -q -p stem-mqtt-client --example auth_client"
+Type "demo auth_client"
 Sleep 500ms
 Enter
 Sleep 4s
 
 # ── What the broker saw (only its own [auth]/[event] lines, not tracing noise) ──
-Type "echo; echo '── broker log ──'; grep '^\[' /tmp/stem-mqtt-auth.log"
+Type "brokerlog"
 Sleep 500ms
 Enter
 Sleep 3s

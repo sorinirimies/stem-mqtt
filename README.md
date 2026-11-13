@@ -124,8 +124,14 @@ A pluggable auth provider rejects two wrong logins and accepts the right one; th
 
 One connection held open across several keep-alive intervals with a heartbeat every two seconds — the shape of a background service or IoT device.
 
+**TLS**
+
+![TLS](examples/vhs/generated/tls-demo.gif)
+
+The blocking client over TLS (`stem-mqtt-client-blocking`, feature `rustls`) against a broker with a TLS listener and a throwaway self-signed certificate: without the broker's CA the certificate is refused, with it a subscriber receives what a publisher sends.
+
 Recorded with [VHS](https://github.com/charmbracelet/vhs): `just vhs-tape <name>` or `just vhs-all`
-(tapes in [`examples/vhs`](examples/vhs); each tape runs the example of the same name).
+(tapes in [`examples/vhs`](examples/vhs); each tape runs the example of the same name, except `tls-demo`, which runs the `tls_broker` and `mqtts` examples). A tape builds first, then records only the command that matters: short hidden shell functions (`demo`, `mqtts`) stand in for the long `cargo run` lines.
 
 ## Installation
 
@@ -192,7 +198,8 @@ Callbacks are available everywhere except Dart and Haskell, which use the
 - **TLS** (client + broker, `mqtt-client::TlsOptions` /
   `mqtt-broker::BrokerTlsConfig`) — pure-Rust `rustls`, custom CA support,
   and mutual TLS (mTLS) client-certificate verification. No OpenSSL/system-
-  TLS dependency.
+  TLS dependency. The blocking client has TLS too: the `rustls` feature on PCs, the SDK's TLS stack on
+  firmware (see [`stem-mqtt-client-blocking`](crates/mqtt-client-blocking#securing-a-client)).
 - **Opt-in client auto-reconnect** (`ConnectOptions::auto_reconnect`) with
   exponential backoff, replaying every topic the client was subscribed to
   once reconnected.
@@ -251,7 +258,7 @@ has a one-Pod and a Deployment + Service Kubernetes demo.
 | Path | Description |
 | --- | --- |
 | [`crates/mqtt-proto`](crates/mqtt-proto) | The MQTT 3.1.1 / 5.0 wire codec (`stem-mqtt-proto`): pure and synchronous, no async runtime, TLS or UniFFI. Shared by the client and the broker. |
-| [`crates/mqtt-client-blocking`](crates/mqtt-client-blocking) | The **blocking** client over any `std::io` transport, built on the codec: no async runtime, runs on an ESP32 with ESP-IDF `std`. The small counterpart of `mqtt-client`. |
+| [`crates/mqtt-client-blocking`](crates/mqtt-client-blocking) | The **blocking** client over any `std::io` transport, built on the codec: no async runtime, runs on an ESP32 with ESP-IDF `std`; optional `rustls` TLS for PCs. The small counterpart of `mqtt-client`. |
 | [`crates/mqtt-client`](crates/mqtt-client) | Async, `tokio`-based MQTT client; re-exports the codec as `mqtt_client::protocol`. |
 | [`crates/mqtt-broker`](crates/mqtt-broker) | Standalone broker (library + `mqtt-broker` CLI), built on the same codec. |
 | [`demo/`](demo) | Browser client (`web/`) and a Rust + Topcoat dashboard (`dashboard/`). |

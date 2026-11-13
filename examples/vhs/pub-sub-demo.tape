@@ -8,8 +8,8 @@
 Output examples/vhs/generated/pub-sub-demo.gif
 
 Set Theme "Catppuccin Mocha"
-Set Width 1200
-Set Height 700
+Set Width 960
+Set Height 420
 Set FontSize 16
 Set PlaybackSpeed 1.5
 
@@ -23,6 +23,11 @@ Set PlaybackSpeed 1.5
 Hide
 Type "set +m"
 Enter
+Type "demo() { cargo run -q -p stem-mqtt-client --example $1; }"
+Enter
+Type "cargo build -q -p stem-mqtt-client --examples && cargo build -q -p stem-mqtt-broker --bins --examples && echo RE''ADY"
+Enter
+Wait+Screen@300s /READY/
 Type "cargo run -q -p stem-mqtt-broker --bin mqtt-broker -- --port 1883 > /dev/null 2>&1 &"
 Enter
 Sleep 3s
@@ -31,7 +36,7 @@ Enter
 Show
 
 # ── Run the pub/sub example against it ───────────────────────────────────────
-Type "cargo run -q -p stem-mqtt-client --example pub_sub"
+Type "demo pub_sub"
 Sleep 500ms
 Enter
 Sleep 4s

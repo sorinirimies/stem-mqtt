@@ -11,15 +11,20 @@
 Output examples/vhs/generated/long-lived-connection-demo.gif
 
 Set Theme "Catppuccin Mocha"
-Set Width 1200
-Set Height 800
-Set FontSize 15
+Set Width 960
+Set Height 700
+Set FontSize 16
 Set PlaybackSpeed 2.5
 
 # ── Start the broker in the background (hidden from recording) ──────────────
 Hide
 Type "set +m"
 Enter
+Type "demo() { cargo run -q -p stem-mqtt-client --example $1; }"
+Enter
+Type "cargo build -q -p stem-mqtt-client --examples && cargo build -q -p stem-mqtt-broker --bins --examples && echo RE''ADY"
+Enter
+Wait+Screen@300s /READY/
 Type "cargo run -q -p stem-mqtt-broker --bin mqtt-broker -- --port 1883 > /dev/null 2>&1 &"
 Enter
 Sleep 3s
@@ -28,7 +33,7 @@ Enter
 Show
 
 # ── Run the long_lived_connection example against it (~20s real time) ───────
-Type "cargo run -q -p stem-mqtt-client --example long_lived_connection"
+Type "demo long_lived_connection"
 Sleep 500ms
 Enter
 Sleep 23s

@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use mqtt_broker::{BrokerTlsConfig, MqttBroker, MqttBrokerConfig};
 use mqtt_client_blocking::tls::{self, ClientIdentity};
-use mqtt_client_blocking::{Client, Options, QoS};
+use mqtt_client_blocking::{Client, Options, QoS, WillMessage};
 
 struct Pem {
     cert: Vec<u8>,
@@ -172,6 +172,122 @@ async fn mutual_tls_needs_the_client_certificate() {
         assert!(Client::connect(stream, Options::new("anon")).is_err());
     })
     .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_ca_bundle_trusts_any_certificate_in_it() {
+    let server = self_signed(&["127.0.0.1"]);
+    let other = self_signed(&["127.0.0.1"]);
+    let (_broker, port) = start_tls_broker(&server, None).await;
+    let bundle = [other.cert.as_slice(), b"\n", server.cert.as_slice()].concat();
+    blocking(move || {
+        let config = tls::client_config(Some(&bundle), None).unwrap();
+        let stream = tls::connect("127.0.0.1", port, config).unwrap();
+        Client::connect(stream, Options::new("bundle")).unwrap();
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_default_web_roots_refuse_a_private_certificate() {
+    let server = self_signed(&["127.0.0.1"]);
+    let (_broker, port) = start_tls_broker(&server, None).await;
+    let err = blocking(move || {
+        let config = tls::client_config(None, None).unwrap();
+        let stream = tls::connect("127.0.0.1", port, config).unwrap();
+        Client::connect(stream, Options::new("web-roots")).err()
+    })
+    .await;
+    assert!(
+        err.is_some(),
+        "a private certificate is not in the web roots"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn keep_alive_pings_work_over_an_idle_tls_connection() {
+    let server = self_signed(&["127.0.0.1"]);
+    let (_broker, port) = start_tls_broker(&server, None).await;
+    let ca = server.cert.clone();
+    blocking(move || {
+        let config = tls::client_config(Some(&ca), None).unwrap();
+        let mut opts = Options::new("idle");
+        opts.keep_alive = Duration::from_secs(1);
+        opts.ping_interval = Some(Duration::from_millis(300));
+        let mut client =
+            Client::connect(tls::connect("127.0.0.1", port, config).unwrap(), opts).unwrap();
+        // Idle for several keep-alive periods: the broker would drop a silent client.
+        let until = Instant::now() + Duration::from_millis(2500);
+        while Instant::now() < until {
+            client.poll(Duration::from_millis(100)).unwrap();
+        }
+        client
+            .publish("idle/ok", b"1", QoS::AtLeastOnce, false)
+            .unwrap();
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_will_is_sent_when_a_tls_client_drops() {
+    let server = self_signed(&["127.0.0.1"]);
+    let (_broker, port) = start_tls_broker(&server, None).await;
+    let ca = server.cert.clone();
+    blocking(move || {
+        let config = tls::client_config(Some(&ca), None).unwrap();
+        let connect = |opts: Options| {
+            Client::connect(
+                tls::connect("127.0.0.1", port, config.clone()).unwrap(),
+                opts,
+            )
+            .unwrap()
+        };
+        let mut watcher = connect(Options::new("watcher"));
+        watcher.subscribe("status/dev", QoS::AtLeastOnce).unwrap();
+        let mut opts = Options::new("dev");
+        opts.will = Some(WillMessage {
+            topic: "status/dev".into(),
+            payload: b"offline".to_vec(),
+            qos: QoS::AtLeastOnce,
+            retain: false,
+        });
+        drop(connect(opts)); // no DISCONNECT: the TLS stream is just closed
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Some(m) = watcher.poll(Duration::from_millis(100)).unwrap() {
+                assert_eq!(m.payload, b"offline");
+                break;
+            }
+            assert!(Instant::now() < deadline, "no will over TLS");
+        }
+    })
+    .await;
+}
+
+#[test]
+fn a_pem_without_certificates_is_invalid_data() {
+    let err = tls::client_config(Some(b""), None).unwrap_err();
+    assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+}
+
+#[test]
+fn a_mismatched_or_missing_client_key_is_invalid_data() {
+    let a = self_signed(&["device"]);
+    let b = self_signed(&["device"]);
+    let ca = self_signed(&["127.0.0.1"]).cert;
+    let mismatched = ClientIdentity {
+        cert_pem: &a.cert,
+        key_pem: &b.key,
+    };
+    let err = tls::client_config(Some(&ca), Some(mismatched)).unwrap_err();
+    assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+    let no_key = ClientIdentity {
+        cert_pem: &a.cert,
+        key_pem: b"",
+    };
+    let err = tls::client_config(Some(&ca), Some(no_key)).unwrap_err();
+    assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
 }
 
 #[test]
