@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.9.0] - 2026-11-13
+### ✨ Features
+- optional rustls TLS transport, mqtts example and securing guide
+- TLS demo tape and tls_broker example, shorter tapes, more TLS tests, READMEs
+### 🐛 Bug Fixes
+- redundant intra-doc link target
+### 🔄 CI
+- bump actions/setup-node from 4 to 7 (#19)
+- bump actions/setup-go from 5 to 7 (#20)
+- bump actions/setup-java from 4 to 6 (#21)
+**Full Changelog**: https://github.com/sorinirimies/stem-mqtt/compare/v0.8.3...v0.9.0
 ## [0.8.3] - 2026-11-12
 ### ♻️  Refactor
 - rename stem-mqtt-sync to stem-mqtt-client-blocking
