@@ -14,15 +14,27 @@ keywords = ["mqtt", "mqtt5", "blocking", "iot", "embedded"]
 [lib]
 name = "mqtt_client_blocking"
 
+[features]
+# TLS over rustls for PCs, Linux gateways and tests: `Transport` for a rustls stream plus `tls::connect`.
+# Off by default: firmware uses the ESP-IDF TLS stack instead (see the README).
+rustls = ["dep:rustls", "dep:webpki-roots"]
+
 [dependencies]
-mqtt-proto = { workspace = true }
-bytes      = { workspace = true }
-thiserror  = { workspace = true }
+mqtt-proto   = { workspace = true }
+bytes        = { workspace = true }
+thiserror    = { workspace = true }
+rustls       = { workspace = true, optional = true }
+webpki-roots = { workspace = true, optional = true }
 
 [dev-dependencies]
 mqtt-broker = { workspace = true }
 mqtt-client = { workspace = true }
+rcgen       = { workspace = true }
 tokio       = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }
 
 [lints]
 workspace = true
+
+[[example]]
+name = "mqtts"
+required-features = ["rustls"]

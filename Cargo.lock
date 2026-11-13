@@ -2173,11 +2173,14 @@ name = "stem-mqtt-client-blocking"
 version = "0.8.3"
 dependencies = [
  "bytes",
+ "rcgen",
+ "rustls",
  "stem-mqtt-broker",
  "stem-mqtt-client",
  "stem-mqtt-proto",
  "thiserror",
  "tokio",
+ "webpki-roots 0.26.11",
 ]
 
 [[package]]

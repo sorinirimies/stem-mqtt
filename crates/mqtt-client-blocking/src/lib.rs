@@ -1,6 +1,6 @@
 //! A small **blocking** MQTT client on top of [`stem-mqtt-proto`](https://docs.rs/stem-mqtt-proto).
 //!
-//! No async runtime, no TLS stack of its own: it drives the codec over any [`Transport`] (a
+//! No async runtime, no TLS stack of its own (the optional `rustls` feature adds [`tls`] for PCs): it drives the codec over any [`Transport`] (a
 //! `std::net::TcpStream` on a PC or on an ESP32 with ESP-IDF `std`, a TLS stream, a test double).
 //! The caller owns the loop: call [`Client::poll`] regularly, it receives messages and keeps the
 //! connection alive (PINGREQ) by itself.
@@ -30,6 +30,9 @@
 #[cfg(doctest)]
 #[doc = include_str!("../README.md")]
 struct ReadmeDoctests;
+
+#[cfg(feature = "rustls")]
+pub mod tls;
 
 use std::collections::VecDeque;
 use std::io::{self, Read, Write};
