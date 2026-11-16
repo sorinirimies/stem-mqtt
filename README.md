@@ -139,92 +139,71 @@ Every published package is prefixed `stem-mqtt-` (`mqtt-client` / `mqtt-broker` 
 projects on crates.io and PyPI; `stem-mqtt-proto` is a Rust-only crate, with no foreign-language package); import names in code are unchanged. A package is available once a
 release has published it to that registry.
 
-| Language | Install | Import |
-| --- | --- | --- |
-| **Rust** | `cargo add stem-mqtt-client stem-mqtt-broker` | `use mqtt_client::…; use mqtt_broker::…;` |
-| Python | `pip install stem-mqtt-client stem-mqtt-broker` | `import mqtt_client, mqtt_broker` |
-| Node.js | `npm i stem-mqtt` | `stem-mqtt/client` · `stem-mqtt/broker` |
-| Kotlin (JVM/Android) | `io.github.sorinirimies.stemmqtt:stem-mqtt-kotlin` (Maven Central) | `import uniffi.mqtt_client.*` |
-| Java (JDK 22+) | `io.github.sorinirimies.stemmqtt:stem-mqtt-java` (Maven Central) | `import uniffi.mqtt_client.*;` |
-| C# | `dotnet add package StemMqtt` | `using uniffi.mqtt_client;` |
-| Go | `go get github.com/sorinirimies/stem-mqtt/go` | `…/stem-mqtt/go/mqtt_client` |
-| Dart | `dart pub add stem_mqtt` | `package:stem_mqtt/mqtt_client.dart` |
-| Haskell | `cabal install stem-mqtt` | `import UniFFI.MqttClient` |
-| Elixir / Erlang | `{:stem_mqtt, "~> 0.5"}` (Hex) | `StemMqtt.Client` · `stem_mqtt` |
-| Ruby | `gem install stem-mqtt-client stem-mqtt-broker` | `require "stem_mqtt_client"` |
-| Swift | `StemMqttSwift-<version>.zip` from the GitHub Release | `import MqttClient` |
+| Language | Install | Import | Guide |
+| --- | --- | --- | --- |
+| **Rust** | `cargo add stem-mqtt-client stem-mqtt-broker` | `use mqtt_client::…; use mqtt_broker::…;` | [rust.md](docs/languages/rust.md) |
+| Python | `pip install stem-mqtt-client stem-mqtt-broker` | `import mqtt_client, mqtt_broker` | [python.md](docs/languages/python.md) |
+| Node.js | `npm i stem-mqtt` | `stem-mqtt/client` · `stem-mqtt/broker` | [node.md](docs/languages/node.md) |
+| Kotlin (JVM/Android) | `io.github.sorinirimies.stemmqtt:stem-mqtt-kotlin` (Maven Central) | `import uniffi.mqtt_client.*` | [kotlin.md](docs/languages/kotlin.md) |
+| Java (JDK 22+) | `io.github.sorinirimies.stemmqtt:stem-mqtt-java` (Maven Central) | `import uniffi.mqtt_client.*;` | [java.md](docs/languages/java.md) |
+| C# | `dotnet add package StemMqtt` | `using uniffi.mqtt_client;` | [csharp.md](docs/languages/csharp.md) |
+| Go | `go get github.com/sorinirimies/stem-mqtt/go` | `…/stem-mqtt/go/mqtt_client` | [go.md](docs/languages/go.md) |
+| Dart | `dart pub add stem_mqtt` | `package:stem_mqtt/mqtt_client.dart` | [dart.md](docs/languages/dart.md) |
+| Haskell | `cabal install stem-mqtt` | `import UniFFI.MqttClient` | [haskell.md](docs/languages/haskell.md) |
+| Elixir / Erlang | `{:stem_mqtt, "~> 0.5"}` (Hex) | `StemMqtt.Client` · `stem_mqtt` | [elixir.md](docs/languages/elixir.md) |
+| Ruby | `gem install stem-mqtt-client stem-mqtt-broker` | `require "stem_mqtt_client"` | [ruby.md](docs/languages/ruby.md) |
+| Swift | `StemMqttSwift-<version>.zip` from the GitHub Release | `import MqttClient` | [swift.md](docs/languages/swift.md) |
+| C | sources zip from the GitHub Release | see guide | [c.md](docs/languages/c.md) |
+| C++ | sources zip from the GitHub Release | see guide | [cpp.md](docs/languages/cpp.md) |
+| Zig | sources zip from the GitHub Release | see guide | [zig.md](docs/languages/zig.md) |
+| Lua | sources zip from the GitHub Release | see guide | [lua.md](docs/languages/lua.md) |
 
-Every language gets the same two components — a client and a broker.
-
-Detailed guides — install, requirements, a complete example, client and broker API, authentication, TLS,
-language-specific notes, building from source and troubleshooting — live in
-[`docs/languages/`](docs/languages/README.md):
-
-| Language | Guide | Notes |
-| --- | --- | --- |
-| Rust | [rust.md](docs/languages/rust.md) | `tokio`; the [quick start](#quick-start-rust) above |
-| Python | [python.md](docs/languages/python.md) | `asyncio`; wheels bundle the native library |
-| Node.js | [node.md](docs/languages/node.md) | ESM, server-side; Promises |
-| Kotlin | [kotlin.md](docs/languages/kotlin.md) | coroutines; JVM and Android |
-| Java | [java.md](docs/languages/java.md) | JDK 22+ (FFM); `CompletableFuture` |
-| C# | [csharp.md](docs/languages/csharp.md) | `async`/`await`; .NET 8+ |
-| Go | [go.md](docs/languages/go.md) | cgo; install the native libraries separately |
-| Dart | [dart.md](docs/languages/dart.md) | pull-style API; needs `cargo` to build |
-| Haskell | [haskell.md](docs/languages/haskell.md) | pull-style API; needs `cargo` to build |
-| Elixir / Erlang | [elixir.md](docs/languages/elixir.md) | Rustler NIF; events as messages; precompiled |
-| Ruby | [ruby.md](docs/languages/ruby.md) | per-platform gems; async calls block (fiber-aware) |
-| Swift | [swift.md](docs/languages/swift.md) | `async`/`await`; XCFrameworks for Apple platforms |
-| C | [c.md](docs/languages/c.md) | C11 sources + the release libraries; `_async` variants with completion callbacks |
-| C++ | [cpp.md](docs/languages/cpp.md) | C++17; `uniffi::Future`; exceptions or `uniffi::Result` |
-| Zig | [zig.md](docs/languages/zig.md) | Zig 0.17; Zig errors and allocators |
-| Lua | [lua.md](docs/languages/lua.md) | Lua C modules (smoke-tested on 5.4 and 5.5); callbacks run on the Lua thread |
+Every language gets a client and a broker. Each guide covers requirements, a complete example, the API, authentication, TLS, building from source and troubleshooting: [`docs/languages/`](docs/languages/README.md).
 
 Callbacks are available everywhere except Dart and Haskell, which use the
 [pull-style API](docs/languages/README.md#receiving-messages-and-events).
 
 ## Features
 
-- **MQTT 3.1.1 and MQTT 5.0** — one codec (`stem-mqtt-proto`), version negotiated per connection
-  (`MqttVersion::V311` / `MqttVersion::V5`).
-- **QoS 0, 1, 2** — at-most-once, at-least-once, and the full exactly-once
-  four-part handshake (PUBLISH → PUBREC → PUBREL → PUBCOMP), with real
-  redelivery (DUP=1 resend on timeout) on both the client and broker side
-  — not just a single fire-and-hope attempt.
-- **Wire codec for all control packet types**, in its own runtime-free crate (`stem-mqtt-proto`, usable
-  on a microcontroller) — CONNECT/CONNACK, PUBLISH and
-  its ack chain, SUBSCRIBE/SUBACK, UNSUBSCRIBE/UNSUBACK, PING, DISCONNECT,
-  and MQTT 5 AUTH — with the enhanced-authentication exchange built on top
-  (see *Authentication* below).
-- **TLS** (client + broker, `mqtt-client::TlsOptions` /
-  `mqtt-broker::BrokerTlsConfig`) — pure-Rust `rustls`, custom CA support,
-  and mutual TLS (mTLS) client-certificate verification. No OpenSSL/system-
-  TLS dependency. The blocking client has TLS too: the `rustls` feature on PCs, the SDK's TLS stack on
-  firmware (see [`stem-mqtt-client-blocking`](crates/mqtt-client-blocking#securing-a-client)).
-- **Opt-in client auto-reconnect** (`ConnectOptions::auto_reconnect`) with
-  exponential backoff, replaying every topic the client was subscribed to
-  once reconnected.
-- **Last Will and Testament**, retained messages, keep-alive pings.
-- **MQTT-over-WebSocket** (`--ws-port`) alongside raw TCP, so browser
-  clients (which can't open raw TCP sockets) can connect directly —
-  see [`demo/`](demo) for a full browser pub/sub demo webpage.
-- **Authentication** — pluggable username/password (`MqttAuthProvider`) and MQTT 5
-  **enhanced authentication** (multi-round challenge/response: SCRAM, Kerberos, OAuth, …) via
-  `MqttEnhancedAuthProvider` on the broker and `MqttAuthHandler` on the client.
-- **Shared subscriptions** (`$share/<group>/<filter>`) — one delivery per group, round-robin —
-  routed through a **topic-trie subscription index** instead of a per-publish scan of every session.
-- **Session expiry** (`session_expiry_secs`) for persistent sessions that never return.
-- **Event observation** (`MqttBrokerEventListener`) and, for runtimes that can't receive callbacks
-  (Dart, Haskell), a **pull-style API**: `enable_message_queue` / `next_message` on the client,
-  `enable_event_queue` / `next_event` on the broker.
-- **UniFFI bindings** — the client and the broker build as `cdylib`/`staticlib`
-  (`cargo rustc --lib --crate-type cdylib,staticlib`) and ship a
-  `uniffi-bindgen` binary for Kotlin, Swift and Python; Go, C#, Java, Dart,
-  Node.js and Haskell are generated through pinned community generators — all of
-  them runtime-tested in CI against a real broker.
-- **Hardened by default** — packet-size limits, bounded per-client send queues,
-  keep-alive timeout detection, credential-redacting `Debug`, foreign callbacks
-  that can't crash I/O tasks, and a decoder that is fuzzed (randomised tests in
-  every build + `cargo-fuzz` targets in [`fuzz/`](fuzz)) — see `CHANGELOG.md`.
+**Protocol**
+
+| | |
+| --- | --- |
+| **MQTT 3.1.1 and 5.0** | One codec, version negotiated per connection (`MqttVersion::V311` / `V5`). |
+| **QoS 0, 1, 2** | Full exactly-once handshake (PUBLISH → PUBREC → PUBREL → PUBCOMP) with real DUP=1 redelivery on timeout, client and broker side. |
+| **Retained, Will, keep-alive** | Retained messages, Last Will and Testament, keep-alive pings and timeout detection. |
+| **Shared subscriptions** | `$share/<group>/<filter>`: one delivery per group, round-robin, via a topic-trie index (no per-publish scan of sessions). |
+| **Session expiry** | `session_expiry_secs` for persistent sessions that never return. |
+
+**Transport and security**
+
+| | |
+| --- | --- |
+| **TLS** | Pure-Rust `rustls` on client and broker: custom CA, mutual TLS, no OpenSSL. The blocking client has it too ([details](crates/mqtt-client-blocking#securing-a-client)). |
+| **WebSocket** | `--ws-port` serves MQTT-over-WebSocket next to raw TCP, so browsers connect directly (see [`demo/`](demo)). |
+| **Authentication** | Pluggable username/password (`MqttAuthProvider`) and MQTT 5 enhanced auth: multi-round SCRAM, Kerberos, OAuth… (`MqttEnhancedAuthProvider` on the broker, `MqttAuthHandler` on the client). |
+
+**Client and broker**
+
+| | |
+| --- | --- |
+| **Auto-reconnect** | Opt in with `ConnectOptions::auto_reconnect`: exponential backoff, subscriptions replayed after reconnect. |
+| **Event observation** | `MqttBrokerEventListener` for connections and messages. |
+| **Pull-style API** | For runtimes without callbacks (Dart, Haskell): `enable_message_queue` / `next_message` on the client, `enable_event_queue` / `next_event` on the broker. |
+
+**Packaging**
+
+| | |
+| --- | --- |
+| **Runtime-free codec** | `stem-mqtt-proto` covers every control packet incl. MQTT 5 AUTH; no async runtime, no sockets, fine on a microcontroller. |
+| **Blocking client** | `stem-mqtt-client-blocking` runs on any `std::io` transport, including ESP32 with ESP-IDF. |
+| **16 languages** | Client and broker in each, via UniFFI and Rustler. See [Installation](#installation) and [bindings](#generating-foreign-language-bindings). |
+
+**Quality**
+
+- **Hardened by default**: packet-size limits, bounded per-client send queues, credential-redacting `Debug`, foreign callbacks that can't crash I/O tasks.
+- **Fuzzed decoder**: randomised tests in every build plus `cargo-fuzz` targets in [`fuzz/`](fuzz).
+- **Runtime-tested bindings**: every language runs against a real broker in CI. See `CHANGELOG.md`.
 
 ## Running the broker
 
@@ -295,39 +274,19 @@ just bindings-all                                 # or: just bindings-third-part
 | Java (JDK 22+) | [uniffi-bindgen-java](https://github.com/IronCoreLabs/uniffi-bindgen-java) | ✅ client + broker + all callbacks | stable |
 | Dart | [uniffi-dart](https://github.com/acterglobal/uniffi-dart) | ✅ client + broker through the pull-style API ¹ | experimental |
 | Node.js | [uniffi-bindgen-node-js](https://github.com/criccomini/uniffi-bindgen-node-js) | ✅ client + broker + all callbacks | experimental |
-| Haskell | [uniffi-bindgen-haskell](https://github.com/mercury/uniffi-bindgen-haskell) + [our patch](packaging/haskell) (PR [#3](https://github.com/mercury/uniffi-bindgen-haskell/pull/3)) | ✅ client + broker through the pull-style API ¹ | experimental |
+| Haskell | [uniffi-bindgen-haskell](https://github.com/mercury/uniffi-bindgen-haskell) + [our patch](packaging/haskell) (PR [#3](https://github.com/mercury/uniffi-bindgen-haskell/pull/3)) ² | ✅ client + broker through the pull-style API ¹ | experimental |
 | C | [uniffi-bindgen-c](https://github.com/sorinirimies/uniffi-bindgen-c) | ✅ client + broker + all callbacks | experimental |
 | C++ | [uniffi-bindgen-cpp](https://github.com/sorinirimies/uniffi-bindgen-cpp) | ✅ client + broker + all callbacks | experimental |
 | Zig | [uniffi-bindgen-zig](https://github.com/sorinirimies/uniffi-bindgen-zig) | ✅ client + broker + all callbacks | experimental |
 | Lua | [uniffi-bindgen-lua](https://github.com/sorinirimies/uniffi-bindgen-lua) ³ | ✅ client + broker + all callbacks | experimental |
 
-¹ Dart: foreign callbacks cannot be invoked from Rust's own threads (the VM aborts). Haskell: callback
-interfaces are exposed only as opaque handles. So `MqttMessageListener`, `MqttAuthProvider`,
-`MqttBrokerEventListener` and the enhanced-auth callbacks can't be implemented there — use the
-**pull-style API** that exists for exactly this: `enable_message_queue` / `next_message(timeout_ms)` on the
-client and `enable_event_queue` / `next_event(timeout_ms)` on the broker. Their smoke tests receive
-messages and observe broker events that way. Authentication uses the pull-style auth queue (`enable_auth_queue` / `next_auth_request` / `resolve_auth_request`).
-² Upstream's Haskell generator had three bugs that made every binding unusable: constructors never
-lowered their arguments (generated code didn't compile), flat-error variants dropped their message
-(decoder failed with "left N trailing bytes"), and records sharing a field name broke the public module.
-[`packaging/haskell/uniffi-bindgen-haskell.patch`](packaging/haskell/uniffi-bindgen-haskell.patch)
-fixes all three (and is proposed upstream, see [`packaging/haskell`](packaging/haskell)); `install_bindgens.nu` builds the generator from the pinned revision with the patch applied.
-³ Lua needs uniffi-bindgen-lua 0.1.2 or later: 0.1.1 deadlocked when Lua waited in one module (a
-client's `connect`) while Rust called back into the other (the broker's auth provider).
+¹ Dart and Haskell can't implement foreign callbacks; they use the [pull-style API](docs/languages/README.md#receiving-messages-and-events).
+² Haskell uses our patched generator, proposed upstream. ³ Lua needs uniffi-bindgen-lua 0.1.2 or later.
+Details: [docs/binding-generators.md](docs/binding-generators.md).
 
-C, C++, Zig and Lua ship as sources (`bindings-<language>.zip` on each release) that you compile into
-your program and link to the libraries of the `mqtt-client-` / `mqtt-broker-<version>-<target>` archives.
+C, C++, Zig and Lua ship as sources (`bindings-<language>.zip` on each release) to compile into your program and link against the `mqtt-client-` / `mqtt-broker-<version>-<target>` archives.
 
-**One solution per language, client and broker everywhere.** Each language has exactly one generator
-(no parallel hand-written addons), and each component is self-contained: the broker owns its own `QoS`
-enum instead of importing the client's, so no generator ever meets a cross-crate "external type" (the
-Node generator rejects them) and every language gets a standalone broker package.
-
-UniFFI bindgens can only read metadata from the UniFFI release they were built
-for, and the third-party generators disagree (the workspace and Java are on 0.32,
-Haskell on 0.32.0, Go, C#, Dart and Node still on 0.31). `generate_bindings.nu` therefore builds the library for
-such a generator in a scratch workspace under `target/uniffi-<version>/` pinned
-to the right release; your workspace is never touched.
+Each language has one generator, and each component is self-contained (the broker owns its own `QoS` enum), so every language gets a standalone client and broker. Third-party generators pin different UniFFI releases, so `generate_bindings.nu` builds each in a scratch workspace under `target/uniffi-<version>/` and never touches yours.
 
 ### Do the bindings actually work?
 
