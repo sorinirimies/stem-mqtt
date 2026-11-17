@@ -143,6 +143,22 @@ pub struct BrokerTlsConfig {
     /// certificates aren't required or checked — just a normal one-way
     /// TLS listener.
     pub client_ca_pem: Option<Vec<u8>>,
+    /// With mutual TLS, tie the MQTT client id to the verified client certificate, so a client cannot claim
+    /// another's id (and with it its topics and its session). [`CertClientId::None`] (the default) leaves the id as the
+    /// client sent it.
+    pub bind_client_id: CertClientId,
+}
+
+/// How a verified client certificate is tied to the MQTT client id (see [`BrokerTlsConfig::bind_client_id`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, uniffi::Enum)]
+pub enum CertClientId {
+    /// The client id is whatever the client sent.
+    #[default]
+    None,
+    /// The client id must equal the certificate's subject common name; a client that sends an empty id is given it.
+    CommonName,
+    /// The client id must equal one of the certificate's DNS subject alternative names.
+    DnsName,
 }
 
 // Never print the server private key when a config is `Debug`-formatted.
@@ -214,6 +230,50 @@ pub trait MqttAuthProvider: Send + Sync {
         username: Option<String>,
         password: Option<Vec<u8>>,
     ) -> bool;
+}
+
+/// What a client asks to do with a topic, for [`MqttAuthorizer`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum TopicAction {
+    /// Publish to a topic name (also a Last Will, checked at CONNECT).
+    Publish,
+    /// Subscribe to a topic filter (for `$share/<group>/<filter>` the inner filter).
+    Subscribe,
+}
+
+/// Pluggable topic authorisation, evaluated for every PUBLISH, every filter of a SUBSCRIBE and a Last Will at CONNECT. With
+/// none registered every authenticated client may use every topic, as before.
+///
+/// Denied: a PUBLISH is dropped and, in MQTT 5.0, acknowledged with reason 0x87 (not authorised; MQTT 3.1.1 has no
+/// such code, the publisher sees an ordinary acknowledgement); a SUBSCRIBE filter gets 0x87 (0x80 in 3.1.1); a Last Will
+/// refuses the CONNECT. The check is a plain call on the connection's task: it must be quick and must not block (an
+/// in-memory ACL, not a database). A panic counts as denied.
+#[uniffi::export(with_foreign)]
+pub trait MqttAuthorizer: Send + Sync {
+    /// Return `true` to allow `client_id` to do `action` on `topic`.
+    fn authorize(&self, client_id: String, action: TopicAction, topic: String) -> bool;
+}
+
+/// One message a client published (or whose Last Will the broker published), for [`MqttMessageObserver`].
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct ObservedMessage {
+    /// The topic name.
+    pub topic: String,
+    /// The payload.
+    pub payload: Vec<u8>,
+    /// The QoS it was published at.
+    pub qos: QoS,
+    /// Whether it was published as retained.
+    pub retain: bool,
+}
+
+/// Sees every message the broker accepts, with its payload, so a program that embeds the broker needs no MQTT client of its
+/// own to read telemetry. Called after authorisation, once per message, on the publishing connection's task: keep it
+/// quick (push to a channel); a panic is contained.
+#[uniffi::export(with_foreign)]
+pub trait MqttMessageObserver: Send + Sync {
+    /// A message from `client_id` was accepted (a Last Will is published by the broker on the dead client's behalf).
+    fn on_message(&self, client_id: String, message: ObservedMessage);
 }
 
 /// The verdict of one round of an MQTT 5.0 enhanced authentication exchange.
@@ -289,6 +349,8 @@ pub trait MqttBrokerEventListener: Send + Sync {
 pub(crate) type SharedAuthProvider = Arc<dyn MqttAuthProvider>;
 pub(crate) type SharedEnhancedAuth = Arc<dyn MqttEnhancedAuthProvider>;
 pub(crate) type SharedEventListener = Arc<dyn MqttBrokerEventListener>;
+pub(crate) type SharedAuthorizer = Arc<dyn MqttAuthorizer>;
+pub(crate) type SharedObserver = Arc<dyn MqttMessageObserver>;
 
 #[cfg(test)]
 mod tests {
@@ -340,6 +402,7 @@ mod tests {
             cert_pem: b"CERT".to_vec(),
             key_pem: b"-----BEGIN PRIVATE KEY-----TOPSECRET".to_vec(),
             client_ca_pem: None,
+            bind_client_id: crate::CertClientId::None,
         };
         let shown = format!("{tls:?}");
         assert!(!shown.contains("TOPSECRET"), "{shown}");

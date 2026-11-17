@@ -31,6 +31,7 @@ async fn main() -> anyhow::Result<()> {
             cert_pem: cert_pem.into_bytes(),
             key_pem: key_pem.into_bytes(),
             client_ca_pem: None,
+            bind_client_id: mqtt_broker::CertClientId::None,
         }),
         ..MqttBrokerConfig::new("127.0.0.1", 1883)
     };

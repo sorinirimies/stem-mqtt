@@ -41,6 +41,7 @@ anyhow       = { workspace = true }
 tokio-tungstenite = { workspace = true }
 futures-util      = { workspace = true }
 rustls         = { workspace = true }
+x509-parser    = { workspace = true }
 tokio-rustls   = { workspace = true }
 
 [features]

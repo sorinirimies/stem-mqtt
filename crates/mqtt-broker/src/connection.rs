@@ -49,6 +49,7 @@ pub(crate) async fn handle_connection<S>(
     stream: S,
     peer: String,
     handshake: HandshakePermit,
+    transport: crate::tls::Peer,
 ) where
     S: AsyncRead + AsyncWrite + Send + Unpin + 'static,
 {
@@ -86,11 +87,37 @@ pub(crate) async fn handle_connection<S>(
         .await;
         return;
     }
-    let client_id = if connect.client_id.is_empty() {
-        generate_client_id()
-    } else {
-        connect.client_id.clone()
+    // With mutual TLS the client id is tied to the certificate: it must be the common name (or a DNS name), and a client
+    // that sends none is given it. A client that is not who its certificate says cannot take another's id.
+    let allowed_ids = match (
+        &transport,
+        state.config.tls.as_ref().map(|t| t.bind_client_id),
+    ) {
+        (crate::tls::Peer::Tls(identity), Some(binding))
+            if binding != crate::CertClientId::None =>
+        {
+            Some(match (identity, binding) {
+                (Some(i), crate::CertClientId::CommonName) => {
+                    i.common_name.iter().cloned().collect::<Vec<_>>()
+                }
+                (Some(i), _) => i.dns_names.clone(),
+                (None, _) => Vec::new(),
+            })
+        }
+        _ => None,
     };
+    let client_id = match (&allowed_ids, connect.client_id.is_empty()) {
+        (Some(ids), true) if !ids.is_empty() => ids[0].clone(),
+        (_, true) => generate_client_id(),
+        _ => connect.client_id.clone(),
+    };
+    if let Some(ids) = &allowed_ids
+        && !ids.contains(&client_id)
+    {
+        tracing::debug!(%peer, %client_id, "client id does not match the client certificate");
+        reject(&mut writer, version, ConnectReasonCode::NOT_AUTHORIZED).await;
+        return;
+    }
 
     // MQTT 5.0 enhanced authentication (multi-round challenge/response) when
     // the CONNECT names a method; otherwise the username/password provider.
@@ -128,6 +155,14 @@ pub(crate) async fn handle_connection<S>(
             ConnectReasonCode::BAD_USERNAME_OR_PASSWORD,
         )
         .await;
+        return;
+    }
+
+    // A Last Will is a publish the broker does later on the client's behalf: it needs the same permission.
+    if let Some(will) = &connect.will
+        && !state.authorized(&client_id, crate::TopicAction::Publish, &will.topic)
+    {
+        reject(&mut writer, version, ConnectReasonCode::NOT_AUTHORIZED).await;
         return;
     }
 
@@ -518,6 +553,29 @@ fn handle_publish(state: &Arc<BrokerState>, client_id: &str, p: PublishPacket) -
     // the sender isn't left retrying, but neither retain nor deliver.
     let reserved = p.topic.starts_with('$');
 
+    // Not allowed: dropped, and told so where MQTT 5.0 can (0x87); nothing is retained, observed or delivered.
+    if !reserved && !state.authorized(client_id, crate::TopicAction::Publish, &p.topic) {
+        let denied = |id| SimpleAck {
+            packet_id: id,
+            reason_code: 0x87,
+            properties: Properties::new(),
+        };
+        match (p.qos, p.packet_id) {
+            (QoS::AtLeastOnce, Some(id)) => {
+                state
+                    .sessions
+                    .send_to(client_id, &Packet::PubAck(denied(id)));
+            }
+            (QoS::ExactlyOnce, Some(id)) => {
+                state
+                    .sessions
+                    .send_to(client_id, &Packet::PubRec(denied(id)));
+            }
+            _ => {}
+        }
+        return true;
+    }
+
     if p.retain && !reserved {
         state.retained.update(&p);
     }
@@ -564,6 +622,7 @@ fn dispatch_publish(state: &Arc<BrokerState>, publisher_id: &str, message: &Queu
     state
         .events
         .notify_message_published(publisher_id, &message.topic, message.qos);
+    state.observe(publisher_id, message);
     state.sessions.fan_out(publisher_id, message);
 }
 
@@ -582,6 +641,11 @@ fn handle_subscribe(state: &Arc<BrokerState>, client_id: &str, p: SubscribePacke
         };
         if !is_valid_filter(proper_filter) {
             reason_codes.push(SubAckReasonCode::FAILURE);
+            continue;
+        }
+        // 0x87 "Not authorized" (collapses to 0x80 for MQTT 3.1.1).
+        if !state.authorized(client_id, crate::TopicAction::Subscribe, proper_filter) {
+            reason_codes.push(SubAckReasonCode(0x87));
             continue;
         }
         let granted_qos = filter.qos.min(state.config.max_qos_core());

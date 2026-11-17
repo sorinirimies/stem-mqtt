@@ -116,6 +116,32 @@ impl MqttAuthProvider for FixedCreds {
 }
 ```
 
+### Topic authorisation, certificate-bound ids, observing messages
+
+```rust,no_run
+# use mqtt_broker::{MqttAuthorizer, MqttMessageObserver, ObservedMessage, TopicAction};
+// A client may use only `rig/<its id>/…`. Quick, in memory, no I/O: it runs on the connection's task.
+struct OwnTopics;
+impl MqttAuthorizer for OwnTopics {
+    fn authorize(&self, client_id: String, _action: TopicAction, topic: String) -> bool {
+        topic.starts_with(&format!("rig/{client_id}/"))
+    }
+}
+// Every accepted message, with its payload, and the Last Will of a client that died.
+struct Telemetry;
+impl MqttMessageObserver for Telemetry {
+    fn on_message(&self, client_id: String, message: ObservedMessage) {
+        println!("{client_id}: {} ({} bytes)", message.topic, message.payload.len());
+    }
+}
+```
+
+Register them with `broker.set_authorizer(..)` and `broker.set_message_observer(..)`. A refused PUBLISH is dropped and, in
+MQTT 5.0, acknowledged with reason `0x87` (3.1.1 has no such code: the publisher sees an ordinary acknowledgement); a refused
+SUBSCRIBE filter gets `0x87` (`0x80` in 3.1.1); a Last Will on a topic the client may not publish to refuses the CONNECT.
+With mutual TLS, `BrokerTlsConfig::bind_client_id = CertClientId::CommonName` (or `DnsName`) makes the client id the one in the verified
+certificate; a client that sends an empty id is given it. That makes the id an identity an authorizer can rely on.
+
 ## QoS in the bindings
 
 The broker's bindings are self-contained: `QoS` in `MqttBrokerConfig::max_qos` and in the event listener is

@@ -34,6 +34,7 @@ rustls         = { version = "0.23", default-features = false, features = ["tls1
 tokio-rustls   = { version = "0.26", default-features = false, features = ["tls12", "ring"] }
 webpki-roots   = "0.26"
 # Self-signed cert generation, for TLS integration tests only.
+x509-parser    = { version = "0.18", default-features = false }
 rcgen          = { version = "0.14", default-features = false, features = ["ring", "pem"] }
 
 # UniFFI language bindings

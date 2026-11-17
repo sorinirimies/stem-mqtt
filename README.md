@@ -197,6 +197,8 @@ Callbacks are available everywhere except Dart and Haskell, which use the
 | --- | --- |
 | **TLS** | Pure-Rust `rustls` on client and broker: custom CA, mutual TLS, no OpenSSL. The blocking client has it too ([details](crates/mqtt-client-blocking#securing-a-client)). |
 | **WebSocket** | `--ws-port` serves MQTT-over-WebSocket next to raw TCP, so browsers connect directly (see [`demo/`](demo)). |
+| **Topic authorisation** | `MqttAuthorizer`: a quick yes/no per PUBLISH, per SUBSCRIBE filter and per Last Will, so a client reaches only its own topics (refused with reason 0x87). |
+| **Certificate-bound client id** | With mutual TLS, `BrokerTlsConfig::bind_client_id` ties the MQTT client id to the verified certificate's common name or DNS name: no client can take another's id. |
 | **Authentication** | Pluggable username/password (`MqttAuthProvider`) and MQTT 5 enhanced auth: multi-round SCRAM, Kerberos, OAuth… (`MqttEnhancedAuthProvider` on the broker, `MqttAuthHandler` on the client). |
 
 **Client and broker**
@@ -204,7 +206,7 @@ Callbacks are available everywhere except Dart and Haskell, which use the
 | | |
 | --- | --- |
 | **Auto-reconnect** | Opt in with `ConnectOptions::auto_reconnect`: exponential backoff, subscriptions replayed after reconnect. |
-| **Event observation** | `MqttBrokerEventListener` for connections and messages. |
+| **Event observation** | `MqttBrokerEventListener` for connections and messages; `MqttMessageObserver` sees every accepted message with its payload (and a Last Will), so a program that embeds the broker needs no client of its own. |
 | **Pull-style API** | For runtimes without callbacks (Dart, Haskell): `enable_message_queue` / `next_message` on the client, `enable_event_queue` / `next_event` on the broker. |
 
 **Packaging**

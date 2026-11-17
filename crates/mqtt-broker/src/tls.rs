@@ -49,6 +49,50 @@ pub(crate) fn build_acceptor(tls: &BrokerTlsConfig) -> Result<tokio_rustls::TlsA
     Ok(tokio_rustls::TlsAcceptor::from(Arc::new(config)))
 }
 
+/// What a verified client certificate says about its holder (see [`crate::CertClientId`]).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct PeerIdentity {
+    /// The subject common name.
+    pub common_name: Option<String>,
+    /// The DNS subject alternative names.
+    pub dns_names: Vec<String>,
+}
+
+/// Where a connection came from, as far as the broker can tell: plain TCP or WebSocket, or TLS with (mutual TLS) or
+/// without a client certificate.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Peer {
+    /// Raw TCP or WebSocket: no certificate.
+    Plain,
+    /// TLS; the identity of the client certificate when it presented one.
+    Tls(Option<PeerIdentity>),
+}
+
+/// Reads the identity out of a DER client certificate (already verified by the TLS handshake against the client CA).
+pub(crate) fn peer_identity(der: &[u8]) -> Option<PeerIdentity> {
+    use x509_parser::extensions::GeneralName;
+    use x509_parser::prelude::{FromDer, X509Certificate};
+    let (_, cert) = X509Certificate::from_der(der).ok()?;
+    let common_name = cert
+        .subject()
+        .iter_common_name()
+        .next()
+        .and_then(|a| a.as_str().ok())
+        .map(str::to_owned);
+    let mut dns_names = Vec::new();
+    if let Ok(Some(san)) = cert.subject_alternative_name() {
+        for name in &san.value.general_names {
+            if let GeneralName::DNSName(d) = name {
+                dns_names.push((*d).to_owned());
+            }
+        }
+    }
+    Some(PeerIdentity {
+        common_name,
+        dns_names,
+    })
+}
+
 fn parse_certs(pem: &[u8]) -> Result<Vec<CertificateDer<'static>>, String> {
     CertificateDer::pem_slice_iter(pem)
         .collect::<Result<Vec<_>, _>>()
@@ -81,6 +125,7 @@ mod tests {
             cert_pem: cert.to_vec(),
             key_pem: key.to_vec(),
             client_ca_pem: ca.map(<[u8]>::to_vec),
+            bind_client_id: crate::CertClientId::None,
         }
     }
 
@@ -114,6 +159,24 @@ mod tests {
         let (cert, _) = self_signed();
         let (_, other_key) = self_signed();
         assert!(err(&config(&cert, &other_key, None)).contains("certificate/key"));
+    }
+
+    #[test]
+    fn the_common_name_and_dns_names_are_read_from_a_certificate() {
+        let key = rcgen::KeyPair::generate().expect("key");
+        let mut params = rcgen::CertificateParams::new(vec![
+            "rig-a1.farm.local".to_string(),
+            "rig-a1".to_string(),
+        ])
+        .expect("params");
+        params
+            .distinguished_name
+            .push(rcgen::DnType::CommonName, "rig-a1");
+        let cert = params.self_signed(&key).expect("cert");
+        let id = peer_identity(cert.der().as_ref()).expect("an identity");
+        assert_eq!(id.common_name.as_deref(), Some("rig-a1"));
+        assert_eq!(id.dns_names, ["rig-a1.farm.local", "rig-a1"]);
+        assert_eq!(peer_identity(b"not a certificate"), None);
     }
 
     #[test]

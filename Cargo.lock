@@ -2149,6 +2149,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uniffi",
+ "x509-parser",
 ]
 
 [[package]]

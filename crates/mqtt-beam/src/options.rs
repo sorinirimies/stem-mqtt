@@ -197,6 +197,7 @@ fn broker_tls(value: Term) -> NifResult<Option<BrokerTlsConfig>> {
         cert_pem: cert_pem.ok_or_else(|| required("cert_pem"))?,
         key_pem: key_pem.ok_or_else(|| required("key_pem"))?,
         client_ca_pem,
+        bind_client_id: mqtt_broker::CertClientId::None,
     }))
 }
 

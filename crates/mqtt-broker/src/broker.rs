@@ -42,6 +42,8 @@ pub(crate) struct BrokerState {
     pub retained: RetainStore,
     pub auth_provider: Mutex<Option<SharedAuthProvider>>,
     pub enhanced_auth: Mutex<Option<SharedEnhancedAuth>>,
+    pub authorizer: Mutex<Option<crate::config::SharedAuthorizer>>,
+    pub observer: Mutex<Option<crate::config::SharedObserver>>,
     pub events: EventHub,
     /// Pull-style authentication (see [`crate::auth_queue`]).
     pub auth_requests: AuthQueue,
@@ -67,6 +69,8 @@ impl BrokerState {
             retained,
             auth_provider: Mutex::new(None),
             enhanced_auth: Mutex::new(None),
+            authorizer: Mutex::new(None),
+            observer: Mutex::new(None),
             events: EventHub::new(),
             auth_requests: AuthQueue::default(),
             handshakes: Arc::new(Semaphore::new(MAX_UNAUTHENTICATED_CONNECTIONS)),
@@ -113,7 +117,41 @@ impl BrokerState {
         if message.retain {
             self.retained.update(&message.to_publish(None, false));
         }
+        self.observe(client_id, &message);
         self.sessions.fan_out(client_id, &message);
+    }
+
+    /// Whether `client_id` may do `action` on `topic`: always, when no authorizer is registered; a panicking one
+    /// denies.
+    pub fn authorized(
+        &self,
+        client_id: &str,
+        action: crate::config::TopicAction,
+        topic: &str,
+    ) -> bool {
+        let Some(authorizer) = self.authorizer.lock_safe().clone() else {
+            return true;
+        };
+        mqtt_client::support::guard_callback("authorize", || {
+            authorizer.authorize(client_id.to_owned(), action, topic.to_owned())
+        })
+        .unwrap_or(false)
+    }
+
+    /// Shows an accepted message to the observer, if one is registered.
+    pub fn observe(&self, publisher_id: &str, message: &QueuedMessage) {
+        let Some(observer) = self.observer.lock_safe().clone() else {
+            return;
+        };
+        let observed = crate::config::ObservedMessage {
+            topic: message.topic.clone(),
+            payload: message.payload.to_vec(),
+            qos: message.qos.into(),
+            retain: message.retain,
+        };
+        let _ = mqtt_client::support::guard_callback("on_message", || {
+            observer.on_message(publisher_id.to_owned(), observed);
+        });
     }
 }
 
@@ -185,6 +223,18 @@ impl MqttBroker {
     /// may be replaced at any time.
     pub fn set_auth_provider(&self, provider: Arc<dyn MqttAuthProvider>) {
         *self.state.auth_provider.lock_safe() = Some(provider);
+    }
+
+    /// Register topic authorisation (see [`MqttAuthorizer`](crate::MqttAuthorizer)); may be replaced at any time. With
+    /// none registered every authenticated client may use every topic.
+    pub fn set_authorizer(&self, authorizer: Arc<dyn crate::MqttAuthorizer>) {
+        *self.state.authorizer.lock_safe() = Some(authorizer);
+    }
+
+    /// Register an observer that sees every accepted message with its payload (see
+    /// [`MqttMessageObserver`](crate::MqttMessageObserver)), so an embedding program needs no client of its own.
+    pub fn set_message_observer(&self, observer: Arc<dyn crate::MqttMessageObserver>) {
+        *self.state.observer.lock_safe() = Some(observer);
     }
 
     /// Pull-style authentication for runtimes that can't implement
@@ -303,7 +353,9 @@ impl MqttBroker {
             tcp,
             "tcp",
             limiter.clone(),
-            move |stream, peer, permit| handle_connection(state.clone(), stream, peer, permit),
+            move |stream, peer, permit| {
+                handle_connection(state.clone(), stream, peer, permit, crate::tls::Peer::Plain)
+            },
         ));
 
         if let Some(listener) = ws {
@@ -476,7 +528,22 @@ async fn accept_tls_connection(
     permit: HandshakePermit,
 ) {
     match tokio::time::timeout(HANDSHAKE_TIMEOUT, acceptor.accept(stream)).await {
-        Ok(Ok(tls_stream)) => handle_connection(state, tls_stream, peer, permit).await,
+        Ok(Ok(tls_stream)) => {
+            let identity = tls_stream
+                .get_ref()
+                .1
+                .peer_certificates()
+                .and_then(|chain| chain.first())
+                .and_then(|leaf| crate::tls::peer_identity(leaf.as_ref()));
+            handle_connection(
+                state,
+                tls_stream,
+                peer,
+                permit,
+                crate::tls::Peer::Tls(identity),
+            )
+            .await;
+        }
         Ok(Err(e)) => tracing::debug!(%peer, error = %e, "TLS handshake failed"),
         Err(_) => tracing::debug!(%peer, "TLS handshake timed out"),
     }
@@ -543,7 +610,14 @@ async fn accept_ws_connection(
         }
     };
 
-    handle_connection(state, WsByteStream::new(ws_stream), peer, permit).await;
+    handle_connection(
+        state,
+        WsByteStream::new(ws_stream),
+        peer,
+        permit,
+        crate::tls::Peer::Plain,
+    )
+    .await;
 }
 
 #[cfg(test)]

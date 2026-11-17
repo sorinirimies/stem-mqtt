@@ -33,6 +33,7 @@ async fn client_connects_to_broker_over_tls() {
             cert_pem: server_cert.cert_pem.clone(),
             key_pem: server_cert.key_pem,
             client_ca_pem: None,
+            bind_client_id: mqtt_broker::CertClientId::None,
         }),
         ..MqttBrokerConfig::new("127.0.0.1", 0)
     };
@@ -82,6 +83,7 @@ async fn client_rejects_untrusted_server_certificate() {
             cert_pem: server_cert.cert_pem,
             key_pem: server_cert.key_pem,
             client_ca_pem: None,
+            bind_client_id: mqtt_broker::CertClientId::None,
         }),
         ..MqttBrokerConfig::new("127.0.0.1", 0)
     };
@@ -119,6 +121,7 @@ async fn mutual_tls_requires_a_trusted_client_certificate() {
             // Requires every connecting client to present a certificate
             // signed by this CA.
             client_ca_pem: Some(client_ca.cert_pem.clone()),
+            bind_client_id: mqtt_broker::CertClientId::None,
         }),
         ..MqttBrokerConfig::new("127.0.0.1", 0)
     };
@@ -174,6 +177,7 @@ async fn insecure_client_accepts_an_unverifiable_server_certificate() {
             cert_pem: server_cert.cert_pem,
             key_pem: server_cert.key_pem,
             client_ca_pem: None,
+            bind_client_id: mqtt_broker::CertClientId::None,
         }),
         ..MqttBrokerConfig::new("127.0.0.1", 0)
     };

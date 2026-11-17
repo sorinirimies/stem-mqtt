@@ -32,6 +32,7 @@ async fn start_tls_broker(server: &Pem, client_ca: Option<Vec<u8>>) -> (MqttBrok
             cert_pem: server.cert.clone(),
             key_pem: server.key.clone(),
             client_ca_pem: client_ca,
+            bind_client_id: mqtt_broker::CertClientId::None,
         }),
         ..MqttBrokerConfig::new("127.0.0.1", 0)
     };

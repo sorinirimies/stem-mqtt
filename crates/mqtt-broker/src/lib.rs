@@ -33,9 +33,10 @@ pub mod internals {
 pub use auth_queue::AuthRequest;
 pub use broker::MqttBroker;
 pub use config::{
-    BrokerTlsConfig, DEFAULT_MAX_OUTBOUND_QUEUE, DEFAULT_MAX_PACKET_SIZE, EnhancedAuthOutcome,
-    EnhancedAuthStep, MqttAuthProvider, MqttBrokerConfig, MqttBrokerEventListener,
-    MqttEnhancedAuthProvider, QoS,
+    BrokerTlsConfig, CertClientId, DEFAULT_MAX_OUTBOUND_QUEUE, DEFAULT_MAX_PACKET_SIZE,
+    EnhancedAuthOutcome, EnhancedAuthStep, MqttAuthProvider, MqttAuthorizer, MqttBrokerConfig,
+    MqttBrokerEventListener, MqttEnhancedAuthProvider, MqttMessageObserver, ObservedMessage, QoS,
+    TopicAction,
 };
 pub use error::{MqttBrokerError, MqttBrokerResult};
 pub use events::BrokerEvent;
