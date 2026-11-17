@@ -21,6 +21,22 @@ broker in CI.
 | `stem-mqtt-client` | [![crates.io](https://img.shields.io/crates/v/stem-mqtt-client.svg)](https://crates.io/crates/stem-mqtt-client) | [![downloads](https://img.shields.io/crates/d/stem-mqtt-client.svg)](https://crates.io/crates/stem-mqtt-client) | [![docs.rs](https://img.shields.io/docsrs/stem-mqtt-client)](https://docs.rs/stem-mqtt-client) |
 | `stem-mqtt-broker` | [![crates.io](https://img.shields.io/crates/v/stem-mqtt-broker.svg)](https://crates.io/crates/stem-mqtt-broker) | [![downloads](https://img.shields.io/crates/d/stem-mqtt-broker.svg)](https://crates.io/crates/stem-mqtt-broker) | [![docs.rs](https://img.shields.io/docsrs/stem-mqtt-broker)](https://docs.rs/stem-mqtt-broker) |
 
+Other registries (downloads per month on PyPI and npm, total elsewhere; pub.dev, Hackage and Maven Central publish no public counter, so those show the version only):
+
+| Registry | Package | Version | Downloads |
+| --- | --- | --- | --- |
+| PyPI | `stem-mqtt-client` | [![PyPI](https://img.shields.io/pypi/v/stem-mqtt-client.svg)](https://pypi.org/project/stem-mqtt-client/) | [![downloads](https://img.shields.io/pypi/dm/stem-mqtt-client.svg)](https://pypi.org/project/stem-mqtt-client/) |
+| PyPI | `stem-mqtt-broker` | [![PyPI](https://img.shields.io/pypi/v/stem-mqtt-broker.svg)](https://pypi.org/project/stem-mqtt-broker/) | [![downloads](https://img.shields.io/pypi/dm/stem-mqtt-broker.svg)](https://pypi.org/project/stem-mqtt-broker/) |
+| npm | `stem-mqtt` | [![npm](https://img.shields.io/npm/v/stem-mqtt.svg)](https://www.npmjs.com/package/stem-mqtt) | [![downloads](https://img.shields.io/npm/dm/stem-mqtt.svg)](https://www.npmjs.com/package/stem-mqtt) |
+| NuGet | `StemMqtt` | [![NuGet](https://img.shields.io/nuget/v/StemMqtt.svg)](https://www.nuget.org/packages/StemMqtt) | [![downloads](https://img.shields.io/nuget/dt/StemMqtt.svg)](https://www.nuget.org/packages/StemMqtt) |
+| Hex | `stem_mqtt` | [![Hex](https://img.shields.io/hexpm/v/stem_mqtt.svg)](https://hex.pm/packages/stem_mqtt) | [![downloads](https://img.shields.io/hexpm/dt/stem_mqtt.svg)](https://hex.pm/packages/stem_mqtt) |
+| RubyGems | `stem-mqtt-client` | [![RubyGems](https://img.shields.io/gem/v/stem-mqtt-client.svg)](https://rubygems.org/gems/stem-mqtt-client) | [![downloads](https://img.shields.io/gem/dt/stem-mqtt-client.svg)](https://rubygems.org/gems/stem-mqtt-client) |
+| RubyGems | `stem-mqtt-broker` | [![RubyGems](https://img.shields.io/gem/v/stem-mqtt-broker.svg)](https://rubygems.org/gems/stem-mqtt-broker) | [![downloads](https://img.shields.io/gem/dt/stem-mqtt-broker.svg)](https://rubygems.org/gems/stem-mqtt-broker) |
+| pub.dev | `stem_mqtt` | [![pub.dev](https://img.shields.io/pub/v/stem_mqtt.svg)](https://pub.dev/packages/stem_mqtt) | — |
+| Hackage | `stem-mqtt` | [![Hackage](https://img.shields.io/hackage/v/stem-mqtt.svg)](https://hackage.haskell.org/package/stem-mqtt) | — |
+| Maven Central | `stem-mqtt-kotlin` | [![Maven Central](https://img.shields.io/maven-central/v/io.github.sorinirimies.stemmqtt/stem-mqtt-kotlin.svg)](https://central.sonatype.com/artifact/io.github.sorinirimies.stemmqtt/stem-mqtt-kotlin) | — |
+| Maven Central | `stem-mqtt-java` | [![Maven Central](https://img.shields.io/maven-central/v/io.github.sorinirimies.stemmqtt/stem-mqtt-java.svg)](https://central.sonatype.com/artifact/io.github.sorinirimies.stemmqtt/stem-mqtt-java) | — |
+
 - [Quick start](#quick-start-rust) · [Installation](#installation) · [Features](#features) ·
   [Running the broker](#running-the-broker) · [Other languages](#generating-foreign-language-bindings)
 
