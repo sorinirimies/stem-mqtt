@@ -216,7 +216,9 @@ impl<T: Transport> Client<T> {
         };
         let mut client = Self {
             io: {
-                io.set_read_timeout(Some(Duration::from_millis(50)))?;
+                // A TLS stream runs its handshake on the first write: give that the whole ack
+                // timeout, not the short poll slice (`pump` sets its own timeout per read).
+                io.set_read_timeout(Some(opts.ack_timeout.max(Duration::from_millis(50))))?;
                 io
             },
             version: opts.version,
