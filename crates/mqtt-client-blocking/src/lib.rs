@@ -737,13 +737,13 @@ mod tests {
     fn a_pingresp_clears_the_wait() {
         let opts = Options {
             keep_alive: Duration::from_secs(1),
-            ping_interval: Some(Duration::from_millis(20)),
+            ping_interval: Some(Duration::from_millis(200)),
             ..Options::new("x")
         };
         let mut s = Script::default();
         s.incoming.push_back(connack(0));
         let mut c = Client::connect(s, opts).expect("connects");
-        std::thread::sleep(Duration::from_millis(40));
+        std::thread::sleep(Duration::from_millis(250));
         c.poll(Duration::from_millis(5)).expect("pings");
         c.io.incoming.push_back(bytes(&Packet::PingResp));
         c.poll(Duration::from_millis(5)).expect("pong read");
