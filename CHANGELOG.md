@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.9.1] - 2026-11-25
+### ✨ Features
+- topic authorisation, certificate-bound client ids, message observer
+### 🐛 Bug Fixes
+- resolve nightly audit/deny findings (lettre, rusqlite, tokio, chrono ignore)
+- update cookie/url/rustix for RUSTSEC-2026-0594, -0592, -0486
+- lua smoke test drains callbacks before exit (teardown segfault)
+- allow the TLS handshake the full ack timeout on connect
+### 📚 Documentation
+- restructure README features, merge install tables, move generator notes to docs
+- add version and download badges for PyPI, npm, NuGet, Hex, RubyGems, pub.dev, Hackage, Maven
+### 🔄 CI
+- nightly dependency upgrade on GitHub, patch release when a requirement changes
+- nightly upgrade stays within semver-compatible ranges
+- open an issue when the nightly fails; fix header comment
+- move the nightly failure notice into scripts/ci/notify_failure.nu
+### 🧪 Testing
+- de-flake pingresp test (ping interval raced the poll)
+**Full Changelog**: https://github.com/sorinirimies/stem-mqtt/compare/v0.9.0...v0.9.1
 ## [0.9.0] - 2026-11-13
 ### ✨ Features
 - optional rustls TLS transport, mqtts example and securing guide
