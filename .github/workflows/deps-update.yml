@@ -58,8 +58,8 @@ jobs:
       - name: Snapshot dependency requirements (before)
         run: cargo metadata --no-deps --format-version 1 | jq -S -c '[.packages[].dependencies[] | {name,req,kind,features,optional,target,uses_default_features}] | sort_by(.name,.kind,.target)' > "$RUNNER_TEMP/reqs-before.json"
 
-      - name: Upgrade workspace dependency pins
-        run: cargo upgrade --incompatible allow
+      - name: Upgrade workspace dependency pins (compatible only, unattended)
+        run: cargo upgrade
 
       - name: Sync Cargo.lock
         run: cargo update
