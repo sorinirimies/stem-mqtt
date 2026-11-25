@@ -88,4 +88,9 @@ pub:disconnect()
 sub:disconnect()
 broker:stop()
 must(not broker:is_running(), "broker stopped")
+-- Release every Lua-side object and drain the callback queue before exiting: a Rust
+-- thread dropping a callback handler after lua_close crashed ~5% of runs.
+pub, sub, broker = nil, nil, nil
+collectgarbage(); collectgarbage()
+poll_until(function() return false end, 1)
 print("SMOKE OK")
