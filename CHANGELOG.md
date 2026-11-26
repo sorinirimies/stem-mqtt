@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.9.4] - 2026-11-26
+### 🐛 Bug Fixes
+- ignore generated-code lint in pub package analysis
+- repair package script copy lines
+**Full Changelog**: https://github.com/sorinirimies/stem-mqtt/compare/v0.9.2...v0.9.4
 ## [0.9.2] - 2026-11-26
 ### 🧪 Testing
 - drop haskell patch tests (patch removed)

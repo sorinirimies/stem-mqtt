@@ -2,7 +2,7 @@ defmodule StemMqtt.MixProject do
   use Mix.Project
 
   # Bumped with the workspace by scripts/bump_version.nu.
-  @version "0.9.2"
+  @version "0.9.4"
   @source_url "https://github.com/sorinirimies/stem-mqtt"
 
   def project do
