@@ -64,8 +64,8 @@ def _raw-specs []: nothing -> list<record> {
             registry: oci, maturity: stable
         }
         {
-            language: csharp, kind: external, uniffi: "0.31.0", tool: "uniffi-bindgen-cs"
-            install: [uniffi-bindgen-cs --git "https://github.com/NordSecurity/uniffi-bindgen-cs" --tag "v0.11.0+v0.31.0"]
+            language: csharp, kind: external, uniffi: "0.32.0", tool: "uniffi-bindgen-cs"
+            install: [uniffi-bindgen-cs --git "https://github.com/NordSecurity/uniffi-bindgen-cs" --tag "v0.12.0+v0.32.0"]
             registry: nuget, maturity: stable
         }
         {
@@ -76,7 +76,7 @@ def _raw-specs []: nothing -> list<record> {
         {
             language: dart, kind: external, uniffi: "0.31.2", tool: "uniffi_bindgen_dart"
             # The v0.2.1 tag ships a placeholder `uniffi_bindgen_dart`; the real CLI landed on main, so pin a main commit.
-            install: [uniffi-dart --git "https://github.com/acterglobal/uniffi-dart" --rev "e2dd2bb7180609184d0c70ddde0353f5e11d4c3b" --features binary --bin uniffi_bindgen_dart]
+            install: [uniffi-dart --git "https://github.com/acterglobal/uniffi-dart" --rev "304bae0604c4735d130b989a3708b5f01a343430" --features binary --bin uniffi_bindgen_dart]
             registry: oci, maturity: experimental
         }
         {
@@ -86,11 +86,8 @@ def _raw-specs []: nothing -> list<record> {
         }
         {
             language: haskell, kind: external, uniffi: "0.32.0", tool: "uniffi-bindgen-haskell"
-            install: [uniffi-bindgen-haskell --git "https://github.com/mercury/uniffi-bindgen-haskell" --rev "836df3601b0bf4a7970457bb53d295c538cf5fb9"]
+            install: [uniffi-bindgen-haskell --git "https://github.com/mercury/uniffi-bindgen-haskell" --rev "8d6270a2af5afbf9253dc63641dd23c493b72863"]
             registry: oci, maturity: experimental
-            # Upstream's constructors never lower their arguments and flat errors drop their
-            # message string; both fixed by this patch (see packaging/haskell/).
-            patch: "packaging/haskell/uniffi-bindgen-haskell.patch", crate_path: "crates/uniffi-bindgen-haskell"
         }
         # Sources compiled into the user's program, linked to the release libraries: they ship as
         # release assets (bindings-<language>.zip), not through a package registry.
