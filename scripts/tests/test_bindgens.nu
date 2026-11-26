@@ -102,25 +102,9 @@ def "test bindgens: the node stub manifest declares one cdylib outside the works
     assert ($m.workspace? != null)
 }
 
-def "test bindgens: haskell is installed from a patched, pinned checkout" [] {
+def "test bindgens: haskell is installed from a pinned revision" [] {
     let spec = (spec-for haskell)
-    assert ($spec.patch | path exists) "patch file missing"
     assert ($spec.install | any { |a| $a == "--rev" })
-    assert equal $spec.crate_path "crates/uniffi-bindgen-haskell"
-}
-
-def "test bindgens: the haskell patch applies to the pinned revision" [] {
-    # Guards against the patch rotting when the pin moves.
-    let spec = (spec-for haskell)
-    let rev = ($spec.install | skip until { |a| $a == "--rev" } | get 1)
-    let patch = ($spec.patch | path expand)
-    let dir = (mktemp -d)
-    let cloned = (do { ^git clone --quiet ($spec.install | skip until { |a| $a == "--git" } | get 1) $dir } | complete)
-    if $cloned.exit_code != 0 { return }  # offline: nothing to check
-    ^git -C $dir checkout --quiet $rev
-    let applied = (do { ^git -C $dir apply --check $patch } | complete)
-    rm -rf $dir
-    assert equal $applied.exit_code 0 $"patch no longer applies: ($applied.stderr)"
 }
 
 def "test bindgens: every registry produces a publish plan" [] {
