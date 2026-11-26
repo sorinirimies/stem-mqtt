@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.9.2] - 2026-11-26
+### 🧪 Testing
+- drop haskell patch tests (patch removed)
+**Full Changelog**: https://github.com/sorinirimies/stem-mqtt/compare/v0.9.1...v0.9.2
 ## [0.9.1] - 2026-11-25
 ### ✨ Features
 - topic authorisation, certificate-bound client ids, message observer
