@@ -28,7 +28,8 @@ export def build-dart-package [gen: string, rust_root: string, out: string, vers
     bundle-rust-sources $rust_root ($out | path join "rust")
 
     cp ($repo | path join $TEMPLATE "hook" "build.dart") ($out | path join "hook")
-    cp ($repo | path join $TEMPLATE "README.md") $out
+    cp ( | path join  "README.md") 
+    cp ( | path join  "analysis_options.yaml") 
     $"## ($version)\n\nSee <https://github.com/sorinirimies/stem-mqtt/blob/main/CHANGELOG.md> for the release notes.\n"
     | save --force ($out | path join "CHANGELOG.md")
     cp ($repo | path join "LICENSE") $out
